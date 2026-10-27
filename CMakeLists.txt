@@ -3748,6 +3748,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     json_test.cpp
     jsonwriter_test.cpp
     linereader_test.cpp
+    localization_test.cpp
     log_test.cpp
     map_test.cpp
     mapbugs_test.cpp

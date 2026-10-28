@@ -13,8 +13,8 @@
 
 ### 快速输入(共 11 种模式)
 
-- 原有 7 种:Tater / Ancient / Next / Meow / Snow / Salatik / F
-- 新增 4 种:Best / Saiko / Delta / Cloud
+- 原有 1 种:Tater 
+- 新增 8 种:Best / Ancient / Next / Meow / Snow / Salatik / F/ Saiko / Delta / Cloud
 - 每种模式可独立调节预测量、钩锁逻辑、是否作用于其他玩家
 - 设置 → TClient → 输入 中切换
 

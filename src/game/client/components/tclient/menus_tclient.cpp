@@ -2240,6 +2240,14 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 	View.HSplitTop(MarginSmall, nullptr, &View);
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPingwheel, "启用信号轮盘（关闭后不能发送，也不接收他人信号）", &g_Config.m_TcPingwheel, &View, LineSize);
+	static CButtonContainer s_PingReaderButton, s_PingClearButton;
+	DoLine_KeyReader(View, s_PingReaderButton, s_PingClearButton, "信号轮盘按键（按住选择）", "+tc_pingwheel");
+
+	View.HSplitTop(MarginSmall * 4, nullptr, &View);
+	static CButtonContainer s_QuickZoomReaderButton, s_QuickZoomClearButton;
+	DoLine_KeyReader(View, s_QuickZoomReaderButton, s_QuickZoomClearButton, "一键缩放按键（按一下切换，再按恢复）", "tc_quick_zoom");
+	View.HSplitTop(LineSize, &Button, &View);
+	DoSliderFloat(&g_Config.m_TcQuickZoom, &g_Config.m_TcQuickZoom, &Button, "一键缩放目标", 0.0f, 20.0f, 0.1f, "");
 	View.HSplitTop(MarginSmall * 4, nullptr, &View);
 
 	// 只调顺序：8 行 = 预览 + 名称 + 序号 + 上/下

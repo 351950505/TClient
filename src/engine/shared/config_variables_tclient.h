@@ -25,6 +25,7 @@ MACRO_CONFIG_INT(ClDupSpreadMs, cl_dup_spread_ms, 4, 1, 15, CFGFLAG_CLIENT | CFG
 
 // [PING-WHEEL] LoL 式地图信号：按住键出轮盘，选信号在准星世界坐标插地图标记；走聊天通道（⟨P:...⟩ 前缀）同步给同服 TClient 玩家，服务端零改动
 MACRO_CONFIG_INT(TcPingwheel, tc_pingwheel, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "地图信号轮盘（LoL式ping；0=关闭，同时不再解析他人信号）")
+MACRO_CONFIG_FLOAT(TcQuickZoom, tc_quick_zoom_level, 15.0f, 0.0f, 20.0f, CFGFLAG_CLIENT | CFGFLAG_SAVE, "一键缩放的目标缩放（与默认缩放同刻度，10=原始）")
 MACRO_CONFIG_INT(TcPingwheelTeam, tc_pingwheel_team, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "信号发送通道：0=全体聊天，1=队伍聊天（默认）")
 
 // [SPEC-CURSOR] 观战指针常驻：自由视角显示鼠标指针（5 秒不动淡出、移动即恢复），被观战者暂停时指针也不隐藏

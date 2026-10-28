@@ -422,6 +422,7 @@ void CCamera::OnConsoleInit()
 	Console()->Register("zoom+", "?f[amount]", CFGFLAG_CLIENT, ConZoomPlus, this, "Zoom increase");
 	Console()->Register("zoom-", "?f[amount]", CFGFLAG_CLIENT, ConZoomMinus, this, "Zoom decrease");
 	Console()->Register("zoom", "?f", CFGFLAG_CLIENT, ConZoom, this, "Change zoom");
+	Console()->Register("tc_quick_zoom", "", CFGFLAG_CLIENT, ConQuickZoom, this, "一键缩放：切到 tc_quick_zoom_level，再按一次恢复");
 	Console()->Register("set_view", "i[x]i[y]", CFGFLAG_CLIENT, ConSetView, this, "Set camera position to x and y in the map");
 	Console()->Register("set_view_relative", "i[x]i[y]", CFGFLAG_CLIENT, ConSetViewRelative, this, "Set camera position relative to current view in the map");
 	Console()->Register("goto_switch", "i[number]?i[offset]", CFGFLAG_CLIENT, ConGotoSwitch, this, "View switch found (at offset) with given number");
@@ -436,6 +437,7 @@ float CCamera::DefaultZoomSteps()
 void CCamera::OnReset()
 {
 	m_CameraSmoothing = false;
+	m_QuickZoomActive = false;
 
 	m_Zoom = CCamera::ZoomStepsToValue(CCamera::DefaultZoomSteps());
 	m_Zooming = false;
@@ -495,6 +497,25 @@ void CCamera::ConSetView(IConsole::IResult *pResult, void *pUserData)
 	CCamera *pSelf = (CCamera *)pUserData;
 	// wait until free view camera type to update the position
 	pSelf->SetView(ivec2(pResult->GetInteger(0), pResult->GetInteger(1)));
+}
+void CCamera::ConQuickZoom(IConsole::IResult *pResult, void *pUserData)
+{
+	CCamera *pSelf = (CCamera *)pUserData;
+	if(!pSelf->ZoomAllowed())
+		return;
+
+	float Target;
+	if(!pSelf->m_QuickZoomActive)
+	{
+		pSelf->m_QuickZoomSaved = pSelf->m_Zooming ? pSelf->m_ZoomSmoothingTarget : pSelf->m_Zoom;
+		Target = CCamera::ZoomStepsToValue(g_Config.m_TcQuickZoom - 10.0f);
+	}
+	else
+		Target = pSelf->m_QuickZoomSaved;
+	pSelf->m_QuickZoomActive = !pSelf->m_QuickZoomActive;
+
+	pSelf->ChangeZoom(Target, g_Config.m_ClSmoothZoomTime, true);
+	pSelf->m_AutoSpecCamera = false;
 }
 void CCamera::ConSetViewRelative(IConsole::IResult *pResult, void *pUserData)
 {

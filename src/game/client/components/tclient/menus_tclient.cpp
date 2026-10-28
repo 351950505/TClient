@@ -251,7 +251,9 @@ bool CMenus::DoSliderFloat(const void *pId, float *pOption, const CUIRect *pRect
 		Value = std::clamp(Value - Delta, Min, Max);
 
 	char aBuf[256];
-	str_format(aBuf, sizeof(aBuf), "%s: %.2f%s", pStr, Value, pSuffix ? pSuffix : "");
+	// 步进≥0.1 且当前值落在 0.1 格上（Ctrl 精调到 0.01 时除外）只显示一位小数
+	const bool OneDecimal = Step >= 0.1f - 1e-4f && std::fabs(Value * 10.0f - std::round(Value * 10.0f)) < 1e-3f;
+	str_format(aBuf, sizeof(aBuf), OneDecimal ? "%s: %.1f%s" : "%s: %.2f%s", pStr, Value, pSuffix ? pSuffix : "");
 
 	CUIRect Label, ScrollBar;
 	pRect->VSplitMid(&Label, &ScrollBar, std::min(10.0f, pRect->w * 0.05f));

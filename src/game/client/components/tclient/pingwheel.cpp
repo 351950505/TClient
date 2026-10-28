@@ -2,6 +2,7 @@
 #include "pingwheel.h"
 
 #include <base/io.h>
+#include <base/log.h>
 #include <base/time.h>
 
 #include <engine/graphics.h>
@@ -69,6 +70,12 @@ void CPingWheel::ConKeyPingWheel(IConsole::IResult *pResult, void *pUserData)
 	if(pSelf->GameClient()->m_Scoreboard.IsActive())
 		return;
 
+	if(!g_Config.m_TcPingwheel)
+	{
+		pSelf->m_Active = false;
+		return;
+	}
+
 	// [TClient] 观察模式也允许使用（落点见 GetPingWorldPos）；demo 回放不可发
 	if(pSelf->Client()->State() == IClient::STATE_DEMOPLAYBACK)
 		return;
@@ -95,9 +102,8 @@ void CPingWheel::OnReset()
 	m_WasActive = false;
 	m_Active = false;
 	m_SelectedSignal = -1;
-	m_aSendTimes.fill(-1e9f);
-	for(int &Id : m_aSoundIds)
-		Id = -1;
+	m_RateWindowStart = -1e9f;
+	m_RateSentCount = 0;
 	for(CMarker &Marker : m_aMarkers)
 		Marker.m_StartTime = -1.0f;
 }
@@ -130,19 +136,14 @@ bool CPingWheel::OnInput(const IInput::CEvent &Event)
 bool CPingWheel::RateLimitedAndRecord()
 {
 	const float Now = Client()->LocalTime();
-	const float Window = (float)g_Config.m_TcPingwheelRateSec;
-	int Count = 0;
-	int OldestIdx = 0;
-	for(int i = 0; i < SEND_HISTORY; i++)
+	if(Now - m_RateWindowStart >= RATE_WINDOW)
 	{
-		if(Now - m_aSendTimes[i] < Window)
-			Count++;
-		if(m_aSendTimes[i] < m_aSendTimes[OldestIdx])
-			OldestIdx = i;
+		m_RateWindowStart = Now;
+		m_RateSentCount = 0;
 	}
-	if(Count >= g_Config.m_TcPingwheelRateCount)
+	if(m_RateSentCount >= RATE_COUNT)
 		return true;
-	m_aSendTimes[OldestIdx] = Now;
+	m_RateSentCount++;
 	return false;
 }
 
@@ -165,12 +166,19 @@ void CPingWheel::TryLoadSounds()
 	if(m_SoundsTried)
 		return;
 	m_SoundsTried = true;
-	// 固定音效：data/tclient/pings/<信号名>.wav，缺失则该信号不播音（id=-1）
+	// 固定音效：data/tclient/pings/<信号名>.wv（DDNet 原生 WavPack 格式，优先）→ .wav 回退；
+	// 都失败则该信号不播音（id=-1）。加载结果打日志，没声音时控制台能直接看到原因。
 	for(int i = 0; i < NUM_SIGNALS; i++)
 	{
 		char aBuf[128];
-		str_format(aBuf, sizeof(aBuf), "tclient/pings/%s.wav", SignalName(i));
-		m_aSoundIds[i] = Sound()->LoadWav(aBuf, IStorage::TYPE_ALL);
+		str_format(aBuf, sizeof(aBuf), "tclient/pings/%s.wv", SignalName(i));
+		m_aSoundIds[i] = Sound()->LoadWV(aBuf, IStorage::TYPE_ALL);
+		if(m_aSoundIds[i] < 0)
+		{
+			str_format(aBuf, sizeof(aBuf), "tclient/pings/%s.wav", SignalName(i));
+			m_aSoundIds[i] = Sound()->LoadWav(aBuf, IStorage::TYPE_ALL);
+		}
+		log_info("pingwheel", "sound '%s' -> id=%d", SignalName(i), m_aSoundIds[i]);
 	}
 }
 
@@ -179,7 +187,7 @@ void CPingWheel::PlaySignalSound(int Signal)
 	TryLoadSounds();
 	const int SoundId = m_aSoundIds[Signal];
 	if(SoundId >= 0)
-		GameClient()->m_Sounds.Play(CSounds::CHN_GUI, SoundId, 1.0f);
+		GameClient()->m_Sounds.PlaySample(CSounds::CHN_GUI, SoundId, 0, 1.0f);
 }
 
 vec2 CPingWheel::GetPingWorldPos() const
@@ -220,11 +228,14 @@ void CPingWheel::AddMarker(int Signal, vec2 WorldPos)
 
 void CPingWheel::Ping(int Signal, vec2 WorldPos)
 {
+	if(!g_Config.m_TcPingwheel)
+		return;
 	if(RateLimitedAndRecord())
 	{
 		// 限频：只本地提示，不发送（防服务器禁言）
 		char aBuf[128];
-		str_format(aBuf, sizeof(aBuf), "信号发送过于频繁：%d 秒内最多 %d 次", g_Config.m_TcPingwheelRateSec, g_Config.m_TcPingwheelRateCount);
+		const int Wait = std::max(1, (int)std::ceil(RATE_WINDOW - (Client()->LocalTime() - m_RateWindowStart)));
+		str_format(aBuf, sizeof(aBuf), "信号发送过于频繁：%d 秒内最多 %d 次，%d 秒后可再发", (int)RATE_WINDOW, RATE_COUNT, Wait);
 		GameClient()->m_Chat.Echo(aBuf);
 		return;
 	}

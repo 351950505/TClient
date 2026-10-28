@@ -30,9 +30,6 @@ MACRO_CONFIG_INT(TcPingwheelTeam, tc_pingwheel_team, 1, 0, 1, CFGFLAG_CLIENT | C
 // [SPEC-CURSOR] 观战指针常驻：自由视角显示鼠标指针（5 秒不动淡出、移动即恢复），被观战者暂停时指针也不隐藏
 MACRO_CONFIG_INT(TcSpecCursorAlways, tc_spec_cursor_always, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "观战指针常驻（1=自由视角常驻显示鼠标指针+被观战者暂停不隐藏；0=DDNet 原版行为）")
 
-// [PING-WHEEL 限频] 防服务器禁言：时间窗口内最多发送 N 次，触发时仅本地提示
-MACRO_CONFIG_INT(TcPingwheelRateCount, tc_pingwheel_rate_count, 4, 1, 16, CFGFLAG_CLIENT | CFGFLAG_SAVE, "信号限频：时间窗口内最多发送次数（默认4）")
-MACRO_CONFIG_INT(TcPingwheelRateSec, tc_pingwheel_rate_sec, 60, 5, 600, CFGFLAG_CLIENT | CFGFLAG_SAVE, "信号限频：时间窗口秒数（默认60）")
 MACRO_CONFIG_STR(TcPingwheelLayout, tc_pingwheel_layout, 16, "0,1,2,3,4,5,6,7", CFGFLAG_CLIENT | CFGFLAG_SAVE, "轮盘扇区→信号顺序（TC 设置 Ping 页可调）")
 
 #if defined(CONF_FAMILY_WINDOWS)
@@ -295,10 +292,19 @@ MACRO_CONFIG_COL(TcBgDrawColor, tc_bg_draw_color, 14024576, CFGFLAG_CLIENT | CFG
 MACRO_CONFIG_INT(TcBgDrawAutoSaveLoad, tc_bg_draw_auto_save_load, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically save and load background drawings")
 
 // Translate
-MACRO_CONFIG_STR(TcTranslateBackend, tc_translate_backend, 32, "google", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Translate backend to use (google, libretranslate)")
+MACRO_CONFIG_STR(TcTranslateBackend, tc_translate_backend, 32, "google", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Translate backend to use (google, libretranslate, tencent, baidu, deepl, mymemory, llm)")
 MACRO_CONFIG_STR(TcTranslateTarget, tc_translate_target, 16, "en", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Translate target language (must be 2 character ISO 639 code)")
 MACRO_CONFIG_STR(TcTranslateEndpoint, tc_translate_endpoint, 256, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "For backends which need it, endpoint to use (must be https)")
 MACRO_CONFIG_STR(TcTranslateKey, tc_translate_key, 256, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "For backends which need it, api key to use")
+MACRO_CONFIG_STR(TcTranslateTencentSecretId, tc_translate_tencent_secret_id, 128, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "腾讯云机器翻译 SecretId")
+MACRO_CONFIG_STR(TcTranslateTencentSecretKey, tc_translate_tencent_secret_key, 128, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "腾讯云机器翻译 SecretKey")
+MACRO_CONFIG_STR(TcTranslateTencentRegion, tc_translate_tencent_region, 32, "ap-guangzhou", CFGFLAG_CLIENT | CFGFLAG_SAVE, "腾讯云机器翻译地域（如 ap-guangzhou）")
+MACRO_CONFIG_STR(TcTranslateBaiduAppId, tc_translate_baidu_appid, 64, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "百度翻译开放平台 APP ID")
+MACRO_CONFIG_STR(TcTranslateBaiduKey, tc_translate_baidu_key, 128, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "百度翻译开放平台密钥")
+MACRO_CONFIG_STR(TcTranslateDeeplKey, tc_translate_deepl_key, 128, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "DeepL API 密钥（免费版以 :fx 结尾）")
+MACRO_CONFIG_STR(TcTranslateLlmEndpoint, tc_translate_llm_endpoint, 256, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "LLM 翻译端点（OpenAI 兼容，base URL 或完整 chat/completions 地址）")
+MACRO_CONFIG_STR(TcTranslateLlmKey, tc_translate_llm_key, 256, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "LLM 翻译 API 密钥（本地端点可留空）")
+MACRO_CONFIG_STR(TcTranslateLlmModel, tc_translate_llm_model, 128, "gpt-4o-mini", CFGFLAG_CLIENT | CFGFLAG_SAVE, "LLM 翻译使用的模型名")
 MACRO_CONFIG_INT(TcTranslateAuto, tc_translate_auto, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically translate incoming messages")
 MACRO_CONFIG_INT(TcTranslateOutgoing, tc_translate_outgoing, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Translate your own outgoing chat messages into another language before sending them")
 MACRO_CONFIG_STR(TcTranslateOutgoingTarget, tc_translate_outgoing_target, 16, "en", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Language to translate your outgoing messages into (must be 2 character ISO 639 code)")

@@ -259,10 +259,14 @@ bool CMenus::DoSliderFloat(const void *pId, float *pOption, const CUIRect *pRect
 	Ui()->DoLabel(&Label, aBuf, LabelFontSize, TEXTALIGN_ML);
 
 	const float Rel = (Max > Min) ? std::clamp((Value - Min) / (Max - Min), 0.0f, 1.0f) : 0.0f;
-	Value = Min + std::clamp(Ui()->DoScrollbarH(pId, &ScrollBar, Rel), 0.0f, 1.0f) * (Max - Min);
-	if(*pOption != Value)
+	// 拖动滚动条也按 Step 对齐(四舍五入到步进),否则拖出 10.37 这类任意浮点值
+	float NewValue = Min + std::clamp(Ui()->DoScrollbarH(pId, &ScrollBar, Rel), 0.0f, 1.0f) * (Max - Min);
+	if(Step > 0.0f)
+		NewValue = Min + std::round((NewValue - Min) / Step) * Step;
+	NewValue = std::clamp(NewValue, Min, Max);
+	if(*pOption != NewValue)
 	{
-		*pOption = Value;
+		*pOption = NewValue;
 		return true;
 	}
 	return false;
@@ -1476,6 +1480,35 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		s_TranslateKey.SetEmptyText(TCLocalize("Optional"));
 		Ui()->DoEditBox(&s_TranslateKey, &KeyBox, EditBoxFontSize);
 	}
+	// Credential fields of the currently selected backend only (data-driven
+	// from g_aTranslateBackends, see translate.cpp).
+	{
+		static CLineInput s_aTranslateCredentialInputs[4];
+		static int s_LastCredentialBackend = -1;
+		const bool BackendChanged = s_LastCredentialBackend != CurrentBackendIndex;
+		s_LastCredentialBackend = CurrentBackendIndex;
+		for(size_t i = 0; i < CurrentBackend.m_vCredentials.size() && i < std::size(s_aTranslateCredentialInputs); i++)
+		{
+			const STranslateCredentialField &Field = CurrentBackend.m_vCredentials[i];
+			CLineInput &Input = s_aTranslateCredentialInputs[i];
+			if(BackendChanged)
+			{
+				// Fresh input so cursor/selection don't carry over from the
+				// previous backend's (differently sized) buffer.
+				Input.Deactivate();
+				Input = CLineInput();
+			}
+			CUIRect FieldBox;
+			Column.HSplitTop(LineSize + MarginExtraSmall, &FieldBox, &Column);
+			FieldBox.VSplitMid(&Label, &FieldBox);
+			Ui()->DoLabel(&Label, Field.m_pLabel, FontSize, TEXTALIGN_ML);
+			Input.SetBuffer(Field.m_pBuf, Field.m_BufSize);
+			Input.SetEmptyText(Field.m_pPlaceholder);
+			Input.SetHidden(Field.m_Secret);
+			Ui()->DoEditBox(&Input, &FieldBox, EditBoxFontSize);
+			Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
+		}
+	}
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
 	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
 
@@ -2205,6 +2238,9 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 		View.w = 520.0f;
 	}
 	View.HSplitTop(MarginSmall, nullptr, &View);
+
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPingwheel, "启用信号轮盘（关闭后不能发送，也不接收他人信号）", &g_Config.m_TcPingwheel, &View, LineSize);
+	View.HSplitTop(MarginSmall * 4, nullptr, &View);
 
 	// 只调顺序：8 行 = 预览 + 名称 + 序号 + 上/下
 	static CButtonContainer s_aUpButtons[CPingWheel::NUM_SIGNALS];

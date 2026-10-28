@@ -34,6 +34,15 @@ struct STranslateLanguage
 	const char *m_pCode;
 };
 
+struct STranslateCredentialField
+{
+	const char *m_pLabel; // UI label
+	char *m_pBuf; // g_Config buffer
+	size_t m_BufSize;
+	const char *m_pPlaceholder;
+	bool m_Secret; // render hidden
+};
+
 // Single source of truth for every available translate backend: its config
 // value, its display name (passed into the backend's constructor so
 // ITranslateBackend::Name() never drifts from it), and the language list its
@@ -50,9 +59,13 @@ struct STranslateBackendInfo
 	// this backend -- data-driven so the menu never has to special-case a
 	// backend by name.
 	bool m_NeedsEndpointConfig;
+	// Backend-specific credential/config fields (shown in the settings menu
+	// only while this backend is selected). Each points straight at a
+	// g_Config string buffer.
+	std::vector<STranslateCredentialField> m_vCredentials = {};
 };
 
-extern const std::array<STranslateBackendInfo, 2> g_aTranslateBackends;
+extern const std::array<STranslateBackendInfo, 7> g_aTranslateBackends;
 
 // Finds pCode's index in vLanguages, or whichever entry IS English (found by
 // code, not a hardcoded position) if pCode is unset/unrecognised -- stays

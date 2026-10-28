@@ -35,7 +35,8 @@ public:
 	// 聊天编码前缀（⟨P:），chat.cpp 靠它拦行、本组件靠它解析
 	static constexpr const char *CHAT_PREFIX = "\xE2\x9F\xA8P:";
 	static constexpr float MARKER_LIFE = 6.0f;       // 标记存活秒数
-	static constexpr int SEND_HISTORY = 16;          // 限频记录槽位（≥ tc_pingwheel_rate_count 上限）
+	static constexpr int RATE_COUNT = 5;             // 限频：每个窗口最多发送次数（防服务器禁言）
+	static constexpr float RATE_WINDOW = 40.0f;      // 限频窗口秒数，从窗口内第一次发送开始计
 
 	struct CMarker
 	{
@@ -50,10 +51,11 @@ private:
 	bool m_Active = false;
 	vec2 m_SelectorMouse;
 	int m_SelectedSignal = -1;
-	int m_aSoundIds[NUM_SIGNALS] = {};   // 每个信号的音效（data/tclient/pings/<名>.wav）
+	int m_aSoundIds[NUM_SIGNALS] = {-1, -1, -1, -1, -1, -1, -1, -1};   // 每个信号的音效（data/tclient/pings/<名>.wav）
 	bool m_SoundsTried = false;
 	vec2 m_PingWorldPos = vec2(0.0f, 0.0f);
-	std::array<float, SEND_HISTORY> m_aSendTimes{};
+	float m_RateWindowStart = -1e9f;
+	int m_RateSentCount = 0;
 	IGraphics::CTextureHandle m_aSignalTextures[NUM_SIGNALS];
 	bool m_IconsTried = false;
 	std::array<CMarker, 16> m_aMarkers;

@@ -569,7 +569,7 @@ void CChat::OnMessage(int MsgType, void *pRawMsg)
 		CNetMsg_Sv_Chat *pMsg = (CNetMsg_Sv_Chat *)pRawMsg;
 
 		// [TClient PING-WHEEL] ping 编码行不进聊天框，由 CPingWheel 解析成地图标记
-		if(g_Config.m_TcPingwheel && str_startswith(pMsg->m_pMessage, CPingWheel::CHAT_PREFIX))
+		if(str_startswith(pMsg->m_pMessage, CPingWheel::CHAT_PREFIX))
 			return;
 
 		/*

@@ -42,5 +42,6 @@
 
 - [TaterClient / TClient](https://github.com/TaterClient/TClient)
 - [DDNet](https://ddnet.org)
+- MeowClient
 
 感谢上游项目的开发者们。

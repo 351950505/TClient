@@ -115,6 +115,15 @@ void CCamera::ResetAutoSpecCamera()
 
 void CCamera::UpdateCamera()
 {
+	// 旧版 cl_default_zoom 为 int 十分位(100 表示 10.0)的一次性迁移:
+	// cfg 加载完成后首帧执行,读到超过新上限(20)的值就 ÷10
+	static bool s_ZoomMigrated = false;
+	if(!s_ZoomMigrated)
+	{
+		s_ZoomMigrated = true;
+		if(g_Config.m_ClDefaultZoom > 20.0f)
+			g_Config.m_ClDefaultZoom /= 10.0f;
+	}
 	// use hardcoded smooth camera for spectating unless player explicitly turn it off
 	bool CanUseCameraInfo = !GameClient()->m_MultiViewActivated;
 	if(Client()->State() == IClient::STATE_DEMOPLAYBACK)
@@ -200,7 +209,7 @@ void CCamera::UpdateCamera()
 		m_Zooming = false;
 		m_AutoSpecCameraZooming = false;
 	}
-	else if(!m_ZoomSet && g_Config.m_ClDefaultZoom != 100)
+	else if(!m_ZoomSet && g_Config.m_ClDefaultZoom != 10.0f)
 	{
 		m_ZoomSet = true;
 		OnReset();
@@ -421,7 +430,7 @@ void CCamera::OnConsoleInit()
 
 float CCamera::DefaultZoomSteps()
 {
-	return g_Config.m_ClDefaultZoom / 10.0f - 10.0f;
+	return g_Config.m_ClDefaultZoom - 10.0f;
 }
 
 void CCamera::OnReset()
@@ -469,7 +478,7 @@ void CCamera::ConZoom(IConsole::IResult *pResult, void *pUserData)
 
 	bool IsReset = !pResult->NumArguments();
 
-	float TargetLevel = !IsReset ? pResult->GetFloat(0) : g_Config.m_ClDefaultZoom / 10.0f;
+	float TargetLevel = !IsReset ? pResult->GetFloat(0) : g_Config.m_ClDefaultZoom;
 
 	if(!pSelf->CanUseAutoSpecCamera() || !pSelf->m_CanUseCameraInfo)
 		pSelf->ChangeZoom(CCamera::ZoomStepsToValue(TargetLevel - 10.0f), pSelf->GameClient()->m_Snap.m_SpecInfo.m_Active && pSelf->GameClient()->m_MultiViewActivated ? g_Config.m_ClMultiViewZoomSmoothness : g_Config.m_ClSmoothZoomTime, true);

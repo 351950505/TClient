@@ -169,7 +169,7 @@ MACRO_CONFIG_INT(ClDownloadCommunitySkins, cl_download_community_skins, 0, 0, 1,
 MACRO_CONFIG_INT(ClAutoStatboardScreenshot, cl_auto_statboard_screenshot, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically take game over statboard screenshot")
 MACRO_CONFIG_INT(ClAutoStatboardScreenshotMax, cl_auto_statboard_screenshot_max, 10, 0, 1000, CFGFLAG_SAVE | CFGFLAG_CLIENT, "Maximum number of automatically created statboard screenshots (0 = no limit)")
 
-MACRO_CONFIG_INT(ClDefaultZoom, cl_default_zoom, 100, 0, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "默认缩放档位，按十分位存储（100 表示 10.0）")
+MACRO_CONFIG_FLOAT(ClDefaultZoom, cl_default_zoom, 10.0f, 0.0f, 20.0f, CFGFLAG_CLIENT | CFGFLAG_SAVE, "默认缩放（浮点，10.0 为默认不缩放）")
 MACRO_CONFIG_INT(ClSmoothZoomTime, cl_smooth_zoom_time, 250, 0, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Time of smooth zoom animation ingame in ms (0 for off)")
 MACRO_CONFIG_INT(ClLimitMaxZoomLevel, cl_limit_max_zoom_level, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Specifies, if zooming ingame should be limited or not (0 = no limit)")
 

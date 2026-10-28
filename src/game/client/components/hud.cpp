@@ -839,7 +839,38 @@ void CHud::RenderCursor()
 	else
 	{
 		// Render spec cursor
-		if(!g_Config.m_ClSpecCursor || !GameClient()->m_CursorInfo.IsAvailable())
+		if(!g_Config.m_ClSpecCursor)
+			return;
+
+		// [TClient] 观战指针常驻：自由视角用鼠标位置画指针，5 秒不动淡出、移动即恢复
+		if(g_Config.m_TcSpecCursorAlways && GameClient()->m_Snap.m_SpecInfo.m_Active &&
+			GameClient()->m_Snap.m_SpecInfo.m_SpectatorId == SPEC_FREEVIEW && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+		{
+			static vec2 s_LastUiMouse = vec2(-1.0f, -1.0f);
+			static float s_IdleStart = -1.0f;
+			const float Now = Client()->LocalTime();
+			const vec2 UiMouse = Ui()->MousePos();
+			if(UiMouse != s_LastUiMouse)
+			{
+				s_LastUiMouse = UiMouse;
+				s_IdleStart = Now;
+			}
+			const float Idle = s_IdleStart < 0.0f ? 0.0f : Now - s_IdleStart;
+			float PointerAlpha = 1.0f;
+			if(Idle > 5.0f)
+				PointerAlpha = std::max(0.0f, 1.0f - (Idle - 5.0f) * 2.5f);
+			if(PointerAlpha > 0.0f)
+			{
+				const CUIRect *pUiScreen = Ui()->Screen();
+				const vec2 Fraction = (UiMouse - vec2(pUiScreen->x, pUiScreen->y)) / vec2(pUiScreen->w, pUiScreen->h);
+				TargetPos = Center + (Fraction - vec2(0.5f, 0.5f)) * (ScreenRect.m_BottomRight - ScreenRect.m_TopLeft) * GameClient()->m_Camera.m_Zoom;
+				CurWeapon = 0;
+				Alpha = 0.85f * PointerAlpha;
+			}
+			return;
+		}
+
+		if(!GameClient()->m_CursorInfo.IsAvailable())
 			return;
 
 		bool RenderSpecCursor = (GameClient()->m_Snap.m_SpecInfo.m_Active && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW) || Client()->State() == IClient::STATE_DEMOPLAYBACK;

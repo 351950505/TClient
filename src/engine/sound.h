@@ -67,6 +67,7 @@ public:
 
 	virtual int LoadOpus(const char *pFilename, int StorageType = IStorage::TYPE_ALL) = 0;
 	virtual int LoadWV(const char *pFilename, int StorageType = IStorage::TYPE_ALL) = 0;
+	virtual int LoadWav(const char *pFilename, int StorageType = IStorage::TYPE_ALL) = 0;
 	virtual int LoadOpusFromMem(const void *pData, unsigned DataSize, bool ForceLoad, const char *pContextName) = 0;
 	virtual int LoadWVFromMem(const void *pData, unsigned DataSize, bool ForceLoad, const char *pContextName) = 0;
 	virtual void UnloadSample(int SampleId) = 0;

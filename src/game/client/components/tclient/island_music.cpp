@@ -1629,6 +1629,9 @@ public:
 		// The /api/search/get/web response often omits album.picUrl, so when it is
 		// missing we resolve it via /api/song/detail (which always carries it).
 		bool m_DetailQueued = false;
+		// QQ 音乐第三源（NetEase NOTFOUND 后、lrclib 兜底前尝试）
+		bool m_TriedQQ = false;      // QQ 流程已走完（成功或失败）
+		std::string m_QQMid;         // 搜索到的 songmid
 	};
 
 	std::map<std::string, SNeteaseMeta> m_NeteaseData;
@@ -1637,6 +1640,9 @@ public:
 	bool m_NeteaseInCoverPhase = false;
 	bool m_NeteaseInDetailPhase = false;
 	std::shared_ptr<IHttpRequest> m_pNeteaseRequest;
+	std::shared_ptr<IHttpRequest> m_pQQRequest;
+	bool m_QQInSearch = false;  // QQ 搜索阶段进行中
+	bool m_QQInLyric = false;   // QQ 歌词阶段进行中
 
 	void AbortNetease()
 	{
@@ -1645,10 +1651,17 @@ public:
 			m_pNeteaseRequest->Abort();
 			m_pNeteaseRequest.reset();
 		}
+		if(m_pQQRequest)
+		{
+			m_pQQRequest->Abort();
+			m_pQQRequest.reset();
+		}
 		m_NeteaseInFlight.clear();
 		m_NeteaseInLyricPhase = false;
 		m_NeteaseInCoverPhase = false;
 		m_NeteaseInDetailPhase = false;
+		m_QQInSearch = false;
+		m_QQInLyric = false;
 	}
 
 	static std::string NeteaseCacheKey(const STrack &Track)
@@ -1739,6 +1752,7 @@ public:
 				}
 			}
 			ProcessNetease();
+			ProcessQQ();
 			return;
 		}
 
@@ -2040,7 +2054,25 @@ public:
 					if(Ok)
 						Meta.m_LyricState = ELyricsState::READY;
 					else
+					{
 						Meta.m_LyricState = ELyricsState::NOTFOUND;
+						// NetEase 没有歌词 → 发起 QQ 音乐搜索（第三源，两阶段）
+						if(!Meta.m_TriedQQ && m_pHttp != nullptr)
+						{
+							char aEscT[512], aEscA[512];
+							EscapeUrl(aEscT, Meta.m_Title.c_str());
+							EscapeUrl(aEscA, Meta.m_Artist.c_str());
+							char aQQUrl[2048];
+							str_format(aQQUrl, sizeof(aQQUrl),
+								"https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&n=3&w=%s%%20%s",
+								aEscT, aEscA);
+							m_pQQRequest = HttpGet(aQQUrl);
+							m_pQQRequest->Timeout(CTimeout{10000, 0, 500, 10});
+							m_pQQRequest->LogProgress(HTTPLOG::FAILURE);
+							m_pQQRequest->HeaderString("Referer", "https://y.qq.com/");
+							m_QQInSearch = true;
+						}
+					}
 					Meta.m_TriedLyric = true;
 					m_NeteaseInLyricPhase = false;
 				}
@@ -2113,7 +2145,7 @@ public:
 
 		// NetEase-first fallback: if NetEase definitively has no lyrics for this
 		// track, hand it to lrclib so we still show something.
-		if(ApplyToActive && Meta.m_TriedLyric && Meta.m_LyricState == ELyricsState::NOTFOUND && !m_NeteaseInLyricPhase && !m_NeteaseInCoverPhase && !m_pNeteaseRequest && m_pRequest == nullptr && m_LrclibState == ELyricsState::IDLE)
+		if(ApplyToActive && Meta.m_TriedLyric && Meta.m_TriedQQ && Meta.m_LyricState == ELyricsState::NOTFOUND && !m_NeteaseInLyricPhase && !m_NeteaseInCoverPhase && !m_pNeteaseRequest && !m_pQQRequest && !m_QQInSearch && !m_QQInLyric && m_pRequest == nullptr && m_LrclibState == ELyricsState::IDLE)
 		{
 			// hand the track over to lrclib. Switch the active key to the lrclib
 			// cache key so the next UpdateLyrics frame drives the lrclib pipeline.
@@ -2129,6 +2161,75 @@ public:
 		}
 	}
 #endif
+
+	// ---------------- QQ 音乐第三源（NetEase NOTFOUND 后、lrclib 前） ----------------
+	// 两阶段：搜索(w=标题 歌手)拿 songmid → 歌词接口拿明文 LRC。解析复用 ParseSyncedLyrics。
+	void ProcessQQ()
+	{
+		if(!m_pQQRequest || !m_pQQRequest->Done())
+			return;
+		std::shared_ptr<IHttpRequest> pFinished = m_pQQRequest;
+		m_pQQRequest.reset();
+		const bool WasSearch = m_QQInSearch;
+		m_QQInSearch = false;
+		m_QQInLyric = false;
+		auto It = m_NeteaseData.find(m_NeteaseInFlight);
+		if(It == m_NeteaseData.end())
+			return; // 已切歌，丢弃
+		SNeteaseMeta &Meta = It->second;
+		if(Meta.m_TriedQQ)
+			return;
+
+		json_value *pRoot = pFinished->ResultJson();
+		if(pRoot != nullptr && pRoot != &json_value_none)
+		{
+			if(WasSearch)
+			{
+				// {"code":0,"data":{"song":{"list":[{...,"songmid":"xxx",...}]}}}
+				const json_value *pData = json_object_get(pRoot, "data");
+				const json_value *pSong = pData ? json_object_get(pData, "song") : nullptr;
+				const json_value *pList = pSong ? json_object_get(pSong, "list") : nullptr;
+				const json_value *pFirst = (pList != nullptr && pList->type == json_array && pList->u.array.length > 0)
+					? pList->u.array.values[0] : nullptr;
+				const json_value *pMid = pFirst ? json_object_get(pFirst, "songmid") : nullptr;
+				if(pMid != nullptr && pMid->type == json_string && pMid->u.string.length > 0)
+				{
+					Meta.m_QQMid = pMid->u.string.ptr;
+					// 第二阶段：拿歌词
+					char aUrl[512];
+					str_format(aUrl, sizeof(aUrl),
+						"https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?format=json&nobase64=1&g_tk=5381&loginUin=0&hostUin=0&platform=yqq&songmid=%s",
+						Meta.m_QQMid.c_str());
+					m_pQQRequest = HttpGet(aUrl);
+					m_pQQRequest->Timeout(CTimeout{10000, 0, 500, 10});
+					m_pQQRequest->LogProgress(HTTPLOG::FAILURE);
+					m_pQQRequest->HeaderString("Referer", "https://y.qq.com/");
+					m_QQInLyric = true;
+				}
+				else
+					Meta.m_TriedQQ = true; // 搜索无结果 → 放行 lrclib
+			}
+			else
+			{
+				// 歌词响应：{"code":0,"lyric":"[mm:ss.xx]..."}
+				const json_value *pLyric = json_object_get(pRoot, "lyric");
+				const char *pLyricText = (pLyric != nullptr && pLyric->type == json_string) ? pLyric->u.string.ptr : "";
+				std::vector<SLyricLine> vLines;
+				if(pLyricText[0] != '\0' && ParseSyncedLyrics(pLyricText, vLines) && !vLines.empty())
+				{
+					Meta.m_vLines = std::move(vLines);
+					Meta.m_vFallbackLines.clear();
+					Meta.m_LyricState = ELyricsState::READY;
+					Meta.m_Resolved = true;
+				}
+				Meta.m_TriedQQ = true; // 成功或失败都收口，失败放行 lrclib
+			}
+		}
+		else
+			Meta.m_TriedQQ = true; // 网络失败也放行 lrclib
+		if(pRoot != nullptr && pRoot != &json_value_none)
+			json_value_free(pRoot);
+	}
 
 	int FindLineIndex(int64_t PositionMs) const
 	{

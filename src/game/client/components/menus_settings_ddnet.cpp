@@ -145,7 +145,7 @@ void CMenus::RenderSettingsDDNet(CUIRect MainView)
 	GameClient()->m_Tooltips.DoToolTip(&g_Config.m_ClShowQuads, &Button, Localize("Quads are used for background decoration"));
 
 	Left.HSplitTop(20.0f, &Button, &Left);
-	if(DoSliderWithTenthsValue(&g_Config.m_ClDefaultZoom, &g_Config.m_ClDefaultZoom, &Button, Localize("Default zoom"), 0, 200))
+	if(DoSliderFloat(&g_Config.m_ClDefaultZoom, &g_Config.m_ClDefaultZoom, &Button, Localize("Default zoom"), 0.0f, 20.0f, 0.1f, ""))
 		GameClient()->m_Camera.SetZoom(CCamera::ZoomStepsToValue(CCamera::DefaultZoomSteps()), g_Config.m_ClSmoothZoomTime, true);
 
 	Right.HSplitTop(20.0f, &Button, &Right);

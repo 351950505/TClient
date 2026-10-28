@@ -1530,18 +1530,39 @@ bool CUi::DoScrollbarOption(const void *pId, int *pOption, const CUIRect *pRect,
 			Value = Max;
 	}
 
-	// Allow adjustment of slider options when ctrl is pressed (to avoid scrolling, or accidentally adjusting the value).
-	// Use a FINE step here so ctrl+wheel is a precise adjustment (previously (Max-Min)/35 was too coarse for wide
-	// ranges such as -5000..5000, making one wheel notch jump hundreds of units). ~200 steps across the range.
-	int Increment = std::max(1, (Max - Min) / 200);
-	if(Input()->ModifierIsPressed() && Input()->KeyPress(KEY_MOUSE_WHEEL_UP) && MouseInside(pRect))
+	// Allow adjustment of slider options when ctrl is pressed (to avoid scrolling, or accidentally adjusting the value)
+	// 精调三通道（自 net-src §162 移植）：Ctrl+滚轮 = 1 单位细档（对 ×100 存储的浮点滑条即 0.01）；
+	// Shift+Ctrl+滚轮 = 粗档快速扫（约 (Max-Min)/35）；悬停方向键 = 1 单位细档。
+	const int IncrFine = 1;
+	const int IncrCoarse = std::max(1, (Max - Min) / 35);
+	if(Input()->ShiftIsPressed() && Input()->ModifierIsPressed() && Input()->KeyPress(KEY_MOUSE_WHEEL_UP) && MouseInside(pRect))
 	{
-		Value += Increment;
+		Value += IncrCoarse;
 		Value = std::clamp(Value, Min, Max);
 	}
-	if(Input()->ModifierIsPressed() && Input()->KeyPress(KEY_MOUSE_WHEEL_DOWN) && MouseInside(pRect))
+	else if(Input()->ModifierIsPressed() && Input()->KeyPress(KEY_MOUSE_WHEEL_UP) && MouseInside(pRect))
 	{
-		Value -= Increment;
+		Value += IncrFine;
+		Value = std::clamp(Value, Min, Max);
+	}
+	if(Input()->ShiftIsPressed() && Input()->ModifierIsPressed() && Input()->KeyPress(KEY_MOUSE_WHEEL_DOWN) && MouseInside(pRect))
+	{
+		Value -= IncrCoarse;
+		Value = std::clamp(Value, Min, Max);
+	}
+	else if(Input()->ModifierIsPressed() && Input()->KeyPress(KEY_MOUSE_WHEEL_DOWN) && MouseInside(pRect))
+	{
+		Value -= IncrFine;
+		Value = std::clamp(Value, Min, Max);
+	}
+	if(Input()->KeyPress(KEY_LEFT) && MouseInside(pRect))
+	{
+		Value -= IncrFine;
+		Value = std::clamp(Value, Min, Max);
+	}
+	if(Input()->KeyPress(KEY_RIGHT) && MouseInside(pRect))
+	{
+		Value += IncrFine;
 		Value = std::clamp(Value, Min, Max);
 	}
 

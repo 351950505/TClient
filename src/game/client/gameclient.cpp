@@ -168,8 +168,9 @@ void CGameClient::OnConsoleInit()
 					      &m_Spectator,
 					      &m_Emoticon,
 					      &m_BindChat, // TClient
-					      &m_BindWheel, // TClient
-					      &m_WarList, // TClient
+						      &m_BindWheel, // TClient
+						      &m_PingWheel, // TClient
+						      &m_WarList, // TClient
 					      &m_IslandMusic, // TClient
 					      &m_StatusBar, // TClient
 					      &m_InfoMessages,
@@ -197,6 +198,7 @@ void CGameClient::OnConsoleInit()
 						  &m_Motd, // for pressing esc to remove it
 						  &m_Spectator,
 						  &m_BindWheel, // TClient
+						  &m_PingWheel, // TClient
 						  &m_Emoticon,
 						  &m_ImportantAlert,
 						  &m_Menus,
@@ -4123,7 +4125,8 @@ void CGameClient::UpdateSpectatorCursor()
 
 	const CSnapState::CCharacterInfo &CharInfo = m_Snap.m_aCharacters[CursorOwnerId];
 	const CClientData &CursorOwnerClient = m_aClients[CursorOwnerId];
-	if(!CharInfo.m_HasExtendedDisplayInfo || !CursorOwnerClient.m_Active || (!g_Config.m_Debug && CursorOwnerClient.m_Paused))
+	// [TClient] tc_spec_cursor_always：观战指针常驻，被观战者暂停时也显示
+	if(!CharInfo.m_HasExtendedDisplayInfo || !CursorOwnerClient.m_Active || (!g_Config.m_Debug && !g_Config.m_TcSpecCursorAlways && CursorOwnerClient.m_Paused))
 	{
 		// hide cursor when the spectating player is paused
 		m_CursorInfo.m_Available = false;

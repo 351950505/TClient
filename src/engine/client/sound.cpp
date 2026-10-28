@@ -461,6 +461,114 @@ void CSound::RateConvert(CSample &Sample) const
 	Sample.m_Rate = m_MixingRate;
 }
 
+int CSound::LoadWav(const char *pFilename, int StorageType)
+{
+	// no need to load sound when we are running with no sound
+	if(!m_SoundEnabled)
+		return -1;
+
+	CSample *pSample = AllocSample();
+	if(!pSample)
+	{
+		log_error("sound/wav", "Failed to allocate sample ID. Filename='%s'", pFilename);
+		return -1;
+	}
+
+	void *pData;
+	unsigned DataSize;
+	if(!m_pStorage->ReadFile(pFilename, StorageType, &pData, &DataSize))
+	{
+		UnloadSample(pSample->m_Index);
+		log_error("sound/wav", "Failed to open file. Filename='%s'", pFilename);
+		return -1;
+	}
+
+	const bool DecodeSuccess = DecodeWav(*pSample, pData, DataSize, pFilename);
+	free(pData);
+	if(!DecodeSuccess)
+	{
+		UnloadSample(pSample->m_Index);
+		return -1;
+	}
+
+	RateConvert(*pSample);
+	return pSample->m_Index;
+}
+
+bool CSound::DecodeWav(CSample &Sample, const void *pData, unsigned DataSize, const char *pFilename) const
+{
+	// [TClient] 标准 RIFF/WAVE PCM（8/16 位、单双声道）解析，供运行时加载外部音效
+	const unsigned char *pRaw = (const unsigned char *)pData;
+	if(DataSize < 44 || memcmp(pRaw, "RIFF", 4) != 0 || memcmp(pRaw + 8, "WAVE", 4) != 0)
+	{
+		log_error("sound/wav", "Not a RIFF/WAVE file. Filename='%s'", pFilename);
+		return false;
+	}
+
+	int Format = 0;
+	int Channels = 0;
+	int Rate = 0;
+	int Bits = 0;
+	const unsigned char *pDataChunk = nullptr;
+	unsigned DataChunkSize = 0;
+	unsigned Offset = 12;
+	while(Offset + 8 <= DataSize)
+	{
+		const unsigned ChunkSize = pRaw[Offset + 4] | (pRaw[Offset + 5] << 8) | (pRaw[Offset + 6] << 16) | (pRaw[Offset + 7] << 24);
+		if(Offset + 8 + ChunkSize > DataSize)
+			break;
+		if(memcmp(pRaw + Offset, "fmt ", 4) == 0)
+		{
+			Format = pRaw[Offset + 8] | (pRaw[Offset + 9] << 8);
+			Channels = pRaw[Offset + 10] | (pRaw[Offset + 11] << 8);
+			Rate = pRaw[Offset + 12] | (pRaw[Offset + 13] << 8) | (pRaw[Offset + 14] << 16) | (pRaw[Offset + 15] << 24);
+			Bits = pRaw[Offset + 22] | (pRaw[Offset + 23] << 8);
+		}
+		else if(memcmp(pRaw + Offset, "data", 4) == 0)
+		{
+			pDataChunk = pRaw + Offset + 8;
+			DataChunkSize = ChunkSize;
+		}
+		Offset += 8 + ChunkSize + (ChunkSize & 1);
+	}
+
+	if(Format != 1 || (Bits != 8 && Bits != 16) || Channels < 1 || Channels > 2 || Rate <= 0 || !pDataChunk)
+	{
+		log_error("sound/wav", "Unsupported format (fmt=%d bits=%d ch=%d rate=%d). Filename='%s'", Format, Bits, Channels, Rate, pFilename);
+		return false;
+	}
+
+	const int BytesPerSample = Bits / 8;
+	const int FrameSize = BytesPerSample * Channels;
+	const int NumFrames = DataChunkSize / FrameSize;
+	const int TotalSamples = NumFrames * Channels > 0 ? NumFrames * Channels : 1;
+	short *pSampleData = (short *)calloc(TotalSamples, sizeof(short));
+	if(!pSampleData)
+		return false;
+
+	for(int Frame = 0; Frame < NumFrames; Frame++)
+	{
+		for(int Channel = 0; Channel < Channels; Channel++)
+		{
+			const unsigned ByteOffset = Frame * FrameSize + Channel * BytesPerSample;
+			short Value = 0;
+			if(Bits == 16)
+				Value = (short)(pDataChunk[ByteOffset] | (pDataChunk[ByteOffset + 1] << 8));
+			else // 8-bit WAV 是无符号采样
+				Value = (short)(((int)pDataChunk[ByteOffset] - 128) << 8);
+			pSampleData[Frame * Channels + Channel] = Value;
+		}
+	}
+
+	Sample.m_pData = pSampleData;
+	Sample.m_NumFrames = NumFrames;
+	Sample.m_Rate = Rate;
+	Sample.m_Channels = Channels;
+	Sample.m_LoopStart = 0;
+	Sample.m_PausedAt = 0;
+	return true;
+}
+
 bool CSound::DecodeOpus(CSample &Sample, const void *pData, unsigned DataSize, const char *pContextName) const
 {
 	int OpusError = 0;

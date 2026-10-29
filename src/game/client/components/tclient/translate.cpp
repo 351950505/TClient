@@ -363,6 +363,60 @@ public:
 	}
 };
 
+// Google's secondary free endpoint (clients5 / dict-chrome-ex). Same
+// unofficial-status caveat as the primary one, but it is a different host and
+// a different response shape (a flat array of strings), so it keeps working
+// when translate.googleapis.com is blocked or rate limited. Verified working
+// 2026-10-29: GET returns ["translated","detected-src"] for one string and a
+// single joined string for multi-line input.
+class CTranslateBackendGoogleAlt : public ITranslateBackendHttp
+{
+private:
+	bool ParseResponse(CTranslateResponse &Out) override
+	{
+		json_value *pObj = m_pHttpRequest->ResultJson();
+		bool Res = false;
+		if(pObj && pObj->type == json_array && json_array_length(pObj) >= 1)
+		{
+			const json_value *pFirst = json_array_get(pObj, 0);
+			if(pFirst && pFirst->type == json_string)
+			{
+				str_copy(Out.m_Text, pFirst->u.string.ptr);
+				Res = Out.m_Text[0] != '\0';
+			}
+			if(json_array_length(pObj) >= 2)
+			{
+				const json_value *pLang = json_array_get(pObj, 1);
+				if(pLang && pLang->type == json_string)
+					str_copy(Out.m_Language, pLang->u.string.ptr);
+			}
+			if(!Res)
+				str_copy(Out.m_Text, "Empty translation");
+		}
+		else
+		{
+			str_copy(Out.m_Text, "Unexpected response format");
+		}
+		json_value_free(pObj);
+		return Res;
+	}
+
+public:
+	CTranslateBackendGoogleAlt(IHttp &Http, const char *pText, const char *pTargetLang, const char *pName) :
+		ITranslateBackendHttp(pName)
+	{
+		// GET with query string: this endpoint does not accept a form body.
+		// The URL buffer is 256 bytes, so long messages are truncated rather
+		// than silently failing -- chat lines are capped well below that.
+		char aText[192];
+		UrlEncode(pText, aText, sizeof(aText));
+		char aUrl[256];
+		const char *pBase = g_Config.m_TcTranslateEndpoint[0] != '\0' ? g_Config.m_TcTranslateEndpoint : "https://clients5.google.com/translate_a/t";
+		str_format(aUrl, sizeof(aUrl), "%s?client=dict-chrome-ex&sl=auto&tl=%s&q=%s", pBase, EncodeTarget(pTargetLang), aText);
+		CreateHttpRequest(Http, aUrl);
+	}
+};
+
 // Talks directly to Google's free, unofficial (undocumented) translate
 // endpoint -- this is the same endpoint the now-defunct FreeTranslateAPI
 // (ftapi.pythonanywhere.com) used to wrap, without needing a third-party
@@ -1218,8 +1272,9 @@ static const std::vector<STranslateLanguage> s_vDeeplLanguages = {
 	{"Ukrainian", "uk"},
 };
 
-const std::array<STranslateBackendInfo, 7> g_aTranslateBackends = {{
+const std::array<STranslateBackendInfo, 8> g_aTranslateBackends = {{
 	{"google", "Google", s_vGoogleLanguages, false},
+	{"googlealt", "Google (备用端点)", s_vGoogleLanguages, true},
 	{"libretranslate", "LibreTranslate", s_vLibretranslateLanguages, true},
 	{"tencent", "腾讯云", s_vTencentLanguages, false, {
 									  {"SecretId:", g_Config.m_TcTranslateTencentSecretId, sizeof(g_Config.m_TcTranslateTencentSecretId), "", false},
@@ -1252,8 +1307,36 @@ int TranslateLanguageIndex(const std::vector<STranslateLanguage> &vLanguages, co
 	return 0;
 }
 
+// 需要密钥的后端在没配密钥时无法工作。用户选到这类后端又没填 key 时，
+// 与其每次翻译都失败（此前只有一句 Configure the ... 错误），不如自动回退到
+// 免密钥的 Google。返回 true 表示发生了回退，调用方据此提示一次。
+bool TranslateBackendNeedsMissingCredentials(const char *pBackend)
+{
+	if(str_comp_nocase(pBackend, "deepl") == 0)
+		return g_Config.m_TcTranslateDeeplKey[0] == '\0';
+	if(str_comp_nocase(pBackend, "baidu") == 0)
+		return g_Config.m_TcTranslateBaiduAppId[0] == '\0' || g_Config.m_TcTranslateBaiduKey[0] == '\0';
+	if(str_comp_nocase(pBackend, "tencent") == 0)
+		return g_Config.m_TcTranslateTencentSecretId[0] == '\0' || g_Config.m_TcTranslateTencentSecretKey[0] == '\0';
+	if(str_comp_nocase(pBackend, "llm") == 0)
+	{
+		// LLM 端点留空会默认打到 api.openai.com，没有 key 一样失败；只有显式
+		// 指向本机端点时才允许无 key。
+		const char *pEndpoint = g_Config.m_TcTranslateLlmEndpoint;
+		if(pEndpoint[0] == '\0')
+			return true;
+		const bool Local = str_find_nocase(pEndpoint, "://localhost") || str_find_nocase(pEndpoint, "://127.0.0.1");
+		return g_Config.m_TcTranslateLlmKey[0] == '\0' && !Local;
+	}
+	return false;
+}
+
 static std::unique_ptr<ITranslateBackend> CreateTranslateBackend(IHttp &Http, const char *pText, const char *pTargetLang)
 {
+	// 缺密钥 → 回退 Google（免密钥），避免整个功能不可用。
+	if(TranslateBackendNeedsMissingCredentials(g_Config.m_TcTranslateBackend))
+		return std::make_unique<CTranslateBackendGoogle>(Http, pText, pTargetLang, "Google");
+
 	for(const STranslateBackendInfo &Backend : g_aTranslateBackends)
 	{
 		if(str_comp_nocase(g_Config.m_TcTranslateBackend, Backend.m_pValue) != 0)
@@ -1262,6 +1345,8 @@ static std::unique_ptr<ITranslateBackend> CreateTranslateBackend(IHttp &Http, co
 			return std::make_unique<CTranslateBackendLibretranslate>(Http, pText, pTargetLang, Backend.m_pName);
 		if(str_comp_nocase(Backend.m_pValue, "google") == 0)
 			return std::make_unique<CTranslateBackendGoogle>(Http, pText, pTargetLang, Backend.m_pName);
+		if(str_comp_nocase(Backend.m_pValue, "googlealt") == 0)
+			return std::make_unique<CTranslateBackendGoogleAlt>(Http, pText, pTargetLang, Backend.m_pName);
 		if(str_comp_nocase(Backend.m_pValue, "tencent") == 0)
 			return std::make_unique<CTranslateBackendTencent>(Http, pText, pTargetLang, Backend.m_pName);
 		if(str_comp_nocase(Backend.m_pValue, "baidu") == 0)
@@ -1294,10 +1379,59 @@ void CTranslate::ConTranslateId(IConsole::IResult *pResult, void *pUserData)
 	pThis->Translate(pResult->GetInteger(0));
 }
 
+static bool IsMostlyChineseOrNoText(const char *pText);
+
+void CTranslate::ConTranslateRecent(IConsole::IResult *pResult, void *pUserData)
+{
+	CTranslate *pThis = static_cast<CTranslate *>(pUserData);
+	if(pResult->NumArguments() > 0)
+	{
+		const int Count = std::clamp(pResult->GetInteger(0), 1, 16);
+		const int Old = g_Config.m_TcTranslateRecentCount;
+		g_Config.m_TcTranslateRecentCount = Count;
+		pThis->TranslateRecent();
+		g_Config.m_TcTranslateRecentCount = Old;
+		return;
+	}
+	pThis->TranslateRecent();
+}
+
+void CTranslate::TranslateRecent()
+{
+	// 从最新一条往回扫，挑出非中文、非系统、非自己的消息，最多翻
+	// g_Config.m_TcTranslateRecentCount 条。已经翻过（有 response）的跳过，
+	// 避免按一次键把同一批重复排队。
+	const int MaxCount = std::clamp(g_Config.m_TcTranslateRecentCount, 1, 16);
+	int Queued = 0;
+	for(int i = 0; i < CChat::MAX_LINES && Queued < MaxCount; i++)
+	{
+		CChat::CLine *pLine = &GameClient()->m_Chat.m_aLines[((GameClient()->m_Chat.m_CurrentLine - i) + CChat::MAX_LINES) % CChat::MAX_LINES];
+		if(!pLine->m_Initialized || pLine->m_aText[0] == '\0')
+			continue;
+		if(pLine->m_pTranslateResponse != nullptr)
+			continue;
+		if(pLine->m_ClientId == CChat::CLIENT_MSG || pLine->m_ClientId == CChat::SERVER_MSG)
+			continue;
+		bool Local = false;
+		for(const int Id : GameClient()->m_aLocalIds)
+			if(Id >= 0 && Id == pLine->m_ClientId)
+				Local = true;
+		if(Local)
+			continue;
+		if(IsMostlyChineseOrNoText(pLine->m_aText))
+			continue;
+		Translate(*pLine, true);
+		Queued++;
+	}
+	if(Queued == 0)
+		GameClient()->m_Chat.Echo("No untranslated non-Chinese messages found");
+}
+
 void CTranslate::OnConsoleInit()
 {
 	Console()->Register("translate", "?r[name]", CFGFLAG_CLIENT, ConTranslate, this, "Translate last message (of a given name)");
 	Console()->Register("translate_id", "v[id]", CFGFLAG_CLIENT, ConTranslateId, this, "Translate last message of the person with this id");
+	Console()->Register("tc_translate_recent", "?i[count]", CFGFLAG_CLIENT, ConTranslateRecent, this, "Translate the most recent non-Chinese chat lines");
 }
 
 void CTranslate::Translate(int Id, bool ShowProgress)

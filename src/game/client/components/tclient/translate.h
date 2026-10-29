@@ -65,7 +65,7 @@ struct STranslateBackendInfo
 	std::vector<STranslateCredentialField> m_vCredentials = {};
 };
 
-extern const std::array<STranslateBackendInfo, 7> g_aTranslateBackends;
+extern const std::array<STranslateBackendInfo, 8> g_aTranslateBackends;
 
 // Finds pCode's index in vLanguages, or whichever entry IS English (found by
 // code, not a hardcoded position) if pCode is unset/unrecognised -- stays
@@ -90,6 +90,7 @@ class CTranslate : public CComponent
 
 	static void ConTranslate(IConsole::IResult *pResult, void *pUserData);
 	static void ConTranslateId(IConsole::IResult *pResult, void *pUserData);
+	static void ConTranslateRecent(IConsole::IResult *pResult, void *pUserData);
 
 public:
 	int Sizeof() const override { return sizeof(*this); }
@@ -102,6 +103,10 @@ public:
 	void Translate(CChat::CLine &Line, bool ShowProgress = true);
 
 	void AutoTranslate(CChat::CLine &Line);
+
+	// Translates the most recent non-Chinese chat lines (up to
+	// g_Config.m_TcTranslateRecentCount). Used by the +tc_translate_recent bind.
+	void TranslateRecent();
 
 	// If outgoing translation applies to pText (enabled, non-empty, not a
 	// "/"-prefixed command), queues a translate job that sends the result

@@ -1493,6 +1493,16 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		s_TranslateKey.SetEmptyText(TCLocalize("Optional"));
 		Ui()->DoEditBox(&s_TranslateKey, &KeyBox, EditBoxFontSize);
 	}
+	// 一键翻译最近 N 条非中文聊天（绑键 + 条数）
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	{
+		static CButtonContainer s_TranslateRecentReaderButton, s_TranslateRecentClearButton;
+		DoLine_KeyReader(Column, s_TranslateRecentReaderButton, s_TranslateRecentClearButton, TCLocalize("Translate recent messages key"), "tc_translate_recent");
+	}
+	Column.HSplitTop(LineSize, &Button, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcTranslateRecentCount, &g_Config.m_TcTranslateRecentCount, &Button, TCLocalize("How many recent messages"), 1, 16, &CUi::ms_LinearScrollbarScale, 0, "");
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
+
 	// Credential fields of the currently selected backend only (data-driven
 	// from g_aTranslateBackends, see translate.cpp).
 	{

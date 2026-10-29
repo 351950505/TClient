@@ -1167,3 +1167,12 @@ Quick zoom
 
 Sound audible range (0 = whole map)
 == 音效可听距离（0 = 全图可听）
+
+Translate recent chat
+== 一键翻译最近聊天
+
+Translate recent messages key
+== 翻译最近消息按键
+
+How many recent messages
+== 翻译最近几条

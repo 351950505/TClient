@@ -954,12 +954,7 @@ void CScoreboard::RenderMediaPanel(CUIRect Panel)
 	if(!Music.HasSession())
 		return;
 
-	char aTitle[128], aArtist[128];
-	Music.GetTrack(aTitle, sizeof(aTitle), aArtist, sizeof(aArtist));
 	const bool Playing = Music.IsPlaying();
-	const bool Clickable = m_MouseUnlocked;
-
-	const float FontSize = 10.0f;
 	const float BtnSize = 20.0f;
 	const float Gap = 3.0f;
 	const float Pad = 7.0f;
@@ -968,62 +963,47 @@ void CScoreboard::RenderMediaPanel(CUIRect Panel)
 
 	CUIRect Inner = Panel;
 	Inner.Margin(Pad, &Inner);
-	CUIRect Row, Btn;
+	CUIRect Btn;
 
-	// 曲名（单行，过长截断）
-	Inner.HSplitTop(FontSize + 3.0f, &Row, &Inner);
-	if(aTitle[0] != '\0')
+	// 五个按钮竖着一排，水平居中。
+	// Enabled 一律传 true：DoButton_FontIcon 在 Enabled=false 时会画一条红色斜线，
+	// 光标未解锁只是暂时不能点，不该画成禁用态。
+	for(int i = 0; i < 5; i++)
 	{
-		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
-		TextRender()->Text(Row.x, Row.y, FontSize, aTitle, Row.w);
-		TextRender()->TextColor(TextRender()->DefaultTextColor());
-	}
-	else
-		Ui()->DoLabel(&Row, Localize("No music"), FontSize, TEXTALIGN_ML);
-
-	// 五个按钮一行，从左往右紧贴排列
-	Inner.HSplitTop(4.0f, nullptr, &Inner);
-	Inner.HSplitTop(BtnSize, &Row, &Inner);
-
-	Row.VSplitLeft(BtnSize, &Btn, &Row);
-	if(Ui()->DoButton_FontIcon(&m_MediaPrevButton, FontIcon::BACKWARD_STEP, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, Clickable))
-		Music.PrevTrack();
-	Row.VSplitLeft(Gap, nullptr, &Row);
-
-	Row.VSplitLeft(BtnSize, &Btn, &Row);
-	if(Ui()->DoButton_FontIcon(&m_MediaPlayButton, Playing ? FontIcon::PAUSE : FontIcon::PLAY, 1, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, Clickable))
-		Music.TogglePlayPause();
-	Row.VSplitLeft(Gap, nullptr, &Row);
-
-	Row.VSplitLeft(BtnSize, &Btn, &Row);
-	if(Ui()->DoButton_FontIcon(&m_MediaNextButton, FontIcon::FORWARD_STEP, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, Clickable))
-		Music.NextTrack();
-	Row.VSplitLeft(Gap, nullptr, &Row);
-
-	Row.VSplitLeft(BtnSize, &Btn, &Row);
-	if(Ui()->DoButton_FontIcon(&m_MediaVolumeDownButton, FontIcon::MINUS, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, Clickable))
-	{
-		m_MediaVolume = std::max(0, m_MediaVolume - 5);
-		Music.SetVolume(m_MediaVolume);
-	}
-	Row.VSplitLeft(Gap, nullptr, &Row);
-
-	Row.VSplitLeft(BtnSize, &Btn, &Row);
-	if(Ui()->DoButton_FontIcon(&m_MediaVolumeUpButton, FontIcon::PLUS, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, Clickable))
-	{
-		m_MediaVolume = std::min(100, m_MediaVolume + 5);
-		Music.SetVolume(m_MediaVolume);
-	}
-
-	// 音量百分比紧跟在按钮右边
-	Row.VSplitLeft(Gap + 2.0f, nullptr, &Row);
-	if(Row.w > 10.0f)
-	{
-		char aVol[16];
-		str_format(aVol, sizeof(aVol), "%d%%", m_MediaVolume);
-		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.55f);
-		Ui()->DoLabel(&Row, aVol, FontSize, TEXTALIGN_ML);
-		TextRender()->TextColor(TextRender()->DefaultTextColor());
+		Inner.HSplitTop(BtnSize, &Btn, &Inner);
+		Btn.VSplitLeft((Btn.w - BtnSize) * 0.5f, nullptr, &Btn);
+		Btn.w = BtnSize;
+		switch(i)
+		{
+		case 0:
+			if(Ui()->DoButton_FontIcon(&m_MediaPrevButton, FontIcon::BACKWARD_STEP, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, true))
+				Music.PrevTrack();
+			break;
+		case 1:
+			if(Ui()->DoButton_FontIcon(&m_MediaPlayButton, Playing ? FontIcon::PAUSE : FontIcon::PLAY, 1, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, true))
+				Music.TogglePlayPause();
+			break;
+		case 2:
+			if(Ui()->DoButton_FontIcon(&m_MediaNextButton, FontIcon::FORWARD_STEP, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, true))
+				Music.NextTrack();
+			break;
+		case 3:
+			if(Ui()->DoButton_FontIcon(&m_MediaVolumeDownButton, FontIcon::MINUS, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, true))
+			{
+				m_MediaVolume = std::max(0, m_MediaVolume - 5);
+				Music.SetVolume(m_MediaVolume);
+			}
+			break;
+		case 4:
+			if(Ui()->DoButton_FontIcon(&m_MediaVolumeUpButton, FontIcon::PLUS, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, true))
+			{
+				m_MediaVolume = std::min(100, m_MediaVolume + 5);
+				Music.SetVolume(m_MediaVolume);
+			}
+			break;
+		}
+		if(i < 4)
+			Inner.HSplitTop(Gap, nullptr, &Inner);
 	}
 }
 
@@ -1202,9 +1182,9 @@ void CScoreboard::OnRender()
 	// 未解锁光标时按钮点不了，但曲目和状态仍可看，解锁后即可点。
 	if(g_Config.m_TcScoreboardMedia)
 	{
-		// 高 51 = 内边距7 + 曲名13 + 4 + 按钮20 + 内边距7
-		const float PanelW = 152.0f;
-		const float PanelH = 51.0f;
+		// 高 126 = 内边距7 + 5×按钮20 + 4×间距3 + 内边距7
+		const float PanelW = 34.0f;
+		const float PanelH = 126.0f;
 		CUIRect MediaPanel;
 		MediaPanel.x = std::max(10.0f, Scoreboard.x - PanelW - 10.0f);
 		MediaPanel.y = Scoreboard.y;

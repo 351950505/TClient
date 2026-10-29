@@ -1,12 +1,13 @@
 /* TClient: LoL 式地图信号轮盘。按住键出轮盘，选信号在准星世界坐标插地图标记。
-   两条发送通道（tc_pingwheel_emote 选择，接收端两条都收）：
-   - 表情通道（默认）：帧头+9 个表情承载 signal+坐标，间隔 tc_pingwheel_emote_ms
-     （默认 300ms，需 >= 服务器 sv_emoticon_ms_delay，否则第 2 个起被个人冷却丢弃），
-     全服广播；帧发完后对比自己收到的回显数，不足则提示被服务器冷却丢弃。
-     对所有人可见（表情气泡+音效），只有 TClient 知道语义。
-   - 聊天通道：紧凑二进制编码（⟨B: + 6 个编码字符）走队伍聊天，服务器按 DDRace
-     队伍过滤收件人（原版"房间"机制）；TClient 客户端静默解析且不显示该聊天行，
-     同队未装 TClient 的玩家看到一条无意义短码。兼容接收旧明文格式（⟨P:id:x:y:名⟩）。
+   发送通道（Ping() 内按可用性路由，信令优先）：
+   - 信令广播（首选，tc_relay）：经 TClient 信令服务转发给同服 TClient 玩家，
+     旁观/死亡也能发，游戏服聊天与表情零占用，原版玩家全程无感知。
+   - 表情通道（fallback，tc_pingwheel_emote）：帧头+9 个表情承载 signal+坐标，
+     间隔 tc_pingwheel_emote_ms（默认 60ms，需 >= 服务器 sv_emoticon_ms_delay，
+     否则第 2 个起被个人冷却丢弃），全服广播；帧发完后对比自己收到的回显数，
+     不足则提示被服务器冷却丢弃。对所有人可见（表情气泡+音效），只有 TClient 知道语义。
+   - 聊天发送已移除；聊天接收兼容旧格式（⟨P:id:x:y:名⟩ 与 ⟨B:...），
+     收到后同样产出地图标记与聊天图标行。
    0.6 协议下客户端不能直连、服务器只广播白名单消息，服务端零改动。
    图标：可放 data/tclient/pings/signal0.png ~ signal7.png（0=危险…7=等等）自定义，
    未提供则用内置绘制样式。注意：Riot 版权素材请勿打进公开分发包。 */
@@ -43,12 +44,10 @@ public:
 	};
 
 	// 聊天编码前缀。旧明文格式 ⟨P:id:x:y:名⟩ 仅接收兼容；发送用新紧凑格式 ⟨B:...⟩。
-	// chat.cpp 靠 IsPingMessage 静默拦行、本组件靠它解析。
+	// chat.cpp 收到同步行时调 SignalFromMessage 识别并静默，本组件负责解码。
 	static constexpr const char *CHAT_PREFIX = "\xE2\x9F\xA8P:";
 	// 注意：'B' 是十六进制字符，不能直接跟在 \xA8 后（会被贪婪解析），用字面量拼接
 	static constexpr const char *CHAT_PREFIX_BIN = "\xE2\x9F\xA8" "B:";
-	// 该聊天行是否为 pingwheel 同步消息（chat.cpp 静默拦截用；解析见 OnMessage）
-	static bool IsPingMessage(const char *pMessage);
 	static constexpr float MARKER_LIFE = 6.0f; // 标记存活秒数
 
 	struct CMarker

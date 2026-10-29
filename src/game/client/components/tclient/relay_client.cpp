@@ -92,12 +92,9 @@ void CRelayClient::PumpRecv()
 			m_LastServerReply = Client()->LocalTime();
 			continue;
 		}
-		// 服务器转发的同服 ping 载荷 → pingwheel 解析成标记
-		if(g_Config.m_TcPingwheel)
-		{
-			log_info("relaydiag", "recv payload: %s", aText);
-			GameClient()->m_PingWheel.OnRelayPayload(aText);
-		}
+		// 纯 transport：载荷原样转投，"这是什么/要不要收"由订阅方决定
+		log_info("relaydiag", "recv payload: %s", aText);
+		GameClient()->m_PingWheel.OnRelayPayload(aText);
 	}
 }
 

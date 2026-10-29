@@ -5,7 +5,8 @@
    协议（UDP 文本行）：
    REG <gameaddr> <name>          注册/心跳（信令回 REG_OK）
    BC  <gameaddr> <name> <payload> 广播给同游戏服其他注册者（信令回 BC_OK N）
-   payload 即 pingwheel 的紧凑编码（⟨B:...），由 CPingWheel::OnRelayPayload 解析。
+   payload 为不透明的字节串（当前是 pingwheel 的紧凑编码），收到即原样转投
+   订阅方（CPingWheel::OnRelayPayload）——transport 不知道也不关心载荷语义。
    信令不可用时自动回退现有通道（表情/本地显示）。 */
 #ifndef GAME_CLIENT_COMPONENTS_TCLIENT_RELAY_CLIENT_H
 #define GAME_CLIENT_COMPONENTS_TCLIENT_RELAY_CLIENT_H

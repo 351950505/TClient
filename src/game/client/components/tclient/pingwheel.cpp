@@ -80,18 +80,6 @@ bool CPingWheel::DecodeBinary(const char *pMessage, int *pSignal, int *pX, int *
 	return true;
 }
 
-bool CPingWheel::IsPingMessage(const char *pMessage)
-{
-	if(str_startswith(pMessage, CHAT_PREFIX)) // 旧明文格式
-		return true;
-	if(str_startswith(pMessage, CHAT_PREFIX_BIN))
-	{
-		int Signal, X, Y;
-		return DecodeBinary(pMessage, &Signal, &X, &Y);
-	}
-	return false;
-}
-
 // ---- 表情通道 ----
 
 void CPingWheel::EmotePing(int Signal, int X, int Y)
@@ -401,6 +389,8 @@ void CPingWheel::AddMarker(int Signal, vec2 WorldPos, int ClientId)
 
 void CPingWheel::OnRelayPayload(const char *pText)
 {
+	if(!g_Config.m_TcPingwheel) // 功能开关归本模块，relay 是纯 transport
+		return;
 	int Signal, X, Y;
 	if(!DecodeBinary(pText, &Signal, &X, &Y) || Signal < 0 || Signal >= NUM_SIGNALS)
 		return;

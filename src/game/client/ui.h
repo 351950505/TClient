@@ -293,20 +293,6 @@ struct SPopupMenuId
 {
 };
 
-// 滑条数值输入弹窗：点数值标签后弹出，输入框里带允许范围提示。
-struct SScrollbarInputPopup : public SPopupMenuId
-{
-	const void *m_pOwnerId = nullptr;   // 触发它的滑条 id
-	int *m_pOption = nullptr;           // 直接写回目标
-	int m_Min = 0;
-	int m_Max = 0;
-	float m_Scale = 1.0f;               // 显示值 = 存储值 * Scale
-	CLineInputNumber m_Input;
-	CUi *m_pUi = nullptr;
-	int m_DisplayedValue = 0;           // 上次显示的值，用来判断是否需要刷新输入框
-	void (*m_pfnRender)(SScrollbarInputPopup *pThis, CUIRect View) = nullptr;
-};
-
 struct SPopupMenuProperties
 {
 	int m_Corners = IGraphics::CORNER_ALL;
@@ -432,9 +418,6 @@ private:
 	const void *m_pLastActiveScrollbar = nullptr;
 	int m_ScrollbarValue = 0;
 	float m_ActiveScrollbarOffset = 0.0f;
-	// 拖动起点：锚定式拖动避免灵敏度折算时累积漂移
-	float m_ActiveScrollbarStartValue = 0.0f;
-	float m_ActiveScrollbarStartMouse = 0.0f;
 	float m_ProgressSpinnerOffset = 0.0f;
 	class CValueSelectorState
 	{
@@ -729,10 +712,6 @@ public:
 	float DoScrollbarV(const void *pId, const CUIRect *pRect, float Current);
 	float DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, const ColorRGBA *pColorInner = nullptr);
 	bool DoScrollbarOption(const void *pId, int *pOption, const CUIRect *pRect, const char *pStr, int Min, int Max, const IScrollbarScale *pScale = &ms_LinearScrollbarScale, unsigned Flags = 0u, const char *pSuffix = "");
-
-	// 打开「输入数值」弹窗（滑条数值标签点击后调用）。
-	// pOption 指向要写回的整数；Scale 用于把显示值换算回存储值（1 = 不换算）。
-	void OpenScrollbarInputPopup(const void *pId, int *pOption, int Min, int Max, int Scale, float X = -1.0f, float Y = -1.0f);
 
 	// progress bar
 	void RenderProgressBar(CUIRect ProgressBar, float Progress);

@@ -1460,8 +1460,6 @@ float CUi::DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, co
 			if(MouseButton(0))
 			{
 				SetActiveItem(pId);
-				m_ActiveScrollbarStartValue = Current;
-				m_ActiveScrollbarStartMouse = MouseX() - Handle.x;
 				m_pLastActiveScrollbar = pId;
 				m_ActiveScrollbarOffset = MouseX() - Handle.x;
 				Grabbed = true;
@@ -1470,8 +1468,6 @@ float CUi::DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, co
 		else if(MouseButtonClicked(0))
 		{
 			SetActiveItem(pId);
-			m_ActiveScrollbarStartValue = Current;
-			m_ActiveScrollbarStartMouse = MouseX() - Handle.x;
 			m_pLastActiveScrollbar = pId;
 			m_ActiveScrollbarOffset = Handle.w / 2.0f;
 			Grabbed = true;
@@ -1492,12 +1488,10 @@ float CUi::DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, co
 	float ReturnValue = Current;
 	if(Grabbed)
 	{
-		const float Travel = Rail.w - Handle.w;
-		// 灵敏度：鼠标位移按 1/DragScale 折算成量程位移（DragScale>1 更细腻）。
-		// 锚定到拖动起点计算，避免逐帧累加造成漂移，滑块始终跟手。
-		const float DragScale = std::max(1.0f, g_Config.m_TcScrollbarDragScale / 100.0f);
+		const float Min = Rail.x;
+		const float Max = Rail.w - Handle.w;
 		const float Cur = MouseX() - m_ActiveScrollbarOffset;
-		ReturnValue = std::clamp(m_ActiveScrollbarStartValue + (Cur - m_ActiveScrollbarStartMouse) / std::max(1.0f, Travel) / DragScale, 0.0f, 1.0f);
+		ReturnValue = std::clamp((Cur - Min) / Max, 0.0f, 1.0f);
 	}
 
 	// render
@@ -1518,70 +1512,6 @@ float CUi::DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, co
 	}
 
 	return ReturnValue;
-}
-
-static SScrollbarInputPopup s_ScrollbarInputPopup;
-
-static int RenderScrollbarInputPopup(CUi *pUi, SScrollbarInputPopup *pThis, CUIRect View, bool Active)
-{
-	char aHint[64];
-	if(pThis->m_Scale == 1.0f)
-		str_format(aHint, sizeof(aHint), "Enter %d - %d", pThis->m_Min, pThis->m_Max);
-	else
-		str_format(aHint, sizeof(aHint), "Enter %.2f - %.2f", pThis->m_Min * pThis->m_Scale, pThis->m_Max * pThis->m_Scale);
-
-	CUIRect InputRow, HintRow;
-	View.HSplitTop(20.0f, &InputRow, &View);
-	View.HSplitTop(3.0f, nullptr, &View);
-	View.HSplitTop(12.0f, &HintRow, &View);
-
-	if(!pThis->m_Input.IsActive())
-	{
-		if(pThis->m_Scale == 1.0f)
-			pThis->m_Input.SetInteger(pThis->m_DisplayedValue);
-		else
-			pThis->m_Input.SetFloat((float)pThis->m_DisplayedValue * pThis->m_Scale);
-	}
-	pThis->m_Input.SetEmptyText(aHint);
-	if(Active)
-		pUi->DoEditBox(&pThis->m_Input, &InputRow, 13.0f);
-	else
-		pUi->DoLabel(&InputRow, pThis->m_Input.GetString()[0] ? pThis->m_Input.GetString() : aHint, 13.0f, TEXTALIGN_MC);
-
-	pUi->TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.5f);
-	pUi->DoLabel(&HintRow, aHint, 10.0f, TEXTALIGN_ML);
-	pUi->TextRender()->TextColor(pUi->TextRender()->DefaultTextColor());
-
-	// 失焦（含回车）时应用并关闭
-	if(Active && !pThis->m_Input.IsActive() && pThis->m_Input.GetString()[0] != '\0')
-	{
-		const float Raw = pThis->m_Scale == 1.0f ? (float)pThis->m_Input.GetInteger() : pThis->m_Input.GetFloat();
-		const int Clamped = std::clamp((int)std::lround(Raw / pThis->m_Scale), pThis->m_Min, pThis->m_Max);
-		if(pThis->m_pOption && *pThis->m_pOption != Clamped)
-			*pThis->m_pOption = Clamped;
-		return 1; // POPUP_CLOSE_CURRENT
-	}
-	return 0; // POPUP_KEEP_OPEN
-}
-
-void CUi::OpenScrollbarInputPopup(const void *pId, int *pOption, int Min, int Max, int Scale, float X, float Y)
-{
-	s_ScrollbarInputPopup.m_pOwnerId = pId;
-	s_ScrollbarInputPopup.m_pOption = pOption;
-	s_ScrollbarInputPopup.m_Min = Min;
-	s_ScrollbarInputPopup.m_Max = Max;
-	s_ScrollbarInputPopup.m_pUi = this;
-	s_ScrollbarInputPopup.m_Input.Deactivate();
-	// 弹窗内的输入框按 Scale 显示/换算，所以这里把范围换成显示值，写回时再除
-	s_ScrollbarInputPopup.m_DisplayedValue = pOption ? *pOption : Min;
-	s_ScrollbarInputPopup.m_Scale = (float)Scale;
-	const float PopX = X >= 0.0f ? X : MouseX();
-	const float PopY = Y >= 0.0f ? Y : MouseY();
-	DoPopupMenu(&s_ScrollbarInputPopup, PopX, PopY, 160.0f, 36.0f, &s_ScrollbarInputPopup,
-		+[](void *pContext, CUIRect View, bool Active) -> CUi::EPopupMenuFunctionResult {
-			SScrollbarInputPopup *pPopup = (SScrollbarInputPopup *)pContext;
-			return (CUi::EPopupMenuFunctionResult)RenderScrollbarInputPopup(pPopup->m_pUi, pPopup, View, Active);
-		});
 }
 
 bool CUi::DoScrollbarOption(const void *pId, int *pOption, const CUIRect *pRect, const char *pStr, int Min, int Max, const IScrollbarScale *pScale, unsigned Flags, const char *pSuffix)
@@ -1656,25 +1586,6 @@ bool CUi::DoScrollbarOption(const void *pId, int *pOption, const CUIRect *pRect,
 
 	const float FontSize = Label.h * CUi::ms_FontmodHeight * 0.8f;
 	DoLabel(&Label, aBuf, FontSize, TEXTALIGN_ML);
-
-	// 点标签上的数值 → 弹出输入框（不挤占滑条宽度，方便精确输入）
-	if(!MultiLine && !Infinite)
-	{
-		static CButtonContainer s_aLabelButtons[64];
-		static const void *s_apLabelIds[64] = {};
-		int Slot = -1;
-		for(int i = 0; i < 64; i++)
-		{
-			if(s_apLabelIds[i] == pId) { Slot = i; break; }
-			if(Slot == -1 && s_apLabelIds[i] == nullptr) Slot = i;
-		}
-		if(Slot >= 0)
-		{
-			s_apLabelIds[Slot] = pId;
-			if(DoButtonLogic(&s_aLabelButtons[Slot], 0, &Label, BUTTONFLAG_LEFT))
-				OpenScrollbarInputPopup(pId, pOption, Min, Max, 1, Label.x + 20.0f, Label.y + Label.h + 4.0f);
-		}
-	}
 
 	Value = pScale->ToAbsolute(DoScrollbarH(pId, &ScrollBar, pScale->ToRelative(Value, Min, Max)), Min, Max);
 	if(NoClampValue && ((Value == Min && PrevValue < Min) || (Value == Max && PrevValue > Max)))

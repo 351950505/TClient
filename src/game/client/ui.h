@@ -416,6 +416,8 @@ private:
 	CDoubleClickState m_DoubleClickState;
 	const void *m_pLastEditingItem = nullptr;
 	const void *m_pLastActiveScrollbar = nullptr;
+	// 滑条右侧数值输入框：每帧渲染时按顺序分配槽位，Update() 里归零。
+	int m_ScrollbarInputCursor = 0;
 	int m_ScrollbarValue = 0;
 	float m_ActiveScrollbarOffset = 0.0f;
 	float m_ProgressSpinnerOffset = 0.0f;

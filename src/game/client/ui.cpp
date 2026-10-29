@@ -184,6 +184,7 @@ void CUi::OnCursorMove(float X, float Y)
 
 void CUi::Update()
 {
+	m_ScrollbarInputCursor = 0;
 	const vec2 WindowSize = vec2(Graphics()->WindowWidth(), Graphics()->WindowHeight());
 	const CUIRect *pScreen = Screen();
 
@@ -1578,16 +1579,48 @@ bool CUi::DoScrollbarOption(const void *pId, int *pOption, const CUIRect *pRect,
 		Value = std::clamp(Value, Min, Max);
 	}
 
-	CUIRect Label, ScrollBar;
+	CUIRect Label, ScrollBar, InputBox;
 	if(MultiLine)
+	{
 		pRect->HSplitMid(&Label, &ScrollBar);
+	}
 	else
-		pRect->VSplitMid(&Label, &ScrollBar, std::min(10.0f, pRect->w * 0.05f));
+	{
+		// 右侧留一个可直接输入数值的输入框，中间是滑条
+		CUIRect SliderRect = *pRect;
+		SliderRect.VSplitRight(58.0f, &SliderRect, &InputBox);
+		InputBox.VSplitLeft(6.0f, nullptr, &InputBox);
+		SliderRect.VSplitMid(&Label, &ScrollBar, std::min(10.0f, SliderRect.w * 0.05f));
+	}
 
 	const float FontSize = Label.h * CUi::ms_FontmodHeight * 0.8f;
 	DoLabel(&Label, aBuf, FontSize, TEXTALIGN_ML);
 
 	Value = pScale->ToAbsolute(DoScrollbarH(pId, &ScrollBar, pScale->ToRelative(Value, Min, Max)), Min, Max);
+
+	// 输入框：显示当前值，回车或失焦时应用；空提示写明允许范围
+	if(!MultiLine && !Infinite)
+	{
+		// 滑条数量远多于静态槽位，按「每帧渲染顺序」轮转分配，而不是按 id 绑定：
+		// 同一帧内每个滑条拿到独立输入框，跨帧时同一个滑条通常仍落在同一个槽。
+		static CLineInputNumber s_aScrollbarInputs[24];
+		CLineInputNumber &Input = s_aScrollbarInputs[m_ScrollbarInputCursor];
+		m_ScrollbarInputCursor = (m_ScrollbarInputCursor + 1) % (int)std::size(s_aScrollbarInputs);
+
+		char aRange[32];
+		str_format(aRange, sizeof(aRange), "%d-%d", Min, Max);
+		Input.SetEmptyText(aRange);
+		if(!Input.IsActive())
+			Input.SetInteger(Value);
+		DoEditBox(&Input, &InputBox, FontSize);
+		// 失焦时应用输入值（回车也会让输入框失焦，这一条同时覆盖两种情况）
+		if(!Input.IsActive() && Input.GetString()[0] != '\0')
+		{
+			const int Typed = Input.GetInteger();
+			if(Typed != Value)
+				Value = std::clamp(Typed, Min, Max);
+		}
+	}
 	if(NoClampValue && ((Value == Min && PrevValue < Min) || (Value == Max && PrevValue > Max)))
 	{
 		Value = PrevValue; // use previous out of range value instead if the scrollbar is at the edge

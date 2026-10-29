@@ -1411,7 +1411,7 @@ float CUi::DoScrollbarV(const void *pId, const CUIRect *pRect, float Current)
 	return ReturnValue;
 }
 
-float CUi::DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, const ColorRGBA *pColorInner)
+float CUi::DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, const ColorRGBA *pColorInner, float Step)
 {
 	Current = std::clamp(Current, 0.0f, 1.0f);
 
@@ -1492,6 +1492,14 @@ float CUi::DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, co
 		const float Max = Rail.w - Handle.w;
 		const float Cur = MouseX() - m_ActiveScrollbarOffset;
 		ReturnValue = std::clamp((Cur - Min) / Max, 0.0f, 1.0f);
+		// Ctrl 拖动：量化到调用方给的最小步长，实现"整数 1 / 小数 0.1 / 分数 0.01"式细调。
+		// 步长是相对值（0~1 的占比），由 DoScrollbarOption 按量程换算后传进来。
+		if(Step > 0.0f && Input()->ModifierIsPressed())
+		{
+			const float Quantized = std::round(ReturnValue / Step) * Step;
+			// 量化后不能超过原始值，否则滑不到两端
+			ReturnValue = std::clamp(Quantized, 0.0f, 1.0f);
+		}
 	}
 
 	// render
@@ -1587,7 +1595,12 @@ bool CUi::DoScrollbarOption(const void *pId, int *pOption, const CUIRect *pRect,
 	const float FontSize = Label.h * CUi::ms_FontmodHeight * 0.8f;
 	DoLabel(&Label, aBuf, FontSize, TEXTALIGN_ML);
 
-	Value = pScale->ToAbsolute(DoScrollbarH(pId, &ScrollBar, pScale->ToRelative(Value, Min, Max)), Min, Max);
+	// Ctrl 细调的最小步长：按滑条量程换算成 0~1 的相对步长。
+	// 整数滑条（量程 >= 100）步长 1；小量程整数（如 1~40）也是 1；
+	// 调用方若声明了更细的步长（浮点滑条），由调用方自己传 Step。
+	const float CtrlStepAbs = 1.0f;
+	const float CtrlStepRel = (Max > Min) ? CtrlStepAbs / (float)(Max - Min) : 0.0f;
+	Value = pScale->ToAbsolute(DoScrollbarH(pId, &ScrollBar, pScale->ToRelative(Value, Min, Max), nullptr, CtrlStepRel), Min, Max);
 	if(NoClampValue && ((Value == Min && PrevValue < Min) || (Value == Max && PrevValue > Max)))
 	{
 		Value = PrevValue; // use previous out of range value instead if the scrollbar is at the edge

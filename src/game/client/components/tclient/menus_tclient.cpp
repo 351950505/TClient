@@ -165,7 +165,9 @@ bool CMenus::DoSliderWithScaledValue(const void *pId, int *pOption, const CUIRec
 	const float LabelFontSize = Label.h * CUi::ms_FontmodHeight * 0.8f;
 	Ui()->DoLabel(&Label, aBuf, LabelFontSize, TEXTALIGN_ML);
 
-	Value = pScale->ToAbsolute(Ui()->DoScrollbarH(pId, &ScrollBar, pScale->ToRelative(Value, Min, Max)), Min, Max);
+	// Ctrl 细调：整数滑条步长 1，对应相对步长 1/(Max-Min)
+	const float CtrlStepRel = (Max > Min) ? 1.0f / (float)(Max - Min) : 0.0f;
+	Value = pScale->ToAbsolute(Ui()->DoScrollbarH(pId, &ScrollBar, pScale->ToRelative(Value, Min, Max), nullptr, CtrlStepRel), Min, Max);
 	if(NoClampValue && ((Value == Min && *pOption < Min) || (Value == Max && *pOption > Max)))
 	{
 		Value = *pOption;
@@ -262,7 +264,9 @@ bool CMenus::DoSliderFloat(const void *pId, float *pOption, const CUIRect *pRect
 
 	const float Rel = (Max > Min) ? std::clamp((Value - Min) / (Max - Min), 0.0f, 1.0f) : 0.0f;
 	// 拖动滚动条也按 Step 对齐(四舍五入到步进),否则拖出 10.37 这类任意浮点值
-	float NewValue = Min + std::clamp(Ui()->DoScrollbarH(pId, &ScrollBar, Rel), 0.0f, 1.0f) * (Max - Min);
+	// Ctrl 细调：按 Step 量化（Step<=0 时用 0.01 的百分之一档）
+	const float CtrlStepRel = (Max > Min && Step > 0.0f) ? Step / (Max - Min) : 0.0f;
+	float NewValue = Min + std::clamp(Ui()->DoScrollbarH(pId, &ScrollBar, Rel, nullptr, CtrlStepRel), 0.0f, 1.0f) * (Max - Min);
 	if(Step > 0.0f)
 		NewValue = Min + std::round((NewValue - Min) / Step) * Step;
 	NewValue = std::clamp(NewValue, Min, Max);

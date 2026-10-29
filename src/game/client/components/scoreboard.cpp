@@ -175,6 +175,35 @@ bool CScoreboard::OnInput(const IInput::CEvent &Event)
 		return true;
 	}
 
+	// 音乐快捷键：计分板打开时（不管光标有没有解锁）都能用，
+	// 这样按 Tab 就能直接切歌/调音量，不必先去解锁光标。
+	if(IsActive() && g_Config.m_TcScoreboardMedia && (Event.m_Flags & IInput::FLAG_PRESS))
+	{
+		CIslandMusic &Music = GameClient()->m_IslandMusic;
+		switch(Event.m_Key)
+		{
+		case KEY_AUDIOPLAY:
+			Music.TogglePlayPause();
+			return true;
+		case KEY_AUDIONEXT:
+			Music.NextTrack();
+			return true;
+		case KEY_AUDIOPREV:
+			Music.PrevTrack();
+			return true;
+		case KEY_LEFTBRACKET:
+			m_MediaVolume = std::max(0, m_MediaVolume - 5);
+			Music.SetVolume(m_MediaVolume);
+			return true;
+		case KEY_RIGHTBRACKET:
+			m_MediaVolume = std::min(100, m_MediaVolume + 5);
+			Music.SetVolume(m_MediaVolume);
+			return true;
+		default:
+			break;
+		}
+	}
+
 	return IsActive() && m_MouseUnlocked;
 }
 
@@ -1178,8 +1207,9 @@ void CScoreboard::OnRender()
 		}
 	}
 
-	// 左侧音乐控制面板：只在计分板打开、且鼠标已解锁（能点）时显示
-	if(m_MouseUnlocked && g_Config.m_TcScoreboardMedia)
+	// 左侧音乐控制面板：Tab 打开计分板就显示（不需要先解锁光标）。
+	// 未解锁光标时按钮点不了，但曲目和状态仍可看，解锁后即可点。
+	if(g_Config.m_TcScoreboardMedia)
 	{
 		const float PanelW = 140.0f;
 		const float PanelH = 92.0f;

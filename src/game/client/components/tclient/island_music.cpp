@@ -44,6 +44,9 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+// 系统音量控制（mixer API）
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
 #endif
 
 #if defined(CONF_FAMILY_WINDOWS) && __has_include(<winrt/Windows.Media.Control.h>)
@@ -233,6 +236,101 @@ public:
 		}
 	}
 
+	void ProcessMediaCommands(WmSessionManager &Manager)
+	{
+		std::vector<EMediaCommand> vCommands;
+		int Volume = -1;
+		{
+			std::lock_guard<std::mutex> Lock(m_Mutex);
+			vCommands.swap(m_vPendingCommands);
+			Volume = m_PendingVolume;
+			m_PendingVolume = -1;
+		}
+		if(Volume >= 0)
+			SetSystemVolume(Volume);
+		if(vCommands.empty())
+			return;
+
+		WmSession Session = nullptr;
+		try
+		{
+			Session = Manager.GetCurrentSession();
+		}
+		catch(...)
+		{
+		}
+		if(!Session)
+			return;
+
+		for(const EMediaCommand Command : vCommands)
+		{
+			try
+			{
+				switch(Command)
+				{
+				case EMediaCommand::TOGGLE_PLAY:
+				{
+					const auto Status = Session.GetPlaybackInfo().PlaybackStatus();
+					if(Status == WmControl::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing)
+						Session.TryPauseAsync().get();
+					else
+						Session.TryPlayAsync().get();
+					break;
+				}
+				case EMediaCommand::NEXT:
+					Session.TrySkipNextAsync().get();
+					break;
+				case EMediaCommand::PREV:
+					Session.TrySkipPreviousAsync().get();
+					break;
+				}
+			}
+			catch(...)
+			{
+			}
+		}
+		// 立刻回写状态，按钮不用等下一次 200ms 轮询才翻转
+		StoreSnapshot(QuerySession(Session));
+	}
+
+	// 用旧版 mixer API 调默认播放设备的音量。SMTC 没有 per-session 音量，
+	// 所以这是系统级音量（和音量键效果一样）。
+	static void SetSystemVolume(int Percent)
+	{
+		Percent = std::clamp(Percent, 0, 100);
+		HMIXER hMixer = nullptr;
+		if(mixerOpen(&hMixer, 0, 0, 0, MIXER_OBJECTF_MIXER) != MMSYSERR_NOERROR)
+			return;
+		MIXERLINE MixerLine{};
+		MixerLine.cbStruct = sizeof(MixerLine);
+		MixerLine.dwComponentType = MIXERLINE_COMPONENTTYPE_DST_SPEAKERS;
+		if(mixerGetLineInfo((HMIXEROBJ)hMixer, &MixerLine, MIXER_GETLINEINFOF_COMPONENTTYPE) == MMSYSERR_NOERROR)
+		{
+			MIXERCONTROL MixerControl{};
+			MIXERLINECONTROLS MixerControls{};
+			MixerControls.cbStruct = sizeof(MixerControls);
+			MixerControls.dwLineID = MixerLine.dwLineID;
+			MixerControls.dwControlType = MIXERCONTROL_CONTROLTYPE_VOLUME;
+			MixerControls.cControls = 1;
+			MixerControls.cbmxctrl = sizeof(MixerControl);
+			MixerControls.pamxctrl = &MixerControl;
+			if(mixerGetLineControls((HMIXEROBJ)hMixer, &MixerControls, MIXER_GETLINECONTROLSF_ONEBYTYPE) == MMSYSERR_NOERROR)
+			{
+				MIXERCONTROLDETAILS Details{};
+				MIXERCONTROLDETAILS_UNSIGNED DetailValue{};
+				Details.cbStruct = sizeof(Details);
+				Details.dwControlID = MixerControl.dwControlID;
+				Details.cChannels = 1;
+				Details.cMultipleItems = 0;
+				Details.cbDetails = sizeof(DetailValue);
+				Details.paDetails = &DetailValue;
+				DetailValue.dwValue = (DWORD)((double)Percent / 100.0 * MixerControl.Bounds.dwMaximum + 0.5);
+				mixerSetControlDetails((HMIXEROBJ)hMixer, &Details, MIXER_SETCONTROLDETAILSF_VALUE);
+			}
+		}
+		mixerClose(hMixer);
+	}
+
 	void PollSessions(WmSessionManager &Manager, std::string &CurrentSessionId)
 	{
 		std::string SystemSessionId;
@@ -362,7 +460,10 @@ public:
 				}
 			}
 			if(Manager)
+			{
+				ProcessMediaCommands(Manager);
 				PollSessions(Manager, CurrentSessionId);
+			}
 		}
 
 		try
@@ -403,9 +504,20 @@ public:
 	int64_t m_CarryDeadline = 0;
 #endif
 
-	std::mutex m_Mutex;
+	mutable std::mutex m_Mutex;
 	std::condition_variable m_Cv;
 	STrack m_Latest;
+
+	// ---- 媒体控制命令（主线程 -> SMTC worker）----
+	// WinRT 只能在初始化了 apartment 的 worker 线程上调用，所以按钮点击只入队。
+	enum class EMediaCommand
+	{
+		TOGGLE_PLAY,
+		NEXT,
+		PREV,
+	};
+	std::vector<EMediaCommand> m_vPendingCommands;
+	int m_PendingVolume = -1;
 
 	// Album cover art. The SMTC worker downloads the current track's thumbnail
 	// PNG bytes into m_CoverPng (guarded by m_Mutex) whenever the "cover key"
@@ -645,6 +757,27 @@ public:
 		{
 			DrawPill(X, Y, W, H, Corners, Body);
 		}
+	}
+
+	bool IsPlayingCached() const
+	{
+		std::lock_guard<std::mutex> Lock(m_Mutex);
+		return m_Latest.m_Valid && m_Latest.m_Playing;
+	}
+
+	void GetTrackCached(char *pTitle, int TitleSize, char *pArtist, int ArtistSize) const
+	{
+		std::lock_guard<std::mutex> Lock(m_Mutex);
+		if(!m_Latest.m_Valid)
+			return;
+		str_copy(pTitle, m_Latest.m_Title.c_str(), TitleSize);
+		str_copy(pArtist, m_Latest.m_Artist.c_str(), ArtistSize);
+	}
+
+	bool HasSessionCached() const
+	{
+		std::lock_guard<std::mutex> Lock(m_Mutex);
+		return m_Latest.m_Valid;
 	}
 
 	STrack TakeSnapshot()
@@ -3020,6 +3153,63 @@ public:
 			m_pTextRender->TextOutlineColor(m_pTextRender->DefaultTextOutlineColor());
 	}
 };
+
+void CIslandMusic::TogglePlayPause()
+{
+	EnsureImpl();
+#if TCLIENT_HAS_WINRT_MUSIC
+	std::lock_guard<std::mutex> Lock(m_pImpl->m_Mutex);
+	m_pImpl->m_vPendingCommands.push_back(CImpl::EMediaCommand::TOGGLE_PLAY);
+#endif
+}
+
+void CIslandMusic::NextTrack()
+{
+	EnsureImpl();
+#if TCLIENT_HAS_WINRT_MUSIC
+	std::lock_guard<std::mutex> Lock(m_pImpl->m_Mutex);
+	m_pImpl->m_vPendingCommands.push_back(CImpl::EMediaCommand::NEXT);
+#endif
+}
+
+void CIslandMusic::PrevTrack()
+{
+	EnsureImpl();
+#if TCLIENT_HAS_WINRT_MUSIC
+	std::lock_guard<std::mutex> Lock(m_pImpl->m_Mutex);
+	m_pImpl->m_vPendingCommands.push_back(CImpl::EMediaCommand::PREV);
+#endif
+}
+
+void CIslandMusic::SetVolume(int Percent)
+{
+	EnsureImpl();
+#if TCLIENT_HAS_WINRT_MUSIC
+	std::lock_guard<std::mutex> Lock(m_pImpl->m_Mutex);
+	m_pImpl->m_PendingVolume = std::clamp(Percent, 0, 100);
+#endif
+}
+
+bool CIslandMusic::IsPlaying() const
+{
+	return m_pImpl && m_pImpl->IsPlayingCached();
+}
+
+void CIslandMusic::GetTrack(char *pTitle, int TitleSize, char *pArtist, int ArtistSize) const
+{
+	if(pTitle && TitleSize > 0)
+		pTitle[0] = '\0';
+	if(pArtist && ArtistSize > 0)
+		pArtist[0] = '\0';
+	if(!m_pImpl)
+		return;
+	m_pImpl->GetTrackCached(pTitle, TitleSize, pArtist, ArtistSize);
+}
+
+bool CIslandMusic::HasSession() const
+{
+	return m_pImpl && m_pImpl->HasSessionCached();
+}
 
 void CIslandMusic::EnsureImpl()
 {

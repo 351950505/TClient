@@ -45,6 +45,16 @@ class CScoreboard : public CComponent
 	void SetUiMousePos(vec2 Pos);
 	void LockMouse();
 
+	// 计分板左侧的音乐控制面板（播放/暂停/上一首/下一首/音量）。
+	// 只在计分板打开且鼠标解锁时可点。
+	void RenderMediaPanel(CUIRect Panel);
+	CButtonContainer m_MediaPrevButton;
+	CButtonContainer m_MediaPlayButton;
+	CButtonContainer m_MediaNextButton;
+	CButtonContainer m_MediaVolumeDownButton;
+	CButtonContainer m_MediaVolumeUpButton;
+	int m_MediaVolume = 50;
+
 	class CScoreboardPopupContext : public SPopupMenuId
 	{
 	public:

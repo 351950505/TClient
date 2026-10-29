@@ -919,6 +919,94 @@ void CScoreboard::RenderRecordingNotification(float x)
 	Ui()->DoLabel(&Rect, aBuf, FontSize, TEXTALIGN_ML);
 }
 
+void CScoreboard::RenderMediaPanel(CUIRect Panel)
+{
+	CIslandMusic &Music = GameClient()->m_IslandMusic;
+	if(!Music.HasSession())
+		return;
+
+	char aTitle[128], aArtist[128];
+	Music.GetTrack(aTitle, sizeof(aTitle), aArtist, sizeof(aArtist));
+	const bool Playing = Music.IsPlaying();
+
+	Panel.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.5f), IGraphics::CORNER_ALL, 7.5f);
+
+	CUIRect Inner, Row, Label, Btn;
+	Panel.Margin(6.0f, &Inner);
+
+	// 曲目信息（最多两行，过长截断）
+	const float FontSize = 11.0f;
+	Inner.HSplitTop(FontSize + 2.0f, &Label, &Inner);
+	if(aTitle[0] != '\0')
+	{
+		char aFit[128];
+		str_copy(aFit, aTitle);
+		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.95f);
+		TextRender()->Text(Label.x, Label.y, FontSize, aFit, Label.w);
+		TextRender()->TextColor(TextRender()->DefaultTextColor());
+	}
+	else
+	{
+		Ui()->DoLabel(&Label, Localize("No music"), FontSize, TEXTALIGN_ML);
+	}
+	Inner.HSplitTop(2.0f, nullptr, &Inner);
+	Inner.HSplitTop(FontSize, &Label, &Inner);
+	if(aArtist[0] != '\0')
+	{
+		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.6f);
+		TextRender()->Text(Label.x, Label.y, FontSize - 1.0f, aArtist, Label.w);
+		TextRender()->TextColor(TextRender()->DefaultTextColor());
+	}
+
+	Inner.HSplitTop(6.0f, nullptr, &Inner);
+
+	// 传输控制按钮：上一首 / 播放暂停 / 下一首
+	const float BtnSize = 22.0f;
+	const float Gap = 4.0f;
+	Inner.HSplitTop(BtnSize, &Row, &Inner);
+	const float TotalW = BtnSize * 3.0f + Gap * 2.0f;
+	Row.VSplitLeft((Row.w - TotalW) / 2.0f, nullptr, &Row);
+	Row.w = TotalW;
+
+	Row.VSplitLeft(BtnSize, &Btn, &Row);
+	if(Ui()->DoButton_FontIcon(&m_MediaPrevButton, FontIcon::BACKWARD_STEP, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, false))
+		Music.PrevTrack();
+	Row.VSplitLeft(Gap, nullptr, &Row);
+
+	Row.VSplitLeft(BtnSize, &Btn, &Row);
+	if(Ui()->DoButton_FontIcon(&m_MediaPlayButton, Playing ? FontIcon::PAUSE : FontIcon::PLAY, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, false))
+		Music.TogglePlayPause();
+	Row.VSplitLeft(Gap, nullptr, &Row);
+
+	Row.VSplitLeft(BtnSize, &Btn, &Row);
+	if(Ui()->DoButton_FontIcon(&m_MediaNextButton, FontIcon::FORWARD_STEP, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, false))
+		Music.NextTrack();
+
+	Inner.HSplitTop(6.0f, nullptr, &Inner);
+
+	// 音量：减 / 数值 / 加
+	Inner.HSplitTop(BtnSize, &Row, &Inner);
+	Row.VSplitLeft(BtnSize, &Btn, &Row);
+	if(Ui()->DoButton_FontIcon(&m_MediaVolumeDownButton, FontIcon::BACKWARD, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, false))
+	{
+		m_MediaVolume = std::max(0, m_MediaVolume - 5);
+		Music.SetVolume(m_MediaVolume);
+	}
+	Row.VSplitLeft(Gap, nullptr, &Row);
+	Row.VSplitRight(BtnSize, &Row, &Btn);
+	if(Ui()->DoButton_FontIcon(&m_MediaVolumeUpButton, FontIcon::FORWARD, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, false))
+	{
+		m_MediaVolume = std::min(100, m_MediaVolume + 5);
+		Music.SetVolume(m_MediaVolume);
+	}
+	Row.VSplitRight(Gap, nullptr, &Row);
+	{
+		char aVol[16];
+		str_format(aVol, sizeof(aVol), "%d%%", m_MediaVolume);
+		Ui()->DoLabel(&Row, aVol, FontSize, TEXTALIGN_MC);
+	}
+}
+
 void CScoreboard::OnRender()
 {
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
@@ -1088,6 +1176,19 @@ void CScoreboard::OnRender()
 				RenderScoreboard(Column, TEAM_GAME, i * PlayersPerColumn, (i + 1) * PlayersPerColumn, RenderState);
 			}
 		}
+	}
+
+	// 左侧音乐控制面板：只在计分板打开、且鼠标已解锁（能点）时显示
+	if(m_MouseUnlocked && g_Config.m_TcScoreboardMedia)
+	{
+		const float PanelW = 140.0f;
+		const float PanelH = 92.0f;
+		CUIRect MediaPanel;
+		MediaPanel.x = std::max(10.0f, Scoreboard.x - PanelW - 10.0f);
+		MediaPanel.y = Scoreboard.y;
+		MediaPanel.w = PanelW;
+		MediaPanel.h = PanelH;
+		RenderMediaPanel(MediaPanel);
 	}
 
 	CUIRect Spectators = {(Screen.w - ScoreboardSmallWidth) / 2.0f, Scoreboard.y + Scoreboard.h + 5.0f, ScoreboardSmallWidth, 100.0f};

@@ -959,73 +959,46 @@ void CScoreboard::RenderMediaPanel(CUIRect Panel)
 	const bool Playing = Music.IsPlaying();
 	const bool Clickable = m_MouseUnlocked;
 
-	const float FontSize = 10.5f;
+	const float FontSize = 10.0f;
 	const float BtnSize = 20.0f;
 	const float Gap = 3.0f;
 	const float Pad = 7.0f;
 
-	// 背板 + 顶部细高光，和计分板其余面板保持同一种观感
 	Panel.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.55f), IGraphics::CORNER_ALL, 6.0f);
 
 	CUIRect Inner = Panel;
 	Inner.Margin(Pad, &Inner);
+	CUIRect Row, Btn;
 
-	CUIRect Row, Cell, Btn;
-
-	// ---- 第 1 行：音乐图标 + 标题（单行，过长截断）----
-	Inner.HSplitTop(FontSize + 4.0f, &Row, &Inner);
-	Row.VSplitLeft(13.0f, &Cell, &Row);
-	{
-		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.55f);
-		Ui()->DoLabel(&Cell, FontIcon::MUSIC, FontSize, TEXTALIGN_ML);
-		TextRender()->TextColor(TextRender()->DefaultTextColor());
-	}
+	// 曲名（单行，过长截断）
+	Inner.HSplitTop(FontSize + 3.0f, &Row, &Inner);
 	if(aTitle[0] != '\0')
 	{
-		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.95f);
+		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
 		TextRender()->Text(Row.x, Row.y, FontSize, aTitle, Row.w);
 		TextRender()->TextColor(TextRender()->DefaultTextColor());
 	}
 	else
 		Ui()->DoLabel(&Row, Localize("No music"), FontSize, TEXTALIGN_ML);
 
-	// ---- 第 2 行：歌手（弱化），左侧留出与标题同宽的对齐缩进 ----
-	Inner.HSplitTop(2.0f, nullptr, &Inner);
-	Inner.HSplitTop(FontSize, &Row, &Inner);
-	Row.VSplitLeft(13.0f, nullptr, &Row);
-	if(aArtist[0] != '\0')
-	{
-		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.5f);
-		TextRender()->Text(Row.x, Row.y, FontSize - 1.0f, aArtist, Row.w);
-		TextRender()->TextColor(TextRender()->DefaultTextColor());
-	}
-
-	// ---- 分隔线 ----
-	Inner.HSplitTop(5.0f, nullptr, &Inner);
-	Inner.HSplitTop(1.0f, &Row, &Inner);
-	Row.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.08f), IGraphics::CORNER_NONE, 0.0f);
-	Inner.HSplitTop(5.0f, nullptr, &Inner);
-
-	// ---- 第 3 行：传输控制，三个按钮等宽铺满 ----
+	// 五个按钮一行，从左往右紧贴排列
+	Inner.HSplitTop(4.0f, nullptr, &Inner);
 	Inner.HSplitTop(BtnSize, &Row, &Inner);
-	const float CellW = (Row.w - Gap * 2.0f) / 3.0f;
-	Row.VSplitLeft(CellW, &Btn, &Row);
+
+	Row.VSplitLeft(BtnSize, &Btn, &Row);
 	if(Ui()->DoButton_FontIcon(&m_MediaPrevButton, FontIcon::BACKWARD_STEP, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, Clickable))
 		Music.PrevTrack();
 	Row.VSplitLeft(Gap, nullptr, &Row);
 
-	Row.VSplitLeft(CellW, &Btn, &Row);
+	Row.VSplitLeft(BtnSize, &Btn, &Row);
 	if(Ui()->DoButton_FontIcon(&m_MediaPlayButton, Playing ? FontIcon::PAUSE : FontIcon::PLAY, 1, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, Clickable))
 		Music.TogglePlayPause();
 	Row.VSplitLeft(Gap, nullptr, &Row);
 
-	Row.VSplitLeft(CellW, &Btn, &Row);
+	Row.VSplitLeft(BtnSize, &Btn, &Row);
 	if(Ui()->DoButton_FontIcon(&m_MediaNextButton, FontIcon::FORWARD_STEP, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, Clickable))
 		Music.NextTrack();
-
-	// ---- 第 4 行：音量，减 / 进度条 / 加 ----
-	Inner.HSplitTop(5.0f, nullptr, &Inner);
-	Inner.HSplitTop(BtnSize, &Row, &Inner);
+	Row.VSplitLeft(Gap, nullptr, &Row);
 
 	Row.VSplitLeft(BtnSize, &Btn, &Row);
 	if(Ui()->DoButton_FontIcon(&m_MediaVolumeDownButton, FontIcon::MINUS, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, Clickable))
@@ -1035,28 +1008,21 @@ void CScoreboard::RenderMediaPanel(CUIRect Panel)
 	}
 	Row.VSplitLeft(Gap, nullptr, &Row);
 
-	Row.VSplitRight(BtnSize, &Row, &Btn);
+	Row.VSplitLeft(BtnSize, &Btn, &Row);
 	if(Ui()->DoButton_FontIcon(&m_MediaVolumeUpButton, FontIcon::PLUS, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, Clickable))
 	{
 		m_MediaVolume = std::min(100, m_MediaVolume + 5);
 		Music.SetVolume(m_MediaVolume);
 	}
-	Row.VSplitRight(Gap, nullptr, &Row);
 
-	// 中间：音量条 + 百分比叠在上面
+	// 音量百分比紧跟在按钮右边
+	Row.VSplitLeft(Gap + 2.0f, nullptr, &Row);
+	if(Row.w > 10.0f)
 	{
-		CUIRect Bar = Row;
-		Bar.HMargin(Bar.h * 0.32f, &Bar);
-		Bar.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.12f), IGraphics::CORNER_ALL, Bar.h * 0.5f);
-		CUIRect Fill = Bar;
-		Fill.w = Bar.w * (float)m_MediaVolume / 100.0f;
-		if(Fill.w > 0.5f)
-			Fill.Draw(ColorRGBA(0.12f, 0.84f, 0.38f, 0.85f), IGraphics::CORNER_ALL, Bar.h * 0.5f);
-
 		char aVol[16];
 		str_format(aVol, sizeof(aVol), "%d%%", m_MediaVolume);
-		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.75f);
-		Ui()->DoLabel(&Row, aVol, FontSize - 1.5f, TEXTALIGN_MC);
+		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.55f);
+		Ui()->DoLabel(&Row, aVol, FontSize, TEXTALIGN_ML);
 		TextRender()->TextColor(TextRender()->DefaultTextColor());
 	}
 }
@@ -1236,9 +1202,9 @@ void CScoreboard::OnRender()
 	// 未解锁光标时按钮点不了，但曲目和状态仍可看，解锁后即可点。
 	if(g_Config.m_TcScoreboardMedia)
 	{
-		// 高 84 = 内边距7 + 标题14.5 + 2 + 歌手10.5 + 5 + 分隔线1 + 5 + 按钮20 + 5 + 音量20 + 内边距7
-		const float PanelW = 148.0f;
-		const float PanelH = 84.0f;
+		// 高 51 = 内边距7 + 曲名13 + 4 + 按钮20 + 内边距7
+		const float PanelW = 152.0f;
+		const float PanelH = 51.0f;
 		CUIRect MediaPanel;
 		MediaPanel.x = std::max(10.0f, Scoreboard.x - PanelW - 10.0f);
 		MediaPanel.y = Scoreboard.y;

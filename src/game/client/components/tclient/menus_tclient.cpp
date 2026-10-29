@@ -159,35 +159,13 @@ bool CMenus::DoSliderWithScaledValue(const void *pId, int *pOption, const CUIRec
 		Value = std::clamp(Value, Min, Max);
 	}
 
-	CUIRect Label, ScrollBar, InputBox, SliderRect = *pRect;
-	SliderRect.VSplitRight(58.0f, &SliderRect, &InputBox);
-	InputBox.VSplitLeft(6.0f, nullptr, &InputBox);
-	SliderRect.VSplitMid(&Label, &ScrollBar, std::min(10.0f, SliderRect.w * 0.05f));
+	CUIRect Label, ScrollBar;
+	pRect->VSplitMid(&Label, &ScrollBar, std::min(10.0f, pRect->w * 0.05f));
 
 	const float LabelFontSize = Label.h * CUi::ms_FontmodHeight * 0.8f;
 	Ui()->DoLabel(&Label, aBuf, LabelFontSize, TEXTALIGN_ML);
 
 	Value = pScale->ToAbsolute(Ui()->DoScrollbarH(pId, &ScrollBar, pScale->ToRelative(Value, Min, Max)), Min, Max);
-
-	// 右侧输入框：显示当前值（已乘 Scale），提示写明允许范围
-	{
-		static CLineInputNumber s_aScaledInputs[16];
-		static int s_ScaledCursor = 0;
-		CLineInputNumber &Input = s_aScaledInputs[s_ScaledCursor];
-		s_ScaledCursor = (s_ScaledCursor + 1) % (int)std::size(s_aScaledInputs);
-		char aRange[48];
-		str_format(aRange, sizeof(aRange), "%d-%d", Min * Scale, Max * Scale);
-		Input.SetEmptyText(aRange);
-		if(!Input.IsActive())
-			Input.SetInteger(Value * Scale);
-		Ui()->DoEditBox(&Input, &InputBox, LabelFontSize);
-		if(!Input.IsActive() && Input.GetString()[0] != '\0')
-		{
-			const int Typed = std::clamp(Input.GetInteger(), Min * Scale, Max * Scale);
-			if(Typed != Value * Scale)
-				Value = Typed / Scale;
-		}
-	}
 	if(NoClampValue && ((Value == Min && *pOption < Min) || (Value == Max && *pOption > Max)))
 	{
 		Value = *pOption;
@@ -277,35 +255,10 @@ bool CMenus::DoSliderFloat(const void *pId, float *pOption, const CUIRect *pRect
 	const bool OneDecimal = Step >= 0.1f - 1e-4f && std::fabs(Value * 10.0f - std::round(Value * 10.0f)) < 1e-3f;
 	str_format(aBuf, sizeof(aBuf), OneDecimal ? "%s: %.1f%s" : "%s: %.2f%s", pStr, Value, pSuffix ? pSuffix : "");
 
-	CUIRect Label, ScrollBar, InputBox, SliderRect = *pRect;
-	SliderRect.VSplitRight(58.0f, &SliderRect, &InputBox);
-	InputBox.VSplitLeft(6.0f, nullptr, &InputBox);
-	SliderRect.VSplitMid(&Label, &ScrollBar, std::min(10.0f, SliderRect.w * 0.05f));
+	CUIRect Label, ScrollBar;
+	pRect->VSplitMid(&Label, &ScrollBar, std::min(10.0f, pRect->w * 0.05f));
 	const float LabelFontSize = Label.h * CUi::ms_FontmodHeight * 0.8f;
 	Ui()->DoLabel(&Label, aBuf, LabelFontSize, TEXTALIGN_ML);
-
-	// 右侧输入框：显示当前值，提示写明允许范围
-	{
-		static CLineInputNumber s_aFloatInputs[16];
-		static int s_FloatCursor = 0;
-		CLineInputNumber &Input = s_aFloatInputs[s_FloatCursor];
-		s_FloatCursor = (s_FloatCursor + 1) % (int)std::size(s_aFloatInputs);
-		char aRange[48];
-		str_format(aRange, sizeof(aRange), "%.2f-%.2f", Min, Max);
-		Input.SetEmptyText(aRange);
-		if(!Input.IsActive())
-			Input.SetFloat(Value);
-		Ui()->DoEditBox(&Input, &InputBox, LabelFontSize);
-		if(!Input.IsActive() && Input.GetString()[0] != '\0')
-		{
-			float NewInput = std::clamp(Input.GetFloat(), Min, Max);
-			if(Step > 0.0f)
-				NewInput = Min + std::round((NewInput - Min) / Step) * Step;
-			NewInput = std::clamp(NewInput, Min, Max);
-			if(std::fabs(NewInput - Value) > 1e-4f)
-				Value = NewInput;
-		}
-	}
 
 	const float Rel = (Max > Min) ? std::clamp((Value - Min) / (Max - Min), 0.0f, 1.0f) : 0.0f;
 	// 拖动滚动条也按 Step 对齐(四舍五入到步进),否则拖出 10.37 这类任意浮点值

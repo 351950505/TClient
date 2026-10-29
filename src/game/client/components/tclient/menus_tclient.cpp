@@ -165,6 +165,24 @@ bool CMenus::DoSliderWithScaledValue(const void *pId, int *pOption, const CUIRec
 	const float LabelFontSize = Label.h * CUi::ms_FontmodHeight * 0.8f;
 	Ui()->DoLabel(&Label, aBuf, LabelFontSize, TEXTALIGN_ML);
 
+	// 点数值标签 → 弹出输入框（不挤占滑条宽度）
+	static CButtonContainer s_aScaledLabelButtons[16];
+	static const void *s_apScaledLabelIds[16] = {};
+	{
+		int Slot = -1;
+		for(int i = 0; i < 16; i++)
+		{
+			if(s_apScaledLabelIds[i] == pId) { Slot = i; break; }
+			if(Slot == -1 && s_apScaledLabelIds[i] == nullptr) Slot = i;
+		}
+		if(Slot >= 0)
+		{
+			s_apScaledLabelIds[Slot] = pId;
+			if(Ui()->DoButtonLogic(&s_aScaledLabelButtons[Slot], 0, &Label, BUTTONFLAG_LEFT))
+				Ui()->OpenScrollbarInputPopup(pId, pOption, Min * Scale, Max * Scale, 1);
+		}
+	}
+
 	Value = pScale->ToAbsolute(Ui()->DoScrollbarH(pId, &ScrollBar, pScale->ToRelative(Value, Min, Max)), Min, Max);
 	if(NoClampValue && ((Value == Min && *pOption < Min) || (Value == Max && *pOption > Max)))
 	{

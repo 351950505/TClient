@@ -2883,6 +2883,8 @@ if(CLIENT)
     components/tclient/data_version.h
     components/tclient/island_music.cpp
     components/tclient/island_music.h
+    components/tclient/relay_client.cpp
+    components/tclient/relay_client.h
     components/tclient/menus_tclient.cpp
     components/tclient/mod.cpp
     components/tclient/mod.h

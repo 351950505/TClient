@@ -1154,7 +1154,44 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	{
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandNotch, TCLocalize("Notch style (attach to top edge)"), &g_Config.m_TcIslandNotch, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowLyrics, TCLocalize("Show synced lyrics"), &g_Config.m_TcIslandShowLyrics, &Column, LineSize);
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowProgress, TCLocalize("Show progress bar and clock"), &g_Config.m_TcIslandShowProgress, &Column, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowProgress, TCLocalize("Show game clock"), &g_Config.m_TcIslandShowProgress, &Column, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowSongProgress, TCLocalize("Show song progress bar"), &g_Config.m_TcIslandShowSongProgress, &Column, LineSize);
+
+		// 灵动岛字体：独立于全局自定义字体；选"跟随全局"时 tc_island_font 留空
+		{
+			static std::vector<const char *> s_IslandFontNames;
+			s_IslandFontNames.clear();
+			s_IslandFontNames.push_back(TCLocalize("Follow custom font"));
+			for(const std::string &Face : *TextRender()->GetCustomFaces())
+				s_IslandFontNames.push_back(Face.c_str());
+			static CUi::SDropDownState s_IslandFontDropDownState;
+			static CScrollRegion s_IslandFontDropDownScrollRegion;
+			s_IslandFontDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_IslandFontDropDownScrollRegion;
+			s_IslandFontDropDownState.m_SelectionPopupContext.m_SpecialFontRenderMode = true;
+			int IslandFontOld = -1;
+			if(g_Config.m_TcIslandFont[0] == '\0')
+				IslandFontOld = 0;
+			else
+			{
+				for(size_t i = 0; i < TextRender()->GetCustomFaces()->size(); ++i)
+				{
+					if(str_find_nocase(g_Config.m_TcIslandFont, TextRender()->GetCustomFaces()->at(i).c_str()))
+						IslandFontOld = (int)i + 1;
+				}
+			}
+			CUIRect IslandFontRect;
+			Column.HSplitTop(LineSize, &IslandFontRect, &Column);
+			IslandFontRect.VSplitLeft(100.0f, &Label, &IslandFontRect);
+			Ui()->DoLabel(&Label, TCLocalize("Island Font: "), FontSize, TEXTALIGN_ML);
+			const int IslandFontNew = Ui()->DoDropDown(&IslandFontRect, IslandFontOld, s_IslandFontNames.data(), s_IslandFontNames.size(), s_IslandFontDropDownState);
+			if(IslandFontOld != IslandFontNew)
+			{
+				if(IslandFontNew <= 0)
+					g_Config.m_TcIslandFont[0] = '\0';
+				else
+					str_copy(g_Config.m_TcIslandFont, s_IslandFontNames[IslandFontNew]);
+			}
+		}
 		Column.HSplitTop(LineSize, &Button, &Column);
 		Ui()->DoScrollbarOption(&g_Config.m_TcIslandSize, &g_Config.m_TcIslandSize, &Button, TCLocalize("Size"), 60, 200, &CUi::ms_LinearScrollbarScale, 0, "%");
 		Column.HSplitTop(LineSize, &Button, &Column);
@@ -2277,6 +2314,9 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelVolume, &g_Config.m_TcPingwheelVolume, &Button, TCLocalize("Signal sound volume"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 	View.HSplitTop(LineSize, &Button, &View);
 	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelSoundRange, &g_Config.m_TcPingwheelSoundRange, &Button, TCLocalize("Sound audible range (0 = whole map)"), 0, 5000, &CUi::ms_LinearScrollbarScale, 0, "");
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPingwheelEmote, TCLocalize("Send signals via emoticons (server needs low emoticon delay)"), &g_Config.m_TcPingwheelEmote, &View, LineSize);
+	View.HSplitTop(LineSize, &Button, &View);
+	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelEmoteMs, &g_Config.m_TcPingwheelEmoteMs, &Button, TCLocalize("Emoticon interval (>= server emoticon delay)"), 20, 3000, &CUi::ms_LinearScrollbarScale, 0, "ms");
 	View.HSplitTop(MarginSmall * 4, nullptr, &View);
 
 	// 只调顺序：8 行 = 预览 + 名称 + 序号 + 上/下

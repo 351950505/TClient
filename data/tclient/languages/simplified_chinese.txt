@@ -948,8 +948,17 @@ Notch style (attach to top edge)
 Show synced lyrics
 == 显示同步歌词
 
-Show progress bar and clock
-== 显示进度条与时间
+Show game clock
+== 显示对局时间
+
+Show song progress bar
+== 显示歌曲进度条
+
+Island Font: 
+== 灵动岛字体: 
+
+Follow custom font
+== 跟随全局字体
 
 Size
 == 大小
@@ -1167,6 +1176,12 @@ Quick zoom
 
 Sound audible range (0 = whole map)
 == 音效可听距离（0 = 全图可听）
+
+Send signals via emoticons (server needs low emoticon delay)
+== 用表情发送信号（间隔需不低于服务器表情冷却）
+
+Emoticon interval (>= server emoticon delay)
+== 表情发送间隔（毫秒，不低于服务器表情冷却）
 
 Translate recent chat
 == 一键翻译最近聊天

@@ -26,7 +26,6 @@ MACRO_CONFIG_INT(ClDupSpreadMs, cl_dup_spread_ms, 4, 1, 15, CFGFLAG_CLIENT | CFG
 // [PING-WHEEL] LoL 式地图信号：按住键出轮盘，选信号在准星世界坐标插地图标记；走聊天通道（⟨P:...⟩ 前缀）同步给同服 TClient 玩家，服务端零改动
 MACRO_CONFIG_INT(TcPingwheel, tc_pingwheel, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "地图信号轮盘（LoL式ping；0=关闭，同时不再解析他人信号）")
 MACRO_CONFIG_FLOAT(TcQuickZoom, tc_quick_zoom_level, 15.0f, 0.0f, 20.0f, CFGFLAG_CLIENT | CFGFLAG_SAVE, "一键缩放的目标缩放（与默认缩放同刻度，10=原始）")
-MACRO_CONFIG_INT(TcPingwheelTeam, tc_pingwheel_team, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "信号发送通道：0=全体聊天，1=队伍聊天（默认）")
 
 // [SPEC-CURSOR] 观战指针常驻：自由视角显示鼠标指针（5 秒不动淡出、移动即恢复），被观战者暂停时指针也不隐藏
 MACRO_CONFIG_INT(TcSpecCursorAlways, tc_spec_cursor_always, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "观战指针常驻（1=自由视角常驻显示鼠标指针+被观战者暂停不隐藏；0=DDNet 原版行为）")
@@ -364,7 +363,9 @@ MACRO_CONFIG_INT(TcShowhudDummyAngle, tc_showhud_dummy_angle, 0, 0, 1, CFGFLAG_C
 MACRO_CONFIG_INT(TcIslandEnable, tc_island_enable, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island music HUD")
 MACRO_CONFIG_INT(TcIslandNotch, tc_island_notch, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island notch style (attach to top edge)")
 MACRO_CONFIG_INT(TcIslandShowLyrics, tc_island_show_lyrics, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show synced lyrics")
-MACRO_CONFIG_INT(TcIslandShowProgress, tc_island_show_progress, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show progress bar and clock")
+MACRO_CONFIG_INT(TcIslandShowProgress, tc_island_show_progress, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show game clock (round timer)")
+MACRO_CONFIG_INT(TcIslandShowSongProgress, tc_island_show_song_progress, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island song progress rail at the bottom")
+MACRO_CONFIG_STR(TcIslandFont, tc_island_font, 128, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island font face (empty = follow the global custom font)")
 MACRO_CONFIG_INT(TcIslandSize, tc_island_size, 100, 60, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island size (%)")
 MACRO_CONFIG_INT(TcIslandNetease, tc_island_netease, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island read NetEase CloudMusic desktop via window title monitor")
 MACRO_CONFIG_INT(TcIslandLyricOffset, tc_island_lyric_offset, 0, -30000, 30000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island lyric timing offset in ms (negative = earlier / ahead)")
@@ -390,5 +391,10 @@ MACRO_CONFIG_INT(TcIslandTransparent, tc_island_transparent, 0, 0, 1, CFGFLAG_CL
 MACRO_CONFIG_INT(TcIslandTransparentTextShadow, tc_island_transparent_text_shadow, 85, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode text outline strength (%)")
 MACRO_CONFIG_INT(TcPingwheelVolume, tc_pingwheel_volume, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal sound volume (%)")
 MACRO_CONFIG_INT(TcPingwheelSoundRange, tc_pingwheel_sound_range, 600, 0, 10000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel sound audible range in world units (0 = global, no falloff)")
+MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel fallback channel (no relay): 1 = emoticons (visible to all, only TClient decodes), 0 = local only")
+MACRO_CONFIG_INT(TcRelay, tc_relay, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal relay: send/receive pings via the TClient signal server (works while spectating, invisible to chat)")
+MACRO_CONFIG_STR(TcRelayAddr, tc_relay_addr, 64, "8.163.48.23:8305", CFGFLAG_CLIENT | CFGFLAG_SAVE, "TClient signal server address (ip:port, udp)")
+MACRO_CONFIG_INT(TcPingwheelEmoteMs, tc_pingwheel_emote_ms, 60, 20, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Emoticon channel send interval in ms (must be >= server sv_emoticon_ms_delay, else frames get dropped)")
+MACRO_CONFIG_INT(TcEmoteDiag, tc_emote_diag, 0, 0, 2, CFGFLAG_CLIENT, "[TEMP] 1=auto send test ping after spawn 2=recv diag log")
 MACRO_CONFIG_INT(TcTranslateRecentCount, tc_translate_recent_count, 5, 1, 16, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How many recent non-Chinese chat lines the translate-recent bind translates")
 MACRO_CONFIG_INT(TcScoreboardMedia, tc_scoreboard_media, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show music controls on the left of the scoreboard")

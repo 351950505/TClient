@@ -191,16 +191,6 @@ bool CScoreboard::OnInput(const IInput::CEvent &Event)
 		case KEY_AUDIOPREV:
 			Music.PrevTrack();
 			return true;
-		case KEY_LEFTBRACKET:
-			SyncMediaVolume();
-			m_MediaVolume = std::max(0, m_MediaVolume - 5);
-			Music.SetVolume(m_MediaVolume);
-			return true;
-		case KEY_RIGHTBRACKET:
-			SyncMediaVolume();
-			m_MediaVolume = std::min(100, m_MediaVolume + 5);
-			Music.SetVolume(m_MediaVolume);
-			return true;
 		default:
 			break;
 		}
@@ -958,13 +948,6 @@ void CScoreboard::RenderRecordingNotification(float x)
 	Ui()->DoLabel(&Rect, aBuf, FontSize, TEXTALIGN_ML);
 }
 
-void CScoreboard::SyncMediaVolume()
-{
-	const int SystemVolume = GameClient()->m_IslandMusic.GetVolume();
-	if(SystemVolume >= 0)
-		m_MediaVolume = SystemVolume;
-}
-
 void CScoreboard::RenderMediaPanel(CUIRect Panel)
 {
 	CIslandMusic &Music = GameClient()->m_IslandMusic;
@@ -982,10 +965,11 @@ void CScoreboard::RenderMediaPanel(CUIRect Panel)
 	Inner.Margin(Pad, &Inner);
 	CUIRect Btn;
 
-	// 五个按钮竖着一排，水平居中。
+	// 三个按钮竖着一排，水平居中（上一首/播放/下一首；音量加减已按用户要求移除，
+	// 用系统音量键即可）。
 	// Enabled 一律传 true：DoButton_FontIcon 在 Enabled=false 时会画一条红色斜线，
 	// 光标未解锁只是暂时不能点，不该画成禁用态。
-	for(int i = 0; i < 5; i++)
+	for(int i = 0; i < 3; i++)
 	{
 		Inner.HSplitTop(BtnSize, &Btn, &Inner);
 		Btn.VSplitLeft((Btn.w - BtnSize) * 0.5f, nullptr, &Btn);
@@ -1004,24 +988,8 @@ void CScoreboard::RenderMediaPanel(CUIRect Panel)
 			if(Ui()->DoButton_FontIcon(&m_MediaNextButton, FontIcon::FORWARD_STEP, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, true))
 				Music.NextTrack();
 			break;
-		case 3:
-			if(Ui()->DoButton_FontIcon(&m_MediaVolumeDownButton, FontIcon::MINUS, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, true))
-			{
-				SyncMediaVolume();
-				m_MediaVolume = std::max(0, m_MediaVolume - 5);
-				Music.SetVolume(m_MediaVolume);
-			}
-			break;
-		case 4:
-			if(Ui()->DoButton_FontIcon(&m_MediaVolumeUpButton, FontIcon::PLUS, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, true))
-			{
-				SyncMediaVolume();
-				m_MediaVolume = std::min(100, m_MediaVolume + 5);
-				Music.SetVolume(m_MediaVolume);
-			}
-			break;
 		}
-		if(i < 4)
+		if(i < 2)
 			Inner.HSplitTop(Gap, nullptr, &Inner);
 	}
 }
@@ -1201,9 +1169,9 @@ void CScoreboard::OnRender()
 	// 未解锁光标时按钮点不了，但曲目和状态仍可看，解锁后即可点。
 	if(g_Config.m_TcScoreboardMedia)
 	{
-		// 高 126 = 内边距7 + 5×按钮20 + 4×间距3 + 内边距7
+		// 高 80 = 内边距7 + 3×按钮20 + 2×间距3 + 内边距7
 		const float PanelW = 34.0f;
-		const float PanelH = 126.0f;
+		const float PanelH = 80.0f;
 		CUIRect MediaPanel;
 		MediaPanel.x = std::max(10.0f, Scoreboard.x - PanelW - 10.0f);
 		MediaPanel.y = Scoreboard.y;

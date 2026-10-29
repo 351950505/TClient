@@ -170,6 +170,7 @@ void CGameClient::OnConsoleInit()
 					      &m_BindChat, // TClient
 						      &m_BindWheel, // TClient
 						      &m_PingWheel, // TClient
+				      &m_RelayClient, // TClient
 						      &m_WarList, // TClient
 					      &m_IslandMusic, // TClient
 					      &m_StatusBar, // TClient

@@ -568,9 +568,16 @@ void CChat::OnMessage(int MsgType, void *pRawMsg)
 	{
 		CNetMsg_Sv_Chat *pMsg = (CNetMsg_Sv_Chat *)pRawMsg;
 
-		// [TClient PING-WHEEL] ping 编码行不进聊天框，由 CPingWheel 解析成地图标记
-		if(str_startswith(pMsg->m_pMessage, CPingWheel::CHAT_PREFIX))
+		// [TClient PING-WHEEL] ping 同步行改写为图标行（QmClient 式聊天可视化）；
+		// 地图标记由 CPingWheel 解析。原版客户端无此行（走聊天通道时它看到短码）
+		int PingSignal = CPingWheel::SignalFromMessage(pMsg->m_pMessage);
+		if(PingSignal >= 0)
+		{
+			char aIconLine[24];
+			str_format(aIconLine, sizeof(aIconLine), "%s", CPingWheel::SignalChatIcon(PingSignal));
+			AddLine(pMsg->m_ClientId, pMsg->m_Team, aIconLine);
 			return;
+		}
 
 		/*
 		if(g_Config.m_ClCensorChat)

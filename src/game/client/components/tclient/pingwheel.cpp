@@ -2,6 +2,8 @@
 #include "pingwheel.h"
 
 #include <base/io.h>
+
+#include <engine/font_icons.h>
 #include <base/log.h>
 #include <base/time.h>
 
@@ -33,6 +35,117 @@ static const vec3 s_aSignalColors[] = {
 static_assert(std::size(s_apSignalNames) == CPingWheel::NUM_SIGNALS);
 static_assert(std::size(s_apSignalShorts) == CPingWheel::NUM_SIGNALS);
 static_assert(std::size(s_aSignalColors) == CPingWheel::NUM_SIGNALS);
+
+// 紧凘编码字母表：64 个不含 ':' 的安全可见字符。
+static const char s_aPingAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#%";
+static_assert(std::size(s_aPingAlphabet) == 65, "alphabet must be 64 chars + NUL");
+
+void CPingWheel::EncodeBinary(int Signal, int X, int Y, char (&aBuf)[24])
+{
+	const uint32_t ux = (uint32_t)std::clamp(X, -32768, 32767) + 32768;
+	const uint32_t uy = (uint32_t)std::clamp(Y, -32768, 32767) + 32768;
+	uint64_t Payload = ((uint64_t)(Signal & 7) << 32) | ((uint64_t)ux << 16) | (uint64_t)uy;
+	char *pOut = aBuf;
+	*pOut++ = 0xE2; *pOut++ = 0x9F; *pOut++ = 0xA8; // ⟨
+	*pOut++ = 'B';
+	*pOut++ = ':';
+	for(int i = 5; i >= 0; i--)
+		*pOut++ = s_aPingAlphabet[(Payload >> (i * 6)) & 0x3F];
+	*pOut = 0;
+}
+
+bool CPingWheel::DecodeBinary(const char *pMessage, int *pSignal, int *pX, int *pY)
+{
+	const char *pCur = str_startswith(pMessage, CHAT_PREFIX_BIN);
+	if(!pCur || str_length(pCur) < 6)
+		return false;
+	uint64_t Payload = 0;
+	for(int i = 0; i < 6; i++)
+	{
+		const char *pSym = (const char *)memchr(s_aPingAlphabet, pCur[i], 64);
+		if(!pSym)
+			return false;
+		Payload = (Payload << 6) | (uint64_t)(pSym - s_aPingAlphabet);
+	}
+	if(pCur[6] != 0) // 后面若还有字符则非合法载荷（防误判普通聊天）
+		return false;
+	const int Signal = (int)((Payload >> 32) & 7);
+	const int X = (int)((Payload >> 16) & 0xFFFF) - 32768;
+	const int Y = (int)(Payload & 0xFFFF) - 32768;
+	if(Signal >= NUM_SIGNALS)
+		return false;
+	*pSignal = Signal;
+	*pX = X;
+	*pY = Y;
+	return true;
+}
+
+bool CPingWheel::IsPingMessage(const char *pMessage)
+{
+	if(str_startswith(pMessage, CHAT_PREFIX)) // 旧明文格式
+		return true;
+	if(str_startswith(pMessage, CHAT_PREFIX_BIN))
+	{
+		int Signal, X, Y;
+		return DecodeBinary(pMessage, &Signal, &X, &Y);
+	}
+	return false;
+}
+
+// ---- 表情通道 ----
+
+void CPingWheel::EmotePing(int Signal, int X, int Y)
+{
+	uint64_t Payload = ((uint64_t)(Signal & 7) << 32) |
+		((uint64_t)(uint32_t)(std::clamp(X, -32768, 32767) + 32768) << 16) |
+		(uint64_t)(uint32_t)(std::clamp(Y, -32768, 32767) + 32768);
+	Payload <<= 1; // 35bit → 36bit（9 个 4bit 表情）
+	m_vEmoteQueue.clear();
+	m_vEmoteQueue.push_back(EMOTICON_OOP); // 帧头
+	for(int i = 8; i >= 0; i--)
+		m_vEmoteQueue.push_back((int)((Payload >> (4 * i)) & 0xF));
+	m_EmoteRecvCount = -1; // 重置接收（自己的表情会被服务器广播回来，接收端按 cid 过滤）
+	// 丢失检测基准：记下发帧前的自回显计数
+	m_EmoteFrameSent = 10;
+	m_EmoteEchoSeen = m_EmoteEchoTotal;
+	m_EmoteFrameDoneTime = -1e9f;
+}
+
+void CPingWheel::PumpEmoteQueue()
+{
+	if(m_vEmoteQueue.empty())
+	{
+		// 帧发完 3 秒后对比自回显数：少于发送数 = 表情被服务器冷却丢弃
+		if(m_EmoteFrameDoneTime > 0 && Client()->LocalTime() - m_EmoteFrameDoneTime > 3.0f)
+		{
+			m_EmoteFrameDoneTime = -1e9f;
+			const int Echoed = m_EmoteEchoTotal - m_EmoteEchoSeen;
+			if(Echoed < m_EmoteFrameSent)
+			{
+				char aBuf[192];
+				str_format(aBuf, sizeof(aBuf), "表情信号只发出 %d/%d 个：服务器表情冷却过长。请在设置里调大表情间隔，或关闭表情通道改用队伍聊天", Echoed, m_EmoteFrameSent);
+				GameClient()->m_Chat.Echo(aBuf);
+			}
+		}
+		return;
+	}
+	if(!GameClient()->m_Snap.m_pLocalCharacter)
+	{
+		// 表情需要活体（服务器丢弃无角色的表情），死亡就放弃残帧
+		m_vEmoteQueue.clear();
+		return;
+	}
+	const float Now = Client()->LocalTime();
+	if(Now - m_LastEmoteSendTime < g_Config.m_TcPingwheelEmoteMs / 1000.0f)
+		return;
+	m_LastEmoteSendTime = Now;
+	CNetMsg_Cl_Emoticon Msg;
+	Msg.m_Emoticon = m_vEmoteQueue.front();
+	m_vEmoteQueue.erase(m_vEmoteQueue.begin());
+	if(m_vEmoteQueue.empty())
+		m_EmoteFrameDoneTime = Now; // 本帧发完，进入丢失检测窗口
+	Client()->SendPackMsgActive(&Msg, MSGFLAG_VITAL);
+}
 
 static void PingWheelParseLayout(const char *p, int *pOut) // pOut 至少 NUM_SIGNALS；非法/缺项回退恒等顺序
 {
@@ -92,9 +205,19 @@ void CPingWheel::ConKeyPingWheel(IConsole::IResult *pResult, void *pUserData)
 	}
 }
 
+void CPingWheel::ConTestPing(IConsole::IResult *pResult, void *pUserData)
+{
+	CPingWheel *pSelf = (CPingWheel *)pUserData;
+	if(pSelf->Client()->State() != IClient::STATE_ONLINE)
+		return;
+	// 调试：直接在准星位置发一次危险信号（不经轮盘）
+	pSelf->Ping(0, pSelf->GameClient()->m_Controls.m_aTargetPos[g_Config.m_ClDummy]);
+}
+
 void CPingWheel::OnConsoleInit()
 {
 	Console()->Register("+tc_pingwheel", "", CFGFLAG_CLIENT, ConKeyPingWheel, this, "Open ping selector");
+	Console()->Register("tc_testping", "", CFGFLAG_CLIENT, ConTestPing, this, "Send a test ping at cursor position");
 }
 
 void CPingWheel::OnReset()
@@ -102,8 +225,10 @@ void CPingWheel::OnReset()
 	m_WasActive = false;
 	m_Active = false;
 	m_SelectedSignal = -1;
-	m_RateWindowStart = -1e9f;
-	m_RateSentCount = 0;
+	m_vEmoteQueue.clear();
+	m_EmoteRecvCount = -1;
+	m_EmoteFrameDoneTime = -1e9f;
+	m_EmoteTestFired = false;
 	for(CMarker &Marker : m_aMarkers)
 		Marker.m_StartTime = -1.0f;
 }
@@ -130,20 +255,6 @@ bool CPingWheel::OnInput(const IInput::CEvent &Event)
 		OnRelease();
 		return true;
 	}
-	return false;
-}
-
-bool CPingWheel::RateLimitedAndRecord()
-{
-	const float Now = Client()->LocalTime();
-	if(Now - m_RateWindowStart >= RATE_WINDOW)
-	{
-		m_RateWindowStart = Now;
-		m_RateSentCount = 0;
-	}
-	if(m_RateSentCount >= RATE_COUNT)
-		return true;
-	m_RateSentCount++;
 	return false;
 }
 
@@ -233,7 +344,35 @@ vec2 CPingWheel::WorldToUi(vec2 WorldPos) const
 	return vec2(pUiScreen->x, pUiScreen->y) + Fraction * vec2(pUiScreen->w, pUiScreen->h);
 }
 
-void CPingWheel::AddMarker(int Signal, vec2 WorldPos)
+const char *CPingWheel::SignalChatIcon(int Signal)
+{
+	static const char *const apIcons[] = {
+		FontIcon::TRIANGLE_EXCLAMATION, // 危险
+		FontIcon::BACKWARD_STEP,        // 撤退
+		FontIcon::FORWARD_FAST,         // 推进
+		FontIcon::FORWARD_STEP,         // 赶来
+		FontIcon::ICON_USERS,           // 集合
+		FontIcon::HEART,                // 支援
+		FontIcon::EYE_SLASH,            // 敌消
+		FontIcon::PAUSE,                // 等等
+	};
+	if(Signal < 0 || Signal >= NUM_SIGNALS)
+		return "";
+	return apIcons[Signal];
+}
+
+int CPingWheel::SignalFromMessage(const char *pMessage)
+{
+	int Signal, X, Y;
+	if(DecodeBinary(pMessage, &Signal, &X, &Y))
+		return Signal;
+	const char *pCur = str_startswith(pMessage, CHAT_PREFIX); // 旧明文格式 ⟨P:id:...
+	if(pCur)
+		return str_toint(pCur);
+	return -1;
+}
+
+void CPingWheel::AddMarker(int Signal, vec2 WorldPos, int ClientId)
 {
 	// 找空槽，满了换最老的
 	CMarker *pSlot = &m_aMarkers[0];
@@ -250,26 +389,64 @@ void CPingWheel::AddMarker(int Signal, vec2 WorldPos)
 	pSlot->m_Type = Signal;
 	pSlot->m_WorldPos = WorldPos;
 	pSlot->m_StartTime = Client()->LocalTime();
+	// QmClient 式聊天可视化：聊天框显示一条图标行（自己发的用系统行，收到的
+	// 是"名字: 图标"行）。原版客户端无此行；走聊天通道时原版看到的是短码。
+	char aIcon[16];
+	str_format(aIcon, sizeof(aIcon), "%s", SignalChatIcon(Signal));
+	if(ClientId >= 0)
+		GameClient()->m_Chat.AddLine(ClientId, 0, aIcon);
+	else
+		GameClient()->m_Chat.Echo(aIcon);
+}
+
+void CPingWheel::OnRelayPayload(const char *pText)
+{
+	int Signal, X, Y;
+	if(!DecodeBinary(pText, &Signal, &X, &Y) || Signal < 0 || Signal >= NUM_SIGNALS)
+		return;
+	AddMarker(Signal, vec2((float)X, (float)Y));
+	PlaySignalSound(Signal, vec2((float)X, (float)Y));
 }
 
 void CPingWheel::Ping(int Signal, vec2 WorldPos)
 {
 	if(!g_Config.m_TcPingwheel)
 		return;
-	if(RateLimitedAndRecord())
-	{
-		// 限频：只本地提示，不发送（防服务器禁言）
-		char aBuf[128];
-		const int Wait = std::max(1, (int)std::ceil(RATE_WINDOW - (Client()->LocalTime() - m_RateWindowStart)));
-		str_format(aBuf, sizeof(aBuf), "信号发送过于频繁：%d 秒内最多 %d 次，%d 秒后可再发", (int)RATE_WINDOW, RATE_COUNT, Wait);
-		GameClient()->m_Chat.Echo(aBuf);
-		return;
-	}
 
-	char aBuf[96];
-	str_format(aBuf, sizeof(aBuf), "%s%d:%d:%d:%s⟩", CHAT_PREFIX, Signal,
-		(int)std::round(WorldPos.x), (int)std::round(WorldPos.y), SignalName(Signal));
-	GameClient()->m_Chat.SendChat(g_Config.m_TcPingwheelTeam, aBuf);
+	const bool Alive = GameClient()->m_Snap.m_pLocalCharacter != nullptr;
+	char aBuf[24];
+	EncodeBinary(Signal, (int)std::round(WorldPos.x), (int)std::round(WorldPos.y), aBuf);
+	if(g_Config.m_TcRelay && GameClient()->m_RelayClient.Online())
+	{
+		// 信令广播：旁观/死亡也能发，不占用游戏服的聊天与表情，原版玩家无感知
+		GameClient()->m_RelayClient.Broadcast(aBuf);
+	}
+	else
+	{
+		if(!Alive)
+		{
+			// 表情在服务器侧有活体硬检查（旁观者无 character 直接丢弃），
+			// 部分服务器对旁观者聊天/私聊限制极严（实测：私聊 4 条即封）
+			GameClient()->m_Chat.Echo("旁观/死亡状态：信令未连接，信号仅本地显示");
+			AddMarker(Signal, WorldPos);
+			PlaySignalSound(Signal, WorldPos);
+			return;
+		}
+		if(g_Config.m_TcPingwheelEmote)
+		{
+			// 表情通道 fallback：帧头+9 个表情全服广播，间隔 tc_pingwheel_emote_ms
+			// （默认 60ms，必须 ≥ 服务器表情冷却）。对所有人可见但只有 TClient
+			// 知道语义。
+			EmotePing(Signal, (int)std::round(WorldPos.x), (int)std::round(WorldPos.y));
+		}
+		else
+		{
+			GameClient()->m_Chat.Echo("信令未连接且表情/聊天通道均已关闭，信号仅本地显示");
+			AddMarker(Signal, WorldPos);
+			PlaySignalSound(Signal, WorldPos);
+			return;
+		}
+	}
 
 	AddMarker(Signal, WorldPos);
 	PlaySignalSound(Signal, WorldPos);
@@ -310,10 +487,72 @@ void CPingWheel::LayoutMove(int Sector, int Dir)
 
 void CPingWheel::OnMessage(int MsgType, void *pRawMsg)
 {
-	if(MsgType != NETMSGTYPE_SV_CHAT || !g_Config.m_TcPingwheel || GameClient()->m_SuppressEvents)
+	if(GameClient()->m_SuppressEvents)
+		return;
+
+	// 表情通道接收：帧头 + 9 个数据表情 → 信号+坐标。收集中的表情一律按数据
+	// 处理（OOP=0 也是合法数据位），空闲时遇到帧头才开始收集，1.5s 超时重置。
+	if(MsgType == NETMSGTYPE_SV_EMOTICON && g_Config.m_TcPingwheel)
+	{
+		CNetMsg_Sv_Emoticon *pMsg = (CNetMsg_Sv_Emoticon *)pRawMsg;
+		// 自回显：丢失检测计数后跳过（发送时已本地出标记）
+		if(Client()->State() != IClient::STATE_DEMOPLAYBACK &&
+			pMsg->m_ClientId == GameClient()->m_Snap.m_LocalClientId)
+		{
+			m_EmoteEchoTotal++;
+			return;
+		}
+
+		const float Now = Client()->LocalTime();
+		if(m_EmoteRecvCount >= 0 && Now - m_EmoteRecvStart <= 1.5f)
+		{
+			m_EmoteRecvPayload = (m_EmoteRecvPayload << 4) | (uint64_t)(pMsg->m_Emoticon & 0xF);
+			m_EmoteRecvCount++;
+			if(m_EmoteRecvCount >= 9)
+			{
+				const uint64_t Payload = m_EmoteRecvPayload >> 1;
+				const int Sig = (int)((Payload >> 32) & 7);
+				const int Px = (int)((Payload >> 16) & 0xFFFF) - 32768;
+				const int Py = (int)(Payload & 0xFFFF) - 32768;
+				m_EmoteRecvCount = -1;
+				if(Sig >= 0 && Sig < NUM_SIGNALS)
+				{
+					AddMarker(Sig, vec2((float)Px, (float)Py), pMsg->m_ClientId);
+					PlaySignalSound(Sig, vec2((float)Px, (float)Py));
+				}
+			}
+		}
+		else
+		{
+			m_EmoteRecvCount = -1;
+			if(pMsg->m_Emoticon == EMOTICON_OOP)
+			{
+				m_EmoteRecvCount = 0;
+				m_EmoteRecvPayload = 0;
+				m_EmoteRecvStart = Now;
+			}
+		}
+		return;
+	}
+
+	if(MsgType != NETMSGTYPE_SV_CHAT || !g_Config.m_TcPingwheel)
 		return;
 
 	CNetMsg_Sv_Chat *pMsg = (CNetMsg_Sv_Chat *)pRawMsg;
+
+	// 新紧凘格式（⟨B:...）
+	int Signal, X, Y;
+	if(DecodeBinary(pMsg->m_pMessage, &Signal, &X, &Y))
+	{
+		if(Client()->State() != IClient::STATE_DEMOPLAYBACK &&
+			pMsg->m_ClientId == GameClient()->m_Snap.m_LocalClientId)
+			return; // 自己在线时的回声不重复显示（发送时已本地出标记）
+		AddMarker(Signal, vec2((float)X, (float)Y), pMsg->m_ClientId);
+		PlaySignalSound(Signal, vec2((float)X, (float)Y));
+		return;
+	}
+
+	// 旧明文格式（⟨P:id:x:y:名⟩，旧版 TClient 发的，接收兼容）
 	if(!str_startswith(pMsg->m_pMessage, CHAT_PREFIX))
 		return;
 
@@ -331,9 +570,9 @@ void CPingWheel::OnMessage(int MsgType, void *pRawMsg)
 			p++;
 		return Value;
 	};
-	const int Signal = NextInt(pCur);
-	const int X = NextInt(pCur);
-	const int Y = NextInt(pCur);
+	Signal = NextInt(pCur);
+	X = NextInt(pCur);
+	Y = NextInt(pCur);
 	if(Signal < 0 || Signal >= NUM_SIGNALS || absolute(X) > 100000 || absolute(Y) > 100000)
 		return;
 
@@ -410,13 +649,21 @@ void CPingWheel::RenderSpecCursor()
 		m_LastSpecMouse = Mouse;
 		m_LastSpecMouseMove = Now;
 	}
+	// 1.5s 不动开始淡出（0.5s 淡完），比系统准星贴图低调得多
 	const float Idle = Now - m_LastSpecMouseMove;
-	const float Alpha = Idle < 5.0f ? 1.0f : std::max(0.0f, 1.0f - (Idle - 5.0f) / 0.5f);
+	const float Alpha = Idle < 1.5f ? 1.0f : std::max(0.0f, 1.0f - (Idle - 1.5f) / 0.5f);
 	if(Alpha <= 0.0f)
 		return;
 	const vec2 Pos = WorldToUi(pGC->m_Controls.m_aTargetPos[g_Config.m_ClDummy]);
 	Ui()->MapScreen();
-	RenderTools()->RenderCursor(Pos, 24.0f, Alpha);
+	// 小圆圈光标：淡晕外圈 + 半透明内核，白色低透明度，只标个位置不抢视线
+	Graphics()->TextureClear();
+	Graphics()->QuadsBegin();
+	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.22f * Alpha);
+	Graphics()->DrawCircle(Pos.x, Pos.y, 6.5f, 24);
+	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.55f * Alpha);
+	Graphics()->DrawCircle(Pos.x, Pos.y, 2.8f, 24);
+	Graphics()->QuadsEnd();
 }
 
 void CPingWheel::OnRender()
@@ -428,6 +675,17 @@ void CPingWheel::OnRender()
 	TryLoadSounds();
 	RenderMarkers();
 	RenderSpecCursor();
+	PumpEmoteQueue();
+
+	// [TEMP-DIAG] tc_emote_diag=1：进服活着 5 秒后自动发一次测试 ping
+	if(g_Config.m_TcEmoteDiag == 1 && Client()->State() == IClient::STATE_ONLINE &&
+		GameClient()->m_Snap.m_pLocalCharacter && !m_EmoteTestFired &&
+		GameClient()->m_RelayClient.Online()) // 等信令注册完成再发
+	{
+		m_EmoteTestFired = true;
+		log_info("relaydiag", "auto test ping sent (relay online)");
+		Ping(0, GameClient()->m_Controls.m_aTargetPos[g_Config.m_ClDummy]);
+	}
 
 	static const auto QuadEaseInOut = [](float t) -> float {
 		if(t == 0.0f)

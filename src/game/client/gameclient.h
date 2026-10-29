@@ -77,6 +77,7 @@
 #include "components/tclient/outlines.h"
 #include "components/tclient/pet.h"
 #include "components/tclient/pingwheel.h"
+#include "components/tclient/relay_client.h"
 #include "components/tclient/player_indicator.h"
 #include "components/tclient/rainbow.h"
 #include "components/tclient/scripting.h"
@@ -232,6 +233,7 @@ public:
 	CBindChat m_BindChat;
 	CBindWheel m_BindWheel;
 	CPingWheel m_PingWheel; // TClient
+	CRelayClient m_RelayClient; // TClient
 	CBgDraw m_BgDraw;
 	CTClient m_TClient;
 	CTrails m_Trails;

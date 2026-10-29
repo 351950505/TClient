@@ -44,7 +44,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-// 系统音量控制（mixer API）
+// 系统音量控制（Core Audio endpoint volume 为主，mixer API 兜底）
 #include <mmsystem.h>
 #pragma comment(lib, "winmm.lib")
 #endif
@@ -239,15 +239,10 @@ public:
 	void ProcessMediaCommands(WmSessionManager &Manager)
 	{
 		std::vector<EMediaCommand> vCommands;
-		int Volume = -1;
 		{
 			std::lock_guard<std::mutex> Lock(m_Mutex);
 			vCommands.swap(m_vPendingCommands);
-			Volume = m_PendingVolume;
-			m_PendingVolume = -1;
 		}
-		if(Volume >= 0)
-			SetSystemVolume(Volume);
 		if(vCommands.empty())
 			return;
 
@@ -291,86 +286,6 @@ public:
 		}
 		// 立刻回写状态，按钮不用等下一次 200ms 轮询才翻转
 		StoreSnapshot(QuerySession(Session));
-	}
-
-	// 用旧版 mixer API 调默认播放设备的音量。SMTC 没有 per-session 音量，
-	// 所以这是系统级音量（和音量键效果一样）。
-	// 读取默认播放设备当前音量（0~100），失败返回 -1。
-	static int GetSystemVolume()
-	{
-		HMIXER hMixer = nullptr;
-		if(mixerOpen(&hMixer, 0, 0, 0, MIXER_OBJECTF_MIXER) != MMSYSERR_NOERROR)
-			return -1;
-		int Percent = -1;
-		MIXERLINE MixerLine{};
-		MixerLine.cbStruct = sizeof(MixerLine);
-		MixerLine.dwComponentType = MIXERLINE_COMPONENTTYPE_DST_SPEAKERS;
-		if(mixerGetLineInfo((HMIXEROBJ)hMixer, &MixerLine, MIXER_GETLINEINFOF_COMPONENTTYPE) == MMSYSERR_NOERROR)
-		{
-			MIXERCONTROL MixerControl{};
-			MIXERLINECONTROLS MixerControls{};
-			MixerControls.cbStruct = sizeof(MixerControls);
-			MixerControls.dwLineID = MixerLine.dwLineID;
-			MixerControls.dwControlType = MIXERCONTROL_CONTROLTYPE_VOLUME;
-			MixerControls.cControls = 1;
-			MixerControls.cbmxctrl = sizeof(MixerControl);
-			MixerControls.pamxctrl = &MixerControl;
-			if(mixerGetLineControls((HMIXEROBJ)hMixer, &MixerControls, MIXER_GETLINECONTROLSF_ONEBYTYPE) == MMSYSERR_NOERROR)
-			{
-				MIXERCONTROLDETAILS Details{};
-				MIXERCONTROLDETAILS_UNSIGNED DetailValue{};
-				Details.cbStruct = sizeof(Details);
-				Details.dwControlID = MixerControl.dwControlID;
-				Details.cChannels = 1;
-				Details.cMultipleItems = 0;
-				Details.cbDetails = sizeof(DetailValue);
-				Details.paDetails = &DetailValue;
-				if(mixerGetControlDetails((HMIXEROBJ)hMixer, &Details, MIXER_GETCONTROLDETAILSF_VALUE) == MMSYSERR_NOERROR &&
-					MixerControl.Bounds.dwMaximum > MixerControl.Bounds.dwMinimum)
-				{
-					const double Span = (double)MixerControl.Bounds.dwMaximum - (double)MixerControl.Bounds.dwMinimum;
-					Percent = (int)(((double)DetailValue.dwValue - (double)MixerControl.Bounds.dwMinimum) / Span * 100.0 + 0.5);
-				}
-			}
-		}
-		mixerClose(hMixer);
-		return std::clamp(Percent, -1, 100);
-	}
-
-	static void SetSystemVolume(int Percent)
-	{
-		Percent = std::clamp(Percent, 0, 100);
-		HMIXER hMixer = nullptr;
-		if(mixerOpen(&hMixer, 0, 0, 0, MIXER_OBJECTF_MIXER) != MMSYSERR_NOERROR)
-			return;
-		MIXERLINE MixerLine{};
-		MixerLine.cbStruct = sizeof(MixerLine);
-		MixerLine.dwComponentType = MIXERLINE_COMPONENTTYPE_DST_SPEAKERS;
-		if(mixerGetLineInfo((HMIXEROBJ)hMixer, &MixerLine, MIXER_GETLINEINFOF_COMPONENTTYPE) == MMSYSERR_NOERROR)
-		{
-			MIXERCONTROL MixerControl{};
-			MIXERLINECONTROLS MixerControls{};
-			MixerControls.cbStruct = sizeof(MixerControls);
-			MixerControls.dwLineID = MixerLine.dwLineID;
-			MixerControls.dwControlType = MIXERCONTROL_CONTROLTYPE_VOLUME;
-			MixerControls.cControls = 1;
-			MixerControls.cbmxctrl = sizeof(MixerControl);
-			MixerControls.pamxctrl = &MixerControl;
-			if(mixerGetLineControls((HMIXEROBJ)hMixer, &MixerControls, MIXER_GETLINECONTROLSF_ONEBYTYPE) == MMSYSERR_NOERROR)
-			{
-				MIXERCONTROLDETAILS Details{};
-				MIXERCONTROLDETAILS_UNSIGNED DetailValue{};
-				Details.cbStruct = sizeof(Details);
-				Details.dwControlID = MixerControl.dwControlID;
-				Details.cChannels = 1;
-				Details.cMultipleItems = 0;
-				Details.cbDetails = sizeof(DetailValue);
-				Details.paDetails = &DetailValue;
-				DetailValue.dwValue = (DWORD)((double)Percent / 100.0 * MixerControl.Bounds.dwMaximum + 0.5);
-				mixerSetControlDetails((HMIXEROBJ)hMixer, &Details, MIXER_SETCONTROLDETAILSF_VALUE);
-			}
-		}
-		mixerClose(hMixer);
 	}
 
 	void PollSessions(WmSessionManager &Manager, std::string &CurrentSessionId)
@@ -559,7 +474,6 @@ public:
 		PREV,
 	};
 	std::vector<EMediaCommand> m_vPendingCommands;
-	int m_PendingVolume = -1;
 
 	// Album cover art. The SMTC worker downloads the current track's thumbnail
 	// PNG bytes into m_CoverPng (guarded by m_Mutex) whenever the "cover key"
@@ -2663,6 +2577,21 @@ public:
 		if(!g_Config.m_TcIslandEnable)
 			return;
 
+		// 灵动岛独立字体：tc_island_font 非空时临时切换默认 face，画完立刻恢复全局
+		// 自定义字体。SetCustomFace 改的是 glyph map 的全局默认 face，只在本次 Render
+		// 期间生效，对已创建的文本容器无影响，因此不影响其它组件的渲染。
+		const bool UseIslandFont = g_Config.m_TcIslandFont[0] != '\0';
+		if(UseIslandFont)
+			m_pTextRender->SetCustomFace(g_Config.m_TcIslandFont);
+		auto RestoreFace = [&]() {
+			if(!UseIslandFont)
+				return;
+			const char *pGlobalFace = g_Config.m_TcCustomFont[0] != '\0'
+				? g_Config.m_TcCustomFont
+				: m_pTextRender->GetCustomFaces()->front().c_str();
+			m_pTextRender->SetCustomFace(pGlobalFace);
+		};
+
 		const STrack Track = CollectTrackStable();
 		UpdateLyrics(Track);
 
@@ -2748,6 +2677,7 @@ public:
 					(int)(PillY + (IdleH - IdleTimerSize) * 0.5f),
 					IdleTimerSize, aIdleTime);
 			}
+			RestoreFace();
 			return;
 		}
 
@@ -2870,6 +2800,9 @@ public:
 		// m_ClockDurationMs alone leaves the rail empty for most tracks. Fall back
 		// to the end of the last lyric line, which is a decent stand-in for the
 		// track length whenever lyrics are available.
+		// tc_island_show_song_progress 只管这条歌曲进度轨（对局时间走
+		// tc_island_show_progress，两者互不牵连）。
+		if(g_Config.m_TcIslandShowSongProgress)
 		{
 			int64_t TotalMs = m_ClockDurationMs;
 			if(TotalMs <= 0)
@@ -3197,6 +3130,7 @@ public:
 		m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 		if(TransparentMode)
 			m_pTextRender->TextOutlineColor(m_pTextRender->DefaultTextOutlineColor());
+		RestoreFace();
 	}
 };
 
@@ -3224,24 +3158,6 @@ void CIslandMusic::PrevTrack()
 #if TCLIENT_HAS_WINRT_MUSIC
 	std::lock_guard<std::mutex> Lock(m_pImpl->m_Mutex);
 	m_pImpl->m_vPendingCommands.push_back(CImpl::EMediaCommand::PREV);
-#endif
-}
-
-void CIslandMusic::SetVolume(int Percent)
-{
-	EnsureImpl();
-#if TCLIENT_HAS_WINRT_MUSIC
-	std::lock_guard<std::mutex> Lock(m_pImpl->m_Mutex);
-	m_pImpl->m_PendingVolume = std::clamp(Percent, 0, 100);
-#endif
-}
-
-int CIslandMusic::GetVolume() const
-{
-#if TCLIENT_HAS_WINRT_MUSIC
-	return CImpl::GetSystemVolume();
-#else
-	return -1;
 #endif
 }
 

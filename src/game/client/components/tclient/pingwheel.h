@@ -1,6 +1,13 @@
-/* TClient: LoL 式地图信号轮盘。按住键出轮盘，选信号在准星世界坐标插地图标记；
-   信号通过聊天通道（⟨P:id:x:y⟩ 前缀）同步，装了 TClient 的同服玩家解析成标记，
-   其他玩家看到一条短文本。服务端零改动。
+/* TClient: LoL 式地图信号轮盘。按住键出轮盘，选信号在准星世界坐标插地图标记。
+   两条发送通道（tc_pingwheel_emote 选择，接收端两条都收）：
+   - 表情通道（默认）：帧头+9 个表情承载 signal+坐标，间隔 tc_pingwheel_emote_ms
+     （默认 300ms，需 >= 服务器 sv_emoticon_ms_delay，否则第 2 个起被个人冷却丢弃），
+     全服广播；帧发完后对比自己收到的回显数，不足则提示被服务器冷却丢弃。
+     对所有人可见（表情气泡+音效），只有 TClient 知道语义。
+   - 聊天通道：紧凑二进制编码（⟨B: + 6 个编码字符）走队伍聊天，服务器按 DDRace
+     队伍过滤收件人（原版"房间"机制）；TClient 客户端静默解析且不显示该聊天行，
+     同队未装 TClient 的玩家看到一条无意义短码。兼容接收旧明文格式（⟨P:id:x:y:名⟩）。
+   0.6 协议下客户端不能直连、服务器只广播白名单消息，服务端零改动。
    图标：可放 data/tclient/pings/signal0.png ~ signal7.png（0=危险…7=等等）自定义，
    未提供则用内置绘制样式。注意：Riot 版权素材请勿打进公开分发包。 */
 #ifndef GAME_CLIENT_COMPONENTS_TCLIENT_PINGWHEEL_H
@@ -9,6 +16,9 @@
 #include <array>
 
 #include <base/vmath.h>
+
+#include <cstdint>
+#include <vector>
 
 #include <engine/console.h>
 #include <engine/graphics.h>
@@ -32,11 +42,14 @@ public:
 		NUM_SIGNALS,
 	};
 
-	// 聊天编码前缀（⟨P:），chat.cpp 靠它拦行、本组件靠它解析
+	// 聊天编码前缀。旧明文格式 ⟨P:id:x:y:名⟩ 仅接收兼容；发送用新紧凑格式 ⟨B:...⟩。
+	// chat.cpp 靠 IsPingMessage 静默拦行、本组件靠它解析。
 	static constexpr const char *CHAT_PREFIX = "\xE2\x9F\xA8P:";
-	static constexpr float MARKER_LIFE = 6.0f;       // 标记存活秒数
-	static constexpr int RATE_COUNT = 5;             // 限频：每个窗口最多发送次数（防服务器禁言）
-	static constexpr float RATE_WINDOW = 40.0f;      // 限频窗口秒数，从窗口内第一次发送开始计
+	// 注意：'B' 是十六进制字符，不能直接跟在 \xA8 后（会被贪婪解析），用字面量拼接
+	static constexpr const char *CHAT_PREFIX_BIN = "\xE2\x9F\xA8" "B:";
+	// 该聊天行是否为 pingwheel 同步消息（chat.cpp 静默拦截用；解析见 OnMessage）
+	static bool IsPingMessage(const char *pMessage);
+	static constexpr float MARKER_LIFE = 6.0f; // 标记存活秒数
 
 	struct CMarker
 	{
@@ -54,19 +67,38 @@ private:
 	int m_aSoundIds[NUM_SIGNALS] = {-1, -1, -1, -1, -1, -1, -1, -1};   // 每个信号的音效（data/tclient/pings/<名>.wav）
 	bool m_SoundsTried = false;
 	vec2 m_PingWorldPos = vec2(0.0f, 0.0f);
-	float m_RateWindowStart = -1e9f;
-	int m_RateSentCount = 0;
 	IGraphics::CTextureHandle m_aSignalTextures[NUM_SIGNALS];
 	bool m_IconsTried = false;
 	std::array<CMarker, 16> m_aMarkers;
 
 	static void ConKeyPingWheel(IConsole::IResult *pResult, void *pUserData);
+	static void ConTestPing(IConsole::IResult *pResult, void *pUserData);
 
-	bool RateLimitedAndRecord();
+	// 紧凑二进制编码：signal(3bit) + x(16bit) + y(16bit) → 6 个编码字符（36bit）。
+	// 坐标为整数像素、有符号 ±32767（超出钳制）。
+	static void EncodeBinary(int Signal, int X, int Y, char (&aBuf)[24]);
+	static bool DecodeBinary(const char *pMessage, int *pSignal, int *pX, int *pY);
+
+	// 表情通道：帧头 + 9 个 4bit 表情承载 signal(3)|x(16)|y(16)（左移 1 位补 36bit）。
+	// 每个表情间隔 tc_pingwheel_emote_ms 毫秒（必须 >= 服务器 sv_emoticon_ms_delay，
+	// 否则第 2 个起被个人冷却直接丢弃）。帧发完后对比自己的回显数检测丢失。
+	std::vector<int> m_vEmoteQueue; // 待发表情序列
+	float m_LastEmoteSendTime = -1e9f;
+	int m_EmoteRecvCount = -1;          // -1 = 等帧头
+	uint64_t m_EmoteRecvPayload = 0;
+	float m_EmoteRecvStart = -1e9f;
+	int m_EmoteFrameSent = 0;           // 当前帧已发送数（10）
+	int m_EmoteEchoSeen = 0;            // 帧发送前的自回显计数基准
+	int m_EmoteEchoTotal = 0;           // 自回显累计计数
+	float m_EmoteFrameDoneTime = -1e9f; // 帧发完时刻（丢失检测用）
+	bool m_EmoteTestFired = false;
+	void EmotePing(int Signal, int X, int Y);
+	void PumpEmoteQueue();
+
 	void TryLoadIcons();
 	void TryLoadSounds();
 	void PlaySignalSound(int Signal, vec2 WorldPos);
-	void AddMarker(int Signal, vec2 WorldPos);
+	void AddMarker(int Signal, vec2 WorldPos, int ClientId = -1); // ClientId >= 0 时在聊天框画一条图标行
 	void RenderMarkers();
 	vec2 GetPingWorldPos() const;
 	vec2 WorldToUi(vec2 WorldPos) const;
@@ -87,6 +119,12 @@ public:
 	void OnMessage(int MsgType, void *pRawMsg) override;
 
 	void Ping(int Signal, vec2 WorldPos);
+	// 信令广播载荷入口（CRelayClient 收到同服 TClient 的 ping 时调用）
+	void OnRelayPayload(const char *pText);
+	// 从消息解析信号类型（⟨B: 新格式 / ⟨P: 旧格式），失败返回 -1；
+	// chat.cpp 用它把 ping 行改写成图标行（QmClient 式聊天可视化）
+	static int SignalFromMessage(const char *pMessage);
+	static const char *SignalChatIcon(int Signal);
 	// TC 设置 Ping 页用的顺序管理
 	int LayoutType(int Sector) const;                 // 扇区 → 信号类型
 	void LayoutMove(int Sector, int Dir);             // 交换相邻扇区并写回 cvar

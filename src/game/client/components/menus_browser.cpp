@@ -1395,7 +1395,9 @@ void CMenus::RenderServerbrowserInfoScoreboard(CUIRect View, const CServerInfo *
 		NameCursor.m_FontSize = FontSize - 1.0f;
 		NameCursor.m_Flags |= TEXTFLAG_STOP_AT_END;
 		NameCursor.m_LineWidth = Name.w;
-		const char *pName = CurrentClient.m_aName;
+		char aNameBuf[MAX_NAME_LENGTH];
+		GameClient()->StreamerNameForServerBrowser(CurrentClient.m_aName, aNameBuf, sizeof(aNameBuf));
+		const char *pName = aNameBuf;
 		bool Printed = false;
 		if(g_Config.m_BrFilterString[0])
 			Printed = PrintHighlighted(pName, [&](const char *pFilteredStr, const int FilterLen) {
@@ -1414,7 +1416,9 @@ void CMenus::RenderServerbrowserInfoScoreboard(CUIRect View, const CServerInfo *
 		ClanCursor.m_FontSize = FontSize - 2.0f;
 		ClanCursor.m_Flags |= TEXTFLAG_STOP_AT_END;
 		ClanCursor.m_LineWidth = Clan.w;
-		const char *pClan = CurrentClient.m_aClan;
+		char aClanBuf[MAX_CLAN_LENGTH];
+		GameClient()->StreamerClanForServerBrowser(CurrentClient.m_aClan, aClanBuf, sizeof(aClanBuf));
+		const char *pClan = aClanBuf;
 		Printed = false;
 		if(g_Config.m_BrFilterString[0])
 			Printed = PrintHighlighted(pClan, [&](const char *pFilteredStr, const int FilterLen) {

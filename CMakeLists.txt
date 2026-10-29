@@ -2912,6 +2912,7 @@ if(CLIENT)
     components/tclient/streamer_mode.cpp
     components/tclient/streamer_word_filter.cpp
     components/tclient/streamer_word_filter.h
+    components/tclient/stb_image.h
     components/tclient/tclient.cpp
     components/tclient/tclient.h
     components/tclient/trails.cpp

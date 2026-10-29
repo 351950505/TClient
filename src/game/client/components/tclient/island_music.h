@@ -20,8 +20,9 @@ public:
 	void TogglePlayPause();
 	void NextTrack();
 	void PrevTrack();
-	// 系统音量（0~100，作用于默认播放设备）。
+	// 系统音量（0~100，作用于默认播放设备）。读取失败返回 -1。
 	void SetVolume(int Percent);
+	int GetVolume() const;
 	// 当前是否正在播放（无歌曲时返回 false）。
 	bool IsPlaying() const;
 	// 当前曲目名与歌手，无歌曲时为空串。

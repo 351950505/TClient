@@ -881,7 +881,9 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 			if(LineAuthor.m_Active)
 			{
 				str_append(CurrentLine.m_aName, " ");
-				str_append(CurrentLine.m_aName, GameClient()->StreamerName(CurrentLine.m_ClientId));
+				char aNameBuf[MAX_NAME_LENGTH];
+				GameClient()->StreamerName(CurrentLine.m_ClientId, aNameBuf, sizeof(aNameBuf));
+				str_append(CurrentLine.m_aName, aNameBuf);
 			}
 			CurrentLine.m_NameColor = TEAM_BLUE;
 			CurrentLine.m_Highlighted = false;
@@ -893,7 +895,9 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 			if(LineAuthor.m_Active)
 			{
 				str_append(CurrentLine.m_aName, " ");
-				str_append(CurrentLine.m_aName, GameClient()->StreamerName(CurrentLine.m_ClientId));
+				char aNameBuf[MAX_NAME_LENGTH];
+				GameClient()->StreamerName(CurrentLine.m_ClientId, aNameBuf, sizeof(aNameBuf));
+				str_append(CurrentLine.m_aName, aNameBuf);
 			}
 			CurrentLine.m_NameColor = TEAM_RED;
 			CurrentLine.m_Highlighted = true;
@@ -901,7 +905,7 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 		}
 		else
 		{
-			str_copy(CurrentLine.m_aName, GameClient()->StreamerName(CurrentLine.m_ClientId));
+			GameClient()->StreamerName(CurrentLine.m_ClientId, CurrentLine.m_aName, sizeof(CurrentLine.m_aName));
 		}
 
 		if(LineAuthor.m_Active)

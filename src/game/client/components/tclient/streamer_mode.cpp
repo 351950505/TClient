@@ -54,6 +54,85 @@ bool CGameClient::StreamerFilterText(char *pText) const
 	return QmStreamerWordFilter::Filter(pText, StreamerModeActive() && g_Config.m_MeStreamerFilterWords != 0);
 }
 
+// 服务器浏览器用：没有 client id，只能按名字判定好友；不是好友就遮掉。
+// 这里不做「显示成编号」——浏览器里没有编号可言，用 * 占位。
+void CGameClient::StreamerNameForServerBrowser(const char *pName, char *pBuf, int BufSize)
+{
+	if(!pBuf || BufSize <= 0)
+		return;
+	pBuf[0] = '\0';
+	if(!pName)
+		return;
+	if(!StreamerModeActive() || g_Config.m_MeStreamerHideNames == 0)
+	{
+		str_copy(pBuf, pName, BufSize);
+		return;
+	}
+	if(Friends() != nullptr && Friends()->IsFriend(pName, "", true))
+	{
+		str_copy(pBuf, pName, BufSize);
+		StreamerFilterText(pBuf);
+		return;
+	}
+	str_copy(pBuf, "***", BufSize);
+}
+
+void CGameClient::StreamerClanForServerBrowser(const char *pClan, char *pBuf, int BufSize)
+{
+	if(!pBuf || BufSize <= 0)
+		return;
+	pBuf[0] = '\0';
+	if(!pClan)
+		return;
+	if(!StreamerModeActive() || g_Config.m_MeStreamerHideNames == 0)
+	{
+		str_copy(pBuf, pClan, BufSize);
+		return;
+	}
+	if(Friends() != nullptr && Friends()->IsFriend("", pClan, true))
+	{
+		str_copy(pBuf, pClan, BufSize);
+		StreamerFilterText(pBuf);
+	}
+}
+
+void CGameClient::StreamerName(int ClientId, char *pBuf, int BufSize) const
+{
+	if(!pBuf || BufSize <= 0)
+		return;
+	pBuf[0] = '\0';
+	if(ClientId < 0 || ClientId >= MAX_CLIENTS)
+		return;
+	if(!StreamerModeActive())
+	{
+		str_copy(pBuf, m_aClients[ClientId].m_aName, BufSize);
+		return;
+	}
+	if(ShouldHideStreamerIdentity(ClientId))
+		str_format(pBuf, BufSize, "%d", ClientId);
+	else
+		str_copy(pBuf, m_aClients[ClientId].m_aName, BufSize);
+	StreamerFilterText(pBuf);
+}
+
+void CGameClient::StreamerClan(int ClientId, char *pBuf, int BufSize) const
+{
+	if(!pBuf || BufSize <= 0)
+		return;
+	pBuf[0] = '\0';
+	if(ClientId < 0 || ClientId >= MAX_CLIENTS)
+		return;
+	if(!StreamerModeActive())
+	{
+		str_copy(pBuf, m_aClients[ClientId].m_aClan, BufSize);
+		return;
+	}
+	if(ShouldHideStreamerIdentity(ClientId))
+		return;
+	str_copy(pBuf, m_aClients[ClientId].m_aClan, BufSize);
+	StreamerFilterText(pBuf);
+}
+
 const char *CGameClient::StreamerName(int ClientId) const
 {
 	if(ClientId < 0 || ClientId >= MAX_CLIENTS)

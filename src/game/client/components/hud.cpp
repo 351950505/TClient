@@ -274,7 +274,9 @@ void CHud::RenderScoreHud()
 					{
 						// draw name of the flag holder
 						int Id = aFlagCarrier[t] % MAX_CLIENTS;
-						const char *pName = GameClient()->m_aClients[Id].m_aName;
+						char aNameBuf[MAX_NAME_LENGTH];
+						GameClient()->StreamerName(Id, aNameBuf, sizeof(aNameBuf));
+						const char *pName = aNameBuf;
 						if(str_comp(pName, m_aScoreInfo[t].m_aPlayerNameText) != 0 || RecreateRect)
 						{
 							str_copy(m_aScoreInfo[t].m_aPlayerNameText, pName);
@@ -395,7 +397,9 @@ void CHud::RenderScoreHud()
 					int Id = apPlayerInfo[t]->m_ClientId;
 					if(Id >= 0 && Id < MAX_CLIENTS)
 					{
-						const char *pName = GameClient()->m_aClients[Id].m_aName;
+						char aNameBuf[MAX_NAME_LENGTH];
+						GameClient()->StreamerName(Id, aNameBuf, sizeof(aNameBuf));
+						const char *pName = aNameBuf;
 						if(str_comp(pName, m_aScoreInfo[t].m_aPlayerNameText) != 0)
 							RecreateRect = true;
 					}
@@ -455,7 +459,9 @@ void CHud::RenderScoreHud()
 					int Id = apPlayerInfo[t]->m_ClientId;
 					if(Id >= 0 && Id < MAX_CLIENTS)
 					{
-						const char *pName = GameClient()->m_aClients[Id].m_aName;
+						char aNameBuf[MAX_NAME_LENGTH];
+						GameClient()->StreamerName(Id, aNameBuf, sizeof(aNameBuf));
+						const char *pName = aNameBuf;
 						if(RecreateRect)
 						{
 							str_copy(m_aScoreInfo[t].m_aPlayerNameText, pName);

@@ -192,10 +192,12 @@ bool CScoreboard::OnInput(const IInput::CEvent &Event)
 			Music.PrevTrack();
 			return true;
 		case KEY_LEFTBRACKET:
+			SyncMediaVolume();
 			m_MediaVolume = std::max(0, m_MediaVolume - 5);
 			Music.SetVolume(m_MediaVolume);
 			return true;
 		case KEY_RIGHTBRACKET:
+			SyncMediaVolume();
 			m_MediaVolume = std::min(100, m_MediaVolume + 5);
 			Music.SetVolume(m_MediaVolume);
 			return true;
@@ -408,7 +410,9 @@ void CScoreboard::RenderSpectators(CUIRect Spectators)
 
 		const CGameClient::CClientData &ClientData = GameClient()->m_aClients[pInfo->m_ClientId];
 		{
-			const char *pClanName = ClientData.m_aClan;
+			char aClanBuf[MAX_CLAN_LENGTH];
+			GameClient()->StreamerClan(pInfo->m_ClientId, aClanBuf, sizeof(aClanBuf));
+			const char *pClanName = aClanBuf;
 			if(pClanName[0] != '\0')
 			{
 				if(GameClient()->m_aLocalIds[g_Config.m_ClDummy] >= 0 && str_comp(pClanName, GameClient()->m_aClients[GameClient()->m_aLocalIds[g_Config.m_ClDummy]].m_aClan) == 0)
@@ -432,7 +436,9 @@ void CScoreboard::RenderSpectators(CUIRect Spectators)
 			TextRender()->TextColor(color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClAuthedPlayerColor)));
 		}
 
-		TextRender()->TextEx(&Cursor, GameClient()->StreamerName(pInfo->m_ClientId));
+		char aNameBuf[MAX_NAME_LENGTH];
+		GameClient()->StreamerName(pInfo->m_ClientId, aNameBuf, sizeof(aNameBuf));
+		TextRender()->TextEx(&Cursor, aNameBuf);
 		TextRender()->TextColor(TextRender()->DefaultTextColor());
 
 		CommaNeeded = true;
@@ -825,16 +831,18 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 
 			// name
 			{
+				char aNameBuf[MAX_NAME_LENGTH];
+				GameClient()->StreamerName(pInfo->m_ClientId, aNameBuf, sizeof(aNameBuf));
 				if(g_Config.m_ClShowIds)
 				{
 					char aClientId[16];
 					GameClient()->FormatClientId(pInfo->m_ClientId, aClientId, EClientIdFormat::INDENT_AUTO);
 					str_copy(aBuf, aClientId);
-					str_append(aBuf, GameClient()->StreamerName(pInfo->m_ClientId));
+					str_append(aBuf, aNameBuf);
 				}
 				else
 				{
-					str_copy(aBuf, GameClient()->StreamerName(pInfo->m_ClientId));
+					str_copy(aBuf, aNameBuf);
 				}
 				ColorRGBA NameColor = TextColor;
 				if(ClientData.m_AuthLevel)
@@ -881,7 +889,9 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 					ClanColor = GameClient()->m_WarList.GetClanColor(pInfo->m_ClientId);
 				}
 
-				Player.m_Clan.Update(TextRender(), GameClient()->StreamerClan(pInfo->m_ClientId), FontSize, ClanLength, TEXTFLAG_RENDER | TEXTFLAG_ELLIPSIS_AT_END);
+				char aClanBuf[MAX_CLAN_LENGTH];
+				GameClient()->StreamerClan(pInfo->m_ClientId, aClanBuf, sizeof(aClanBuf));
+				Player.m_Clan.Update(TextRender(), aClanBuf, FontSize, ClanLength, TEXTFLAG_RENDER | TEXTFLAG_ELLIPSIS_AT_END);
 				Player.m_Clan.Render(TextRender(), vec2(ClanOffset + (ClanLength - std::min(Player.m_Clan.Width(), ClanLength)) / 2.0f, TextY), ClanColor);
 			}
 
@@ -948,6 +958,13 @@ void CScoreboard::RenderRecordingNotification(float x)
 	Ui()->DoLabel(&Rect, aBuf, FontSize, TEXTALIGN_ML);
 }
 
+void CScoreboard::SyncMediaVolume()
+{
+	const int SystemVolume = GameClient()->m_IslandMusic.GetVolume();
+	if(SystemVolume >= 0)
+		m_MediaVolume = SystemVolume;
+}
+
 void CScoreboard::RenderMediaPanel(CUIRect Panel)
 {
 	CIslandMusic &Music = GameClient()->m_IslandMusic;
@@ -990,6 +1007,7 @@ void CScoreboard::RenderMediaPanel(CUIRect Panel)
 		case 3:
 			if(Ui()->DoButton_FontIcon(&m_MediaVolumeDownButton, FontIcon::MINUS, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, true))
 			{
+				SyncMediaVolume();
 				m_MediaVolume = std::max(0, m_MediaVolume - 5);
 				Music.SetVolume(m_MediaVolume);
 			}
@@ -997,6 +1015,7 @@ void CScoreboard::RenderMediaPanel(CUIRect Panel)
 		case 4:
 			if(Ui()->DoButton_FontIcon(&m_MediaVolumeUpButton, FontIcon::PLUS, 0, &Btn, BUTTONFLAG_LEFT, IGraphics::CORNER_ALL, true))
 			{
+				SyncMediaVolume();
 				m_MediaVolume = std::min(100, m_MediaVolume + 5);
 				Music.SetVolume(m_MediaVolume);
 			}
@@ -1254,7 +1273,9 @@ const char *CScoreboard::GetTeamName(int Team) const
 
 		if(!pClanName)
 		{
-			pClanName = GameClient()->m_aClients[pInfo->m_ClientId].m_aClan;
+			char aClanBuf2[MAX_CLAN_LENGTH];
+			GameClient()->StreamerClan(pInfo->m_ClientId, aClanBuf2, sizeof(aClanBuf2));
+			pClanName = aClanBuf2;
 			ClanPlayers++;
 		}
 		else
@@ -1291,7 +1312,9 @@ CUi::EPopupMenuFunctionResult CScoreboard::CScoreboardPopupContext::Render(void 
 	const float FontSize = 12.0f;
 
 	View.HSplitTop(FontSize, &Label, &View);
-	pUi->DoLabel(&Label, Client.m_aName, FontSize, TEXTALIGN_ML);
+	char aNameBuf[MAX_NAME_LENGTH];
+	pScoreboard->GameClient()->StreamerName(pPopupContext->m_ClientId, aNameBuf, sizeof(aNameBuf));
+	pUi->DoLabel(&Label, aNameBuf, FontSize, TEXTALIGN_ML);
 
 	if(!pPopupContext->m_IsLocal)
 	{

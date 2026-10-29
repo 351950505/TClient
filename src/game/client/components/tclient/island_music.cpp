@@ -295,6 +295,48 @@ public:
 
 	// 用旧版 mixer API 调默认播放设备的音量。SMTC 没有 per-session 音量，
 	// 所以这是系统级音量（和音量键效果一样）。
+	// 读取默认播放设备当前音量（0~100），失败返回 -1。
+	static int GetSystemVolume()
+	{
+		HMIXER hMixer = nullptr;
+		if(mixerOpen(&hMixer, 0, 0, 0, MIXER_OBJECTF_MIXER) != MMSYSERR_NOERROR)
+			return -1;
+		int Percent = -1;
+		MIXERLINE MixerLine{};
+		MixerLine.cbStruct = sizeof(MixerLine);
+		MixerLine.dwComponentType = MIXERLINE_COMPONENTTYPE_DST_SPEAKERS;
+		if(mixerGetLineInfo((HMIXEROBJ)hMixer, &MixerLine, MIXER_GETLINEINFOF_COMPONENTTYPE) == MMSYSERR_NOERROR)
+		{
+			MIXERCONTROL MixerControl{};
+			MIXERLINECONTROLS MixerControls{};
+			MixerControls.cbStruct = sizeof(MixerControls);
+			MixerControls.dwLineID = MixerLine.dwLineID;
+			MixerControls.dwControlType = MIXERCONTROL_CONTROLTYPE_VOLUME;
+			MixerControls.cControls = 1;
+			MixerControls.cbmxctrl = sizeof(MixerControl);
+			MixerControls.pamxctrl = &MixerControl;
+			if(mixerGetLineControls((HMIXEROBJ)hMixer, &MixerControls, MIXER_GETLINECONTROLSF_ONEBYTYPE) == MMSYSERR_NOERROR)
+			{
+				MIXERCONTROLDETAILS Details{};
+				MIXERCONTROLDETAILS_UNSIGNED DetailValue{};
+				Details.cbStruct = sizeof(Details);
+				Details.dwControlID = MixerControl.dwControlID;
+				Details.cChannels = 1;
+				Details.cMultipleItems = 0;
+				Details.cbDetails = sizeof(DetailValue);
+				Details.paDetails = &DetailValue;
+				if(mixerGetControlDetails((HMIXEROBJ)hMixer, &Details, MIXER_GETCONTROLDETAILSF_VALUE) == MMSYSERR_NOERROR &&
+					MixerControl.Bounds.dwMaximum > MixerControl.Bounds.dwMinimum)
+				{
+					const double Span = (double)MixerControl.Bounds.dwMaximum - (double)MixerControl.Bounds.dwMinimum;
+					Percent = (int)(((double)DetailValue.dwValue - (double)MixerControl.Bounds.dwMinimum) / Span * 100.0 + 0.5);
+				}
+			}
+		}
+		mixerClose(hMixer);
+		return std::clamp(Percent, -1, 100);
+	}
+
 	static void SetSystemVolume(int Percent)
 	{
 		Percent = std::clamp(Percent, 0, 100);
@@ -3187,6 +3229,15 @@ void CIslandMusic::SetVolume(int Percent)
 #if TCLIENT_HAS_WINRT_MUSIC
 	std::lock_guard<std::mutex> Lock(m_pImpl->m_Mutex);
 	m_pImpl->m_PendingVolume = std::clamp(Percent, 0, 100);
+#endif
+}
+
+int CIslandMusic::GetVolume() const
+{
+#if TCLIENT_HAS_WINRT_MUSIC
+	return CImpl::GetSystemVolume();
+#else
+	return -1;
 #endif
 }
 

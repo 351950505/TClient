@@ -277,6 +277,8 @@ void CPingWheel::Ping(int Signal, vec2 WorldPos)
 
 int CPingWheel::LayoutType(int Sector) const
 {
+	if(Sector < 0 || Sector >= NUM_SIGNALS)
+		return 0;
 	int aLayout[NUM_SIGNALS];
 	PingWheelParseLayout(g_Config.m_TcPingwheelLayout, aLayout);
 	return aLayout[Sector];

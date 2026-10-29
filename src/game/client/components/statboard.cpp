@@ -517,12 +517,16 @@ void CStatboard::FormatStats(char *pDest, size_t DestSize)
 		// Game with flags
 		bool GameWithFlags = (GameClient()->m_Snap.m_pGameInfoObj && GameClient()->m_Snap.m_pGameInfoObj->m_GameFlags & GAMEFLAG_FLAGS);
 
+		char aStatName[MAX_NAME_LENGTH];
+		GameClient()->StreamerName(pInfo->m_ClientId, aStatName, sizeof(aStatName));
+		char aStatClan[MAX_CLAN_LENGTH];
+		GameClient()->StreamerClan(pInfo->m_ClientId, aStatClan, sizeof(aStatClan));
 		char aBuf[1024];
 		str_format(aBuf, sizeof(aBuf), "%d,%d,%s,%s,%d,%d,%d,%d,%.2f,%i,%.1f,%d,%d,%s,%d,%d,%d\n",
 			LocalPlayer ? 1 : 0, // Local player
 			GameClient()->m_aClients[pInfo->m_ClientId].m_Team, // Team
-			ReplaceCommata(GameClient()->m_aClients[pInfo->m_ClientId].m_aName).c_str(), // Name
-			ReplaceCommata(GameClient()->m_aClients[pInfo->m_ClientId].m_aClan).c_str(), // Clan
+			ReplaceCommata(aStatName).c_str(), // Name
+			ReplaceCommata(aStatClan).c_str(), // Clan
 			std::clamp(pInfo->m_Score, -999, 999), // Score
 			pStats->m_Frags, // Frags
 			pStats->m_Deaths, // Deaths

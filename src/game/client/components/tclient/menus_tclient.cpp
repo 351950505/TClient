@@ -1479,7 +1479,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		CUIRect EndpointBox;
 		Column.HSplitTop(LineSize + MarginExtraSmall, &EndpointBox, &Column);
 		EndpointBox.VSplitMid(&Label, &EndpointBox);
-		Ui()->DoLabel(&Label, TCLocalize("LibreTranslate endpoint:"), FontSize, TEXTALIGN_ML);
+		Ui()->DoLabel(&Label, CurrentBackend.m_pValue[0] == 'l' ? TCLocalize("LibreTranslate endpoint:") : TCLocalize("Endpoint override (optional):"), FontSize, TEXTALIGN_ML);
 		static CLineInput s_TranslateEndpoint(g_Config.m_TcTranslateEndpoint, sizeof(g_Config.m_TcTranslateEndpoint));
 		s_TranslateEndpoint.SetEmptyText("localhost:5000/translate");
 		Ui()->DoEditBox(&s_TranslateEndpoint, &EndpointBox, EditBoxFontSize);
@@ -2218,7 +2218,9 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 		ColorRGBA NameButtonColor = Ui()->CheckActiveItem(&s_vNameButtons[i]) ? ColorRGBA(1.0f, 1.0f, 1.0f, 0.75f) :
 											(Ui()->HotItem() == &s_vNameButtons[i] ? ColorRGBA(1.0f, 1.0f, 1.0f, 0.33f) : ColorRGBA(1.0f, 1.0f, 1.0f, 0.0f));
 		PlayerRect.Draw(NameButtonColor, IGraphics::CORNER_L, 5.0f);
-		Ui()->DoLabel(&NameRect, Client.m_aName, StandardFontSize, TEXTALIGN_ML);
+		char aStreamerName[MAX_NAME_LENGTH];
+		GameClient()->StreamerName(i, aStreamerName, sizeof(aStreamerName));
+		Ui()->DoLabel(&NameRect, aStreamerName, StandardFontSize, TEXTALIGN_ML);
 		if(Ui()->DoButtonLogic(&s_vNameButtons[i], false, &PlayerRect, BUTTONFLAG_LEFT))
 		{
 			s_IsName = true;

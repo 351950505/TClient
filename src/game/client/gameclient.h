@@ -689,8 +689,15 @@ public:
 	bool ShouldHideStreamerIdentity(int ClientId) const;
 	bool ShouldHideStreamerSkin(int ClientId) const;
 	bool StreamerDefaultFlags() const;
+	// 返回内部环形缓冲的指针，只在下次调用前有效；需要长期保存请用带缓冲的版本。
 	const char *StreamerName(int ClientId) const;
 	const char *StreamerClan(int ClientId) const;
+	// 写入调用方缓冲，避免依赖上面两个接口的临时指针生命周期。
+	void StreamerName(int ClientId, char *pBuf, int BufSize) const;
+	void StreamerClan(int ClientId, char *pBuf, int BufSize) const;
+	// 服务器浏览器里的玩家还没有 client id，只能按名字/战队判定好友。
+	void StreamerNameForServerBrowser(const char *pName, char *pBuf, int BufSize);
+	void StreamerClanForServerBrowser(const char *pClan, char *pBuf, int BufSize);
 	bool StreamerFilterText(char *pText) const;
 	void UpdateStreamerMode();
 	bool m_aStreamerLastHideSkin[MAX_CLIENTS] = {};

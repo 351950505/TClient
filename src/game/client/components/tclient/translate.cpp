@@ -406,12 +406,16 @@ public:
 		ITranslateBackendHttp(pName)
 	{
 		// GET with query string: this endpoint does not accept a form body.
-		// The URL buffer is 256 bytes, so long messages are truncated rather
-		// than silently failing -- chat lines are capped well below that.
-		char aText[192];
-		UrlEncode(pText, aText, sizeof(aText));
-		char aUrl[256];
+		// CHttpRequest::m_aUrl is 256 bytes. Size the text buffer from what is
+		// left after the base URL and fixed query prefix, so a long message is
+		// not silently truncated into a wrong translation.
+		char aText[256];
 		const char *pBase = g_Config.m_TcTranslateEndpoint[0] != '\0' ? g_Config.m_TcTranslateEndpoint : "https://clients5.google.com/translate_a/t";
+		const int FixedLen = str_length(pBase) +
+				      (int)str_length("?client=dict-chrome-ex&sl=auto&tl=&q=") + str_length(EncodeTarget(pTargetLang));
+		const int TextBudget = std::clamp(256 - FixedLen - 1, 16, (int)sizeof(aText) - 1);
+		UrlEncode(pText, aText, (size_t)TextBudget + 1);
+		char aUrl[256];
 		str_format(aUrl, sizeof(aUrl), "%s?client=dict-chrome-ex&sl=auto&tl=%s&q=%s", pBase, EncodeTarget(pTargetLang), aText);
 		CreateHttpRequest(Http, aUrl);
 	}

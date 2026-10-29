@@ -823,6 +823,8 @@ void CGameClient::UpdatePositions()
 
 void CGameClient::OnRender()
 {
+	UpdateStreamerMode();
+
 	const ColorRGBA ClearColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClOverlayEntities ? g_Config.m_ClBackgroundEntitiesColor : g_Config.m_ClBackgroundColor));
 	Graphics()->Clear(ClearColor.r, ClearColor.g, ClearColor.b);
 
@@ -3369,7 +3371,10 @@ void CGameClient::CClientData::UpdateSkinInfo()
 	const auto &&ApplySkinProperties = [&]() {
 		if(SkinDescriptor.m_Flags & CSkinDescriptor::FLAG_SIX)
 		{
-			m_pSkinInfo->TeeRenderInfo().ApplyColors(m_UseCustomColor, m_ColorBody, m_ColorFeet);
+			if(m_pGameClient->ShouldHideStreamerSkin(ClientId()))
+				m_pSkinInfo->TeeRenderInfo().ApplyColors(false, 0, 0);
+			else
+				m_pSkinInfo->TeeRenderInfo().ApplyColors(m_UseCustomColor, m_ColorBody, m_ColorFeet);
 		}
 		if(SkinDescriptor.m_Flags & CSkinDescriptor::FLAG_SEVEN)
 		{
@@ -3559,7 +3564,12 @@ CSkinDescriptor CGameClient::CClientData::ToSkinDescriptor() const
 	CSkinDescriptor SkinDescriptor;
 
 	CTranslationContext::CClientData &TranslatedClient = m_pGameClient->m_pClient->m_TranslationContext.m_aClients[ClientId()];
-	if(m_Active && !TranslatedClient.m_Active)
+	if(m_Active && m_pGameClient->ShouldHideStreamerSkin(ClientId()))
+	{
+		SkinDescriptor.m_Flags |= CSkinDescriptor::FLAG_SIX;
+		str_copy(SkinDescriptor.m_aSkinName, "default");
+	}
+	else if(m_Active && !TranslatedClient.m_Active)
 	{
 		SkinDescriptor.m_Flags |= CSkinDescriptor::FLAG_SIX;
 		str_copy(SkinDescriptor.m_aSkinName, m_aSkinName);

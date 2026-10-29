@@ -182,29 +182,55 @@ void CPingWheel::TryLoadSounds()
 	}
 }
 
-void CPingWheel::PlaySignalSound(int Signal)
+void CPingWheel::PlaySignalSound(int Signal, vec2 WorldPos)
 {
 	TryLoadSounds();
 	const int SoundId = m_aSoundIds[Signal];
-	if(SoundId >= 0)
-		GameClient()->m_Sounds.PlaySample(CSounds::CHN_GUI, SoundId, 0, 1.0f);
+	if(SoundId < 0)
+		return;
+
+	// 按距离衰减：以自己角色的位置为准（观战/死亡时用镜头中心），超出可听半径就完全静音。
+	// 这样信号只在附近的玩家才听得到，而不是全图都响。
+	CGameClient *pGC = GameClient();
+	const vec2 Listener = pGC->m_Snap.m_pLocalCharacter ? pGC->m_LocalCharacterPos : pGC->m_Camera.m_Center;
+	const float Range = (float)g_Config.m_TcPingwheelSoundRange;
+	const float Distance = distance(Listener, WorldPos);
+	float Volume = 1.0f;
+	if(Range > 0.0f)
+	{
+		if(Distance >= Range)
+			return;
+		Volume = 1.0f - Distance / Range;
+		Volume *= Volume; // 平方衰减，远处掉得快
+	}
+	if(Volume <= 0.01f)
+		return;
+	GameClient()->m_Sounds.PlaySample(CSounds::CHN_PINGWHEEL, SoundId, 0, Volume);
 }
 
 vec2 CPingWheel::GetPingWorldPos() const
 {
 	CGameClient *pGC = GameClient();
-	// 观察模式：锁定跟观→被观战者准星；自由视角/无扩展数据→鼠标所在世界位置
-	if(pGC->m_Snap.m_SpecInfo.m_Active)
-	{
-		if(pGC->m_CursorInfo.IsAvailable())
-			return pGC->m_CursorInfo.WorldTarget();
-		const CUIRect *pUiScreen = Ui()->Screen();
-		const vec2 Fraction = (Ui()->MousePos() - vec2(pUiScreen->x, pUiScreen->y)) / vec2(pUiScreen->w, pUiScreen->h);
-		CScreenRect ScreenRect = Graphics()->MapScreenToWorld(pGC->m_Camera.m_Center.x, pGC->m_Camera.m_Center.y, 100.0f, 100.0f, 100.0f, 0, 0, Graphics()->ScreenAspect(), 1.0f);
-		return pGC->m_Camera.m_Center + (Fraction - vec2(0.5f, 0.5f)) * (ScreenRect.m_BottomRight - ScreenRect.m_TopLeft) * pGC->m_Camera.m_Zoom;
-	}
-	// 正常游戏：准星世界坐标
-	return pGC->m_Controls.m_aTargetPos[g_Config.m_ClDummy];
+	// 准星贴图是用 zoom=1 的投影画的（见 CHud::RenderCursor），地图和标记用的是相机
+	// zoom 投影，两者只在 zoom==1 时重合。所以不能直接把 m_aTargetPos 当世界坐标发出去，
+	// 否则不同缩放的玩家会 ping 到不同位置。这里反过来算：先取准星的屏幕位置，再用
+	// 地图投影反解成世界坐标 —— 玩家看到准星压在哪，ping 就落在哪，与缩放无关。
+	const vec2 Center = pGC->m_Camera.m_Center;
+	const CScreenRect CursorRect = Graphics()->MapScreenToWorld(Center.x, Center.y, 100.0f, 100.0f, 100.0f, 0, 0, Graphics()->ScreenAspect(), 1.0f);
+	const vec2 CursorWorld = pGC->m_Controls.m_aTargetPos[g_Config.m_ClDummy];
+	const vec2 Fraction = (CursorWorld - CursorRect.m_TopLeft) / (CursorRect.m_BottomRight - CursorRect.m_TopLeft);
+
+	const CScreenRect MapRect = Graphics()->MapScreenToWorld(Center.x, Center.y, 100.0f, 100.0f, 100.0f, 0, 0, Graphics()->ScreenAspect(), pGC->m_Camera.m_Zoom);
+	return MapRect.m_TopLeft + Fraction * (MapRect.m_BottomRight - MapRect.m_TopLeft);
+}
+
+vec2 CPingWheel::WorldToUi(vec2 WorldPos) const
+{
+	const vec2 Center = GameClient()->m_Camera.m_Center;
+	CScreenRect ScreenRect = Graphics()->MapScreenToWorld(Center.x, Center.y, 100.0f, 100.0f, 100.0f, 0, 0, Graphics()->ScreenAspect(), GameClient()->m_Camera.m_Zoom);
+	const vec2 Fraction = (WorldPos - ScreenRect.m_TopLeft) / (ScreenRect.m_BottomRight - ScreenRect.m_TopLeft);
+	const CUIRect *pUiScreen = Ui()->Screen();
+	return vec2(pUiScreen->x, pUiScreen->y) + Fraction * vec2(pUiScreen->w, pUiScreen->h);
 }
 
 void CPingWheel::AddMarker(int Signal, vec2 WorldPos)
@@ -246,7 +272,7 @@ void CPingWheel::Ping(int Signal, vec2 WorldPos)
 	GameClient()->m_Chat.SendChat(g_Config.m_TcPingwheelTeam, aBuf);
 
 	AddMarker(Signal, WorldPos);
-	PlaySignalSound(Signal);
+	PlaySignalSound(Signal, WorldPos);
 }
 
 int CPingWheel::LayoutType(int Sector) const
@@ -311,13 +337,16 @@ void CPingWheel::OnMessage(int MsgType, void *pRawMsg)
 
 	AddMarker(Signal, vec2((float)X, (float)Y));
 	if(pMsg->m_ClientId != GameClient()->m_Snap.m_LocalClientId)
-		PlaySignalSound(Signal);
+		PlaySignalSound(Signal, vec2((float)X, (float)Y));
 }
 
 void CPingWheel::RenderMarkers()
 {
 	const vec2 Center = GameClient()->m_Camera.m_Center;
-	CScreenRect ScreenRect = Graphics()->MapScreenToWorld(Center.x, Center.y, 100.0f, 100.0f, 100.0f, 0, 0, Graphics()->ScreenAspect(), 1.0f);
+	const CScreenRect ScreenRect = Graphics()->MapScreenToWorld(Center.x, Center.y, 100.0f, 100.0f, 100.0f, 0, 0, Graphics()->ScreenAspect(), GameClient()->m_Camera.m_Zoom);
+	// 保存并还原投影：这个组件后面还有 WarList / 灵动岛 / 聊天等按屏幕坐标绘制的东西，
+	// 不还原会把世界投影漏给它们。
+	const CScreenRect PrevRect = Graphics()->GetScreen();
 	Graphics()->MapScreen(ScreenRect);
 
 	const float Now = Client()->LocalTime();
@@ -361,6 +390,31 @@ void CPingWheel::RenderMarkers()
 			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 		}
 	}
+
+	Graphics()->MapScreen(PrevRect);
+}
+
+void CPingWheel::RenderSpecCursor()
+{
+	CGameClient *pGC = GameClient();
+	if(!pGC->m_Snap.m_SpecInfo.m_Active || m_Active || Client()->State() == IClient::STATE_DEMOPLAYBACK)
+		return;
+	if(pGC->m_Menus.IsActive() || pGC->m_Chat.IsActive() || pGC->m_Scoreboard.IsActive() || pGC->m_Emoticon.IsActive())
+		return;
+	const vec2 Mouse = pGC->m_Controls.m_aMousePos[g_Config.m_ClDummy];
+	const float Now = Client()->LocalTime();
+	if(Mouse != m_LastSpecMouse)
+	{
+		m_LastSpecMouse = Mouse;
+		m_LastSpecMouseMove = Now;
+	}
+	const float Idle = Now - m_LastSpecMouseMove;
+	const float Alpha = Idle < 5.0f ? 1.0f : std::max(0.0f, 1.0f - (Idle - 5.0f) / 0.5f);
+	if(Alpha <= 0.0f)
+		return;
+	const vec2 Pos = WorldToUi(pGC->m_Controls.m_aTargetPos[g_Config.m_ClDummy]);
+	Ui()->MapScreen();
+	RenderTools()->RenderCursor(Pos, 24.0f, Alpha);
 }
 
 void CPingWheel::OnRender()
@@ -371,6 +425,7 @@ void CPingWheel::OnRender()
 	TryLoadIcons();
 	TryLoadSounds();
 	RenderMarkers();
+	RenderSpecCursor();
 
 	static const auto QuadEaseInOut = [](float t) -> float {
 		if(t == 0.0f)
@@ -432,7 +487,7 @@ void CPingWheel::OnRender()
 		m_SelectedSignal = aLayout[(int)PositiveMod(std::round(SelectorAngle / (2.0f * pi) * (float)NUM_SIGNALS), NUM_SIGNALS)];
 
 	const float Phase = AnimationTime == 0.0f ? 1.0f : QuadEaseInOut(m_AnimationTime / AnimationTime);
-	const vec2 ScreenCenter = Ui()->Screen()->Center();
+	const vec2 ScreenCenter = WorldToUi(m_PingWorldPos);
 
 	Ui()->MapScreen();
 

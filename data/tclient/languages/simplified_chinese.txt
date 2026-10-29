@@ -1077,3 +1077,93 @@ Spread duplicate packets (anti burst loss)
 == 错峰发包（抗突发丢包，副本间隔铺开）
 Spread interval
 == 错峰间隔
+
+Enable ping wheel (off = cannot send, does not receive others)
+== 启用信号轮盘（关闭后不能发送，也不接收他人信号）
+
+Ping wheel key (hold to choose)
+== 信号轮盘按键（按住选择）
+
+Quick zoom key (press to toggle, press again to restore)
+== 一键缩放按键（按一下切换，再按恢复）
+
+Quick zoom target
+== 一键缩放目标
+
+Up
+== 上
+
+Down
+== 下
+
+Streamer Mode
+== 主播模式
+
+Enable streamer mode
+== 启用主播模式
+
+Filter sensitive words (chat, names, clans)
+== 屏蔽敏感词（聊天、名字、战队）
+
+Hide non-friend names (show client ID) and clans
+== 隐藏非好友名字（显示为编号）和战队
+
+Non-friends use default skin
+== 非好友使用默认皮肤
+
+Hide country flags everywhere
+== 各处隐藏国旗
+
+Custom word list file
+== 自定义屏蔽词文件
+
+One word per line, # starts a comment
+== 每行一个词，# 开头为注释
+
+You and your friends are never hidden. Sub-options only apply while the master switch is on.
+== 好友和你自己不会被隐藏。各子项只在总开关打开时生效。
+
+Message muting
+== 消息屏蔽
+
+Mute team chat
+== 屏蔽队伍聊天
+
+Mute whispers
+== 屏蔽私聊
+
+Mute system messages
+== 屏蔽系统消息
+
+Mute kill feed
+== 屏蔽击杀信息
+
+Mute finish feed
+== 屏蔽通关信息
+
+Console commands: me_mute_team_chat / me_mute_whisper / me_mute_system_chat / me_mute_kill_feed / me_mute_finish_feed
+== 对应 F1 控制台命令：me_mute_team_chat / me_mute_whisper / me_mute_system_chat / me_mute_kill_feed / me_mute_finish_feed
+
+Horizontal offset
+== 水平偏移
+
+Vertical offset
+== 垂直偏移
+
+Transparent mode (drop the black capsule)
+== 透明模式（不画黑色胶囊底）
+
+Island transparent mode
+== 灵动岛透明模式
+
+Text outline strength
+== 文字描边强度
+
+Signal sound volume
+== 信号音效音量
+
+Quick zoom
+== 一键缩放
+
+Sound audible range (0 = whole map)
+== 音效可听距离（0 = 全图可听）

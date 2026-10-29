@@ -690,6 +690,20 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 	if(ClientId == CLIENT_MSG && !g_Config.m_TcShowChatClient)
 		return;
 
+	// ME: per-category muting
+	if(ClientId == SERVER_MSG && g_Config.m_MeMuteSystemChat)
+		return;
+	if(Team == TEAM_WHISPER_SEND || Team == TEAM_WHISPER_RECV)
+	{
+		if(g_Config.m_MeMuteWhisper)
+			return;
+	}
+	else if(Team == TEAM_RED || Team == TEAM_BLUE)
+	{
+		if(g_Config.m_MeMuteTeamChat)
+			return;
+	}
+
 	// TClient
 	if(([&]() {
 		   if(ClientId == CLIENT_MSG || ClientId == SERVER_MSG)
@@ -833,6 +847,7 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 	CurrentLine.m_Highlighted = Highlighted;
 
 	str_copy(CurrentLine.m_aText, pLine);
+	GameClient()->StreamerFilterText(CurrentLine.m_aText);
 
 	if(CurrentLine.m_ClientId == SERVER_MSG)
 	{
@@ -866,7 +881,7 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 			if(LineAuthor.m_Active)
 			{
 				str_append(CurrentLine.m_aName, " ");
-				str_append(CurrentLine.m_aName, LineAuthor.m_aName);
+				str_append(CurrentLine.m_aName, GameClient()->StreamerName(CurrentLine.m_ClientId));
 			}
 			CurrentLine.m_NameColor = TEAM_BLUE;
 			CurrentLine.m_Highlighted = false;
@@ -878,7 +893,7 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 			if(LineAuthor.m_Active)
 			{
 				str_append(CurrentLine.m_aName, " ");
-				str_append(CurrentLine.m_aName, LineAuthor.m_aName);
+				str_append(CurrentLine.m_aName, GameClient()->StreamerName(CurrentLine.m_ClientId));
 			}
 			CurrentLine.m_NameColor = TEAM_RED;
 			CurrentLine.m_Highlighted = true;
@@ -886,7 +901,7 @@ void CChat::AddLine(int ClientId, int Team, const char *pLine)
 		}
 		else
 		{
-			str_copy(CurrentLine.m_aName, LineAuthor.m_aName);
+			str_copy(CurrentLine.m_aName, GameClient()->StreamerName(CurrentLine.m_ClientId));
 		}
 
 		if(LineAuthor.m_Active)

@@ -65,10 +65,14 @@ private:
 	bool RateLimitedAndRecord();
 	void TryLoadIcons();
 	void TryLoadSounds();
-	void PlaySignalSound(int Signal);
+	void PlaySignalSound(int Signal, vec2 WorldPos);
 	void AddMarker(int Signal, vec2 WorldPos);
 	void RenderMarkers();
 	vec2 GetPingWorldPos() const;
+	vec2 WorldToUi(vec2 WorldPos) const;
+	void RenderSpecCursor();
+	vec2 m_LastSpecMouse = vec2(0.0f, 0.0f);
+	float m_LastSpecMouseMove = 0.0f;
 
 public:
 	CPingWheel();

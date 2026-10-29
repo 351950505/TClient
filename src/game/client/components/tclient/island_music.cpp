@@ -487,7 +487,9 @@ public:
 	{
 		if(W <= 0 || H <= 0)
 			return IGraphics::CTextureHandle();
-		const float R = std::clamp(Rounding, 0.0f, std::min(W, H) * 0.5f);
+		// 允许圆角半径达到短边全长：胶囊端部是宽 H/2 的半圆，其半径就是 H/2，
+		// 旧的 min(W,H)*0.5 上限会把它压成 H/4，端部看起来不够圆。
+		const float R = std::clamp(Rounding, 0.0f, (float)std::min(W, H));
 		const SShapeKey Key{W, H, (int)std::lround(R * 100.0f), Corners, (int)std::lround(Inset * 100.0f)};
 		auto It = m_ShapeCache.find(Key);
 		if(It != m_ShapeCache.end() && It->second.IsValid())
@@ -601,6 +603,33 @@ public:
 		m_pGraphics->TextureClear();
 	}
 
+	// 胶囊 = 左右两个固定尺寸的端帽 + 中间一段实心矩形。
+	// 旧实现把整块胶囊烘焙成一张纹理，而纹理键里带宽度；歌词每换一行宽度就变，
+	// 于是每行都要重新做一次 2x 超采样的大图烘焙（1080p 下约 1100x150），
+	// 这就是切歌词时掉帧的根源。端帽尺寸只跟高度有关，宽度变化不再触发烘焙。
+	void DrawPill(float X, float Y, float W, float H, int Corners, ColorRGBA Color)
+	{
+		const float CapW = H * 0.5f;
+		if(W <= CapW * 2.0f + 0.5f)
+		{
+			DrawShape(X, Y, W, H, H * 0.5f, Corners, Color);
+			return;
+		}
+		const int LeftCorners = Corners & (IGraphics::CORNER_TL | IGraphics::CORNER_BL);
+		const int RightCorners = Corners & (IGraphics::CORNER_TR | IGraphics::CORNER_BR);
+		// DrawShape 会把位置和尺寸取整到整像素，中间矩形必须用同一套取整后的边界，
+		// 否则缩放不是整数时两者错开半像素，接缝处会露出一条细缝。
+		const int LeftX = (int)std::lround(X);
+		const int CapWi = (int)std::lround(CapW);
+		const int RightX = (int)std::lround(X + W - CapW);
+		DrawShape(X, Y, CapW, H, H * 0.5f, LeftCorners, Color);
+		DrawShape(X + W - CapW, Y, CapW, H, H * 0.5f, RightCorners, Color);
+		const float FillX = (float)(LeftX + CapWi);
+		const float FillW = (float)(RightX - (LeftX + CapWi));
+		if(FillW > 0.0f)
+			m_pGraphics->DrawRect(FillX, (float)std::lround(Y), FillW, (float)std::lround(H), Color, IGraphics::CORNER_NONE, 0.0f);
+	}
+
 	// Rounded panel with a 1 px light rim. The rim is a full-size tinted blit and
 	// the body is drawn 1 px smaller on top, so the outermost pixel stays visible
 	// as a hairline that follows the antialiased silhouette.
@@ -609,12 +638,12 @@ public:
 		const ColorRGBA Body(0.027f, 0.031f, 0.039f, 1.0f);
 		if(Rim)
 		{
-			DrawShape(X, Y, W, H, Rounding, Corners, ColorRGBA(1.0f, 1.0f, 1.0f, 0.07f));
-			DrawShape(X + 1.0f, Y + 1.0f, W - 2.0f, H - 2.0f, std::max(0.0f, Rounding - 1.0f), Corners, Body);
+			DrawPill(X, Y, W, H, Corners, ColorRGBA(1.0f, 1.0f, 1.0f, 0.07f));
+			DrawPill(X + 1.0f, Y + 1.0f, W - 2.0f, H - 2.0f, Corners, Body);
 		}
 		else
 		{
-			DrawShape(X, Y, W, H, Rounding, Corners, Body);
+			DrawPill(X, Y, W, H, Corners, Body);
 		}
 	}
 
@@ -2489,7 +2518,9 @@ public:
 		// edge with all four corners rounded (a true floating capsule).
 		const bool NotchStyle = g_Config.m_TcIslandNotch != 0;
 		// 刘海模式整体上移 1px：把烘焙纹理顶边的 AA 半透明像素推出屏幕，让顶边真正"贴合"
-		const float PillY = NotchStyle ? -1.0f : Height * 0.55f;
+		const float OffsetX = (float)g_Config.m_TcIslandOffsetX * Scale;
+		const float OffsetY = (float)g_Config.m_TcIslandOffsetY * Scale;
+		const float PillY = (NotchStyle ? -1.0f : Height * 0.55f) + OffsetY;
 		const int PillCorners = NotchStyle ? (IGraphics::CORNER_BL | IGraphics::CORNER_BR) : IGraphics::CORNER_ALL;
 		// 两种模式都是完整胶囊（端部半径 = 高度一半，iOS 灵动岛观感）。
 		// 旧的 14px 圆角矩形端部弧太短，看起来"方"——用户反馈的"圆角不够光滑"即此。
@@ -2520,8 +2551,9 @@ public:
 			float IdleW, IdleH;
 			if(ShowIdleTime)
 			{
-				const float IdleTextW = m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
-				IdleW = IdleTextW + IdlePad * 2.0f;
+				// 固定宽度：计时器数字宽度会随时间变化（1:09 -> 1:10），跟着它伸缩
+				// 每次都要换一张端帽纹理。这里按 8px 网格取一个不会变的上限宽度。
+				IdleW = std::ceil((m_pTextRender->TextWidth(IdleTimerSize, "00:00:00") + IdlePad * 2.0f) / 8.0f) * 8.0f;
 				IdleH = Height;
 			}
 			else
@@ -2530,8 +2562,9 @@ public:
 				IdleH = Height * 0.42f;
 			}
 
-			const float IdleX = (ScreenW - IdleW) * 0.5f;
-			DrawPanel(IdleX, PillY, IdleW, IdleH, PillRounding, PillCorners, false);
+			const float IdleX = (ScreenW - IdleW) * 0.5f + OffsetX;
+			if(g_Config.m_TcIslandTransparent == 0)
+				DrawPanel(IdleX, PillY, IdleW, IdleH, PillRounding, PillCorners, false);
 			if(ShowIdleTime)
 			{
 				const float IdleTextW = m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
@@ -2626,9 +2659,12 @@ public:
 		const float MinPillW = 180.0f * Scale;
 
 		const float TextW = std::max(0.0f, std::min(FullTextW, MaxPillW - ChromeW));
-		const float Width = std::clamp(ChromeW + TextW, MinPillW, MaxPillW);
+		// 宽度固定：胶囊不再随歌词长短伸缩，换行时连宽度都不变，因此端帽纹理永远是
+		// 同一张、整帧不需要任何新的烘焙。长歌词由下面的 FitText/marquee 在框内处理。
+		(void)TextW;
+		const float Width = std::floor(std::clamp(MaxPillW, MinPillW, MaxPillW) / 8.0f) * 8.0f;
 
-		const float X = (ScreenW - Width) * 0.5f;
+		const float X = (ScreenW - Width) * 0.5f + OffsetX;
 
 		// ---- draw the capsule body ------------------------------------------
 		// Gauge style: no halo, no glow. One inset hairline marks the rim, and the
@@ -2638,7 +2674,13 @@ public:
 		// The silhouette is baked into an RGBA texture with supersampled coverage
 		// instead of using DrawRect's triangle fan, which has no antialiasing and
 		// left the arcs visibly stair-stepped.
-		DrawPanel(X, PillY, Width, Height, PillRounding, PillCorners, !NotchStyle);
+		// 透明模式：只画内容，不画黑色胶囊底（适合叠在游戏画面上或自己加遮罩）。
+		// 没有黑底后白字压在亮画面上会糊，所以透明模式给文字加一圈黑描边。
+		const bool TransparentMode = g_Config.m_TcIslandTransparent != 0;
+		if(TransparentMode)
+			m_pTextRender->TextOutlineColor(0.0f, 0.0f, 0.0f, std::clamp((float)g_Config.m_TcIslandTransparentTextShadow / 100.0f, 0.0f, 1.0f));
+		if(!TransparentMode)
+			DrawPanel(X, PillY, Width, Height, PillRounding, PillCorners, !NotchStyle);
 
 		// ---- bottom progress rail -------------------------------------------
 		// A hairline of the track's elapsed fraction, clipped to the rounded body
@@ -2802,7 +2844,9 @@ public:
 				const float BarH = std::max(EqH * 0.22f, EqH * Frac);
 				// heights are whole pixels, so the shape cache holds at most one
 				// entry per distinct bar height instead of growing every frame.
-				const float SnappedH = std::max(2.0f, std::round(BarH));
+				// 2px 量化：高度每差 1px 就是一张新烘焙纹理，逐帧变化会把
+				// 形状缓存冲爆（缓存满 64 条会整体清空重烤），也让每一帧都在烘焙。
+				const float SnappedH = std::max(2.0f, std::round(BarH * 0.5f) * 2.0f);
 				DrawShape(EqCellX + EqPadL + i * (EqBarW + EqBarGap), EqY + (EqH - SnappedH), EqBarW, SnappedH,
 					EqBarW * 0.5f, IGraphics::CORNER_ALL,
 					ColorRGBA(0.12f, 0.84f, 0.38f, m_ClockPlaying ? 0.85f : 0.35f));
@@ -2972,6 +3016,8 @@ public:
 			m_pTextRender->Text(TextX, PillY + (Height - LyricSize) * 0.5f, LyricSize, aFitSong);
 		}
 		m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
+		if(TransparentMode)
+			m_pTextRender->TextOutlineColor(m_pTextRender->DefaultTextOutlineColor());
 	}
 };
 

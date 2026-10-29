@@ -2894,7 +2894,10 @@ if(CLIENT)
     components/tclient/outlines.h
     components/tclient/pet.cpp
     components/tclient/pet.h
+    components/tclient/pingwheel.cpp
+    components/tclient/pingwheel.h
     components/tclient/player_indicator.cpp
+    components/tclient/player_display_privacy.h
     components/tclient/player_indicator.h
     components/tclient/rainbow.cpp
     components/tclient/rainbow.h
@@ -2906,6 +2909,9 @@ if(CLIENT)
     components/tclient/skinprofiles.h
     components/tclient/statusbar.cpp
     components/tclient/statusbar.h
+    components/tclient/streamer_mode.cpp
+    components/tclient/streamer_word_filter.cpp
+    components/tclient/streamer_word_filter.h
     components/tclient/tclient.cpp
     components/tclient/tclient.h
     components/tclient/trails.cpp

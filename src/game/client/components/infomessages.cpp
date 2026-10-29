@@ -209,10 +209,18 @@ void CInfoMessages::OnMessage(int MsgType, void *pRawMsg)
 		OnTeamKillMessage(static_cast<CNetMsg_Sv_KillMsgTeam *>(pRawMsg));
 		break;
 	case NETMSGTYPE_SV_KILLMSG:
+	{
+		if(g_Config.m_MeMuteKillFeed)
+			return;
 		OnKillMessage(static_cast<CNetMsg_Sv_KillMsg *>(pRawMsg));
+	}
 		break;
 	case NETMSGTYPE_SV_RACEFINISH:
+	{
+		if(g_Config.m_MeMuteFinishFeed)
+			return;
 		OnRaceFinishMessage(static_cast<CNetMsg_Sv_RaceFinish *>(pRawMsg));
+	}
 		break;
 	}
 }
@@ -256,14 +264,14 @@ void CInfoMessages::OnKillMessage(const CNetMsg_Sv_KillMsg *pMsg)
 		Kill.m_TeamSize = 1;
 		Kill.m_aVictimIds[0] = pMsg->m_Victim;
 		Kill.m_VictimDDTeam = GameClient()->m_Teams.Team(Kill.m_aVictimIds[0]);
-		str_copy(Kill.m_aVictimName, GameClient()->m_aClients[Kill.m_aVictimIds[0]].m_aName);
+		str_copy(Kill.m_aVictimName, GameClient()->StreamerName(Kill.m_aVictimIds[0]));
 		Kill.m_apVictimManagedTeeRenderInfos[0] = GameClient()->CreateManagedTeeRenderInfo(GameClient()->m_aClients[Kill.m_aVictimIds[0]]);
 	}
 
 	if(GameClient()->m_aClients[pMsg->m_Killer].m_Active)
 	{
 		Kill.m_KillerId = pMsg->m_Killer;
-		str_copy(Kill.m_aKillerName, GameClient()->m_aClients[Kill.m_KillerId].m_aName);
+		str_copy(Kill.m_aKillerName, GameClient()->StreamerName(Kill.m_KillerId));
 		Kill.m_pKillerManagedTeeRenderInfo = GameClient()->CreateManagedTeeRenderInfo(GameClient()->m_aClients[Kill.m_KillerId]);
 	}
 
@@ -291,7 +299,7 @@ void CInfoMessages::OnRaceFinishMessage(const CNetMsg_Sv_RaceFinish *pMsg)
 	Finish.m_TeamSize = 1;
 	Finish.m_aVictimIds[0] = pMsg->m_ClientId;
 	Finish.m_VictimDDTeam = GameClient()->m_Teams.Team(Finish.m_aVictimIds[0]);
-	str_copy(Finish.m_aVictimName, GameClient()->m_aClients[Finish.m_aVictimIds[0]].m_aName);
+	str_copy(Finish.m_aVictimName, GameClient()->StreamerName(Finish.m_aVictimIds[0]));
 	Finish.m_apVictimManagedTeeRenderInfos[0] = GameClient()->CreateManagedTeeRenderInfo(GameClient()->m_aClients[pMsg->m_ClientId]);
 
 	Finish.m_Diff = pMsg->m_Diff;

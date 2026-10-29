@@ -1,0 +1,135 @@
+#include "player_display_privacy.h"
+#include "streamer_word_filter.h"
+
+#include <base/str.h>
+
+#include <engine/shared/config.h>
+#include <engine/storage.h>
+
+#include <game/client/gameclient.h>
+
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+bool CGameClient::StreamerModeActive() const
+{
+	return g_Config.m_MeStreamerMode != 0;
+}
+
+static bool IsStreamerLocal(const CGameClient &GameClient, int ClientId)
+{
+	return ClientId == GameClient.m_aLocalIds[0] || ClientId == GameClient.m_aLocalIds[1] || ClientId == GameClient.m_Snap.m_LocalClientId;
+}
+
+static QmPlayerDisplayPrivacy::SDecisions ResolveStreamerPrivacy(const CGameClient &GameClient, int ClientId)
+{
+	if(!GameClient.StreamerModeActive() || ClientId < 0 || ClientId >= MAX_CLIENTS)
+		return {};
+	QmPlayerDisplayPrivacy::SSettings Settings{g_Config.m_MeStreamerHideNames != 0, g_Config.m_MeStreamerHideSkins != 0, false};
+	QmPlayerDisplayPrivacy::SPlayer Player;
+	Player.m_ClientId = ClientId;
+	Player.m_Local = IsStreamerLocal(GameClient, ClientId);
+	Player.m_Friend = GameClient.m_aClients[ClientId].m_Friend;
+	return QmPlayerDisplayPrivacy::Resolve(Settings, Player);
+}
+
+bool CGameClient::ShouldHideStreamerIdentity(int ClientId) const
+{
+	return ResolveStreamerPrivacy(*this, ClientId).m_HideIdentity;
+}
+
+bool CGameClient::ShouldHideStreamerSkin(int ClientId) const
+{
+	return ResolveStreamerPrivacy(*this, ClientId).m_HideSkin;
+}
+
+bool CGameClient::StreamerDefaultFlags() const
+{
+	return StreamerModeActive() && g_Config.m_MeStreamerDefaultFlags != 0;
+}
+
+bool CGameClient::StreamerFilterText(char *pText) const
+{
+	return QmStreamerWordFilter::Filter(pText, StreamerModeActive() && g_Config.m_MeStreamerFilterWords != 0);
+}
+
+const char *CGameClient::StreamerName(int ClientId) const
+{
+	if(ClientId < 0 || ClientId >= MAX_CLIENTS)
+		return "";
+	if(!StreamerModeActive())
+		return m_aClients[ClientId].m_aName;
+	char *pBuf = m_aaStreamerTextBuf[m_StreamerTextBufIndex];
+	m_StreamerTextBufIndex = (m_StreamerTextBufIndex + 1) % (int)std::size(m_aaStreamerTextBuf);
+	if(ShouldHideStreamerIdentity(ClientId))
+		str_format(pBuf, sizeof(m_aaStreamerTextBuf[0]), "%d", ClientId);
+	else
+		str_copy(pBuf, m_aClients[ClientId].m_aName, sizeof(m_aaStreamerTextBuf[0]));
+	StreamerFilterText(pBuf);
+	return pBuf;
+}
+
+const char *CGameClient::StreamerClan(int ClientId) const
+{
+	if(ClientId < 0 || ClientId >= MAX_CLIENTS)
+		return "";
+	if(!StreamerModeActive())
+		return m_aClients[ClientId].m_aClan;
+	if(ShouldHideStreamerIdentity(ClientId))
+		return "";
+	char *pBuf = m_aaStreamerTextBuf[m_StreamerTextBufIndex];
+	m_StreamerTextBufIndex = (m_StreamerTextBufIndex + 1) % (int)std::size(m_aaStreamerTextBuf);
+	str_copy(pBuf, m_aClients[ClientId].m_aClan, sizeof(m_aaStreamerTextBuf[0]));
+	StreamerFilterText(pBuf);
+	return pBuf;
+}
+
+void CGameClient::UpdateStreamerMode()
+{
+	if(str_comp(m_aStreamerWordsFileLoaded, g_Config.m_MeStreamerWordsFile) != 0)
+	{
+		str_copy(m_aStreamerWordsFileLoaded, g_Config.m_MeStreamerWordsFile);
+		std::vector<std::string> vWords;
+		if(g_Config.m_MeStreamerWordsFile[0] != '\0')
+		{
+			char *pData = Storage()->ReadFileStr(g_Config.m_MeStreamerWordsFile, IStorage::TYPE_ALL_OR_ABSOLUTE);
+			if(pData)
+			{
+				const char *pLine = pData;
+				while(*pLine)
+				{
+					const char *pEnd = pLine;
+					while(*pEnd && *pEnd != '\n' && *pEnd != '\r')
+						++pEnd;
+					std::string Word(pLine, pEnd - pLine);
+					const char *pTrim = str_utf8_skip_whitespaces(Word.c_str());
+					std::string Trimmed(pTrim);
+					while(!Trimmed.empty() && (Trimmed.back() == ' ' || Trimmed.back() == '\t'))
+						Trimmed.pop_back();
+					if(!Trimmed.empty() && Trimmed[0] != '#')
+						vWords.push_back(Trimmed);
+					pLine = *pEnd ? pEnd + 1 : pEnd;
+				}
+				free(pData);
+			}
+		}
+		QmStreamerWordFilter::SetAdditionalWords(vWords);
+	}
+
+	bool Changed = false;
+	for(int i = 0; i < MAX_CLIENTS; ++i)
+	{
+		const bool Hide = m_aClients[i].m_Active && ShouldHideStreamerSkin(i);
+		if(Hide != m_aStreamerLastHideSkin[i])
+		{
+			m_aStreamerLastHideSkin[i] = Hide;
+			if(m_aClients[i].m_Active)
+			{
+				m_aClients[i].UpdateSkinInfo();
+				Changed = true;
+			}
+		}
+	}
+	(void)Changed;
+}

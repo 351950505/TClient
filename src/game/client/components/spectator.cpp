@@ -546,7 +546,7 @@ void CSpectator::OnRender()
 			TextRender()->TextColor(GameClient()->m_WarList.GetPriorityColor(pInfo->m_ClientId));
 		}
 
-		TextRender()->TextEx(&NameCursor, GameClient()->m_aClients[GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId].m_aName);
+		TextRender()->TextEx(&NameCursor, GameClient()->StreamerName(GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId));
 
 		if(GameClient()->m_MultiViewActivated)
 		{

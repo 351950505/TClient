@@ -684,6 +684,20 @@ public:
 
 	size_t ComponentCount() const { return m_vpAll.size(); }
 
+	// ME: streamer mode
+	bool StreamerModeActive() const;
+	bool ShouldHideStreamerIdentity(int ClientId) const;
+	bool ShouldHideStreamerSkin(int ClientId) const;
+	bool StreamerDefaultFlags() const;
+	const char *StreamerName(int ClientId) const;
+	const char *StreamerClan(int ClientId) const;
+	bool StreamerFilterText(char *pText) const;
+	void UpdateStreamerMode();
+	bool m_aStreamerLastHideSkin[MAX_CLIENTS] = {};
+	char m_aStreamerWordsFileLoaded[1024] = "\x01";
+	mutable char m_aaStreamerTextBuf[8][64];
+	mutable int m_StreamerTextBufIndex = 0;
+
 	// hooks
 	void OnConnected() override;
 	void OnRender() override;

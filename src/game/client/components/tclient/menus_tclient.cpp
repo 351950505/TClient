@@ -1157,6 +1157,17 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		Ui()->DoScrollbarOption(&g_Config.m_TcIslandLyricOffset, &g_Config.m_TcIslandLyricOffset, &Button, TCLocalize("Lyric offset (ms, - = earlier)"), -5000, 5000, &CUi::ms_LinearScrollbarScale, 0, "ms");
 		Column.HSplitTop(LineSize, &Button, &Column);
 		Ui()->DoScrollbarOption(&g_Config.m_TcIslandKaraokeLead, &g_Config.m_TcIslandKaraokeLead, &Button, TCLocalize("Karaoke lead (ms)"), 0, 500, &CUi::ms_LinearScrollbarScale, 0, "ms");
+		Column.HSplitTop(LineSize, &Button, &Column);
+		Ui()->DoScrollbarOption(&g_Config.m_TcIslandOffsetX, &g_Config.m_TcIslandOffsetX, &Button, TCLocalize("Horizontal offset"), -600, 600, &CUi::ms_LinearScrollbarScale, 0, "px");
+		Column.HSplitTop(LineSize, &Button, &Column);
+		Ui()->DoScrollbarOption(&g_Config.m_TcIslandOffsetY, &g_Config.m_TcIslandOffsetY, &Button, TCLocalize("Vertical offset"), -600, 600, &CUi::ms_LinearScrollbarScale, 0, "px");
+		// 透明模式：单独开关 + 自己的调节项，跟在灵动岛基础选项下面
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandTransparent, TCLocalize("Transparent mode (drop the black capsule)"), &g_Config.m_TcIslandTransparent, &Column, LineSize);
+		if(g_Config.m_TcIslandTransparent)
+		{
+			Column.HSplitTop(LineSize, &Button, &Column);
+			Ui()->DoScrollbarOption(&g_Config.m_TcIslandTransparentTextShadow, &g_Config.m_TcIslandTransparentTextShadow, &Button, TCLocalize("Text outline strength"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+		}
 	}
 	else
 		Column.HSplitTop(LineSize, nullptr, &Column);
@@ -2241,15 +2252,15 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 	}
 	View.HSplitTop(MarginSmall, nullptr, &View);
 
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPingwheel, "启用信号轮盘（关闭后不能发送，也不接收他人信号）", &g_Config.m_TcPingwheel, &View, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPingwheel, TCLocalize("Enable ping wheel (off = cannot send, does not receive others)"), &g_Config.m_TcPingwheel, &View, LineSize);
 	static CButtonContainer s_PingReaderButton, s_PingClearButton;
-	DoLine_KeyReader(View, s_PingReaderButton, s_PingClearButton, "信号轮盘按键（按住选择）", "+tc_pingwheel");
+	DoLine_KeyReader(View, s_PingReaderButton, s_PingClearButton, TCLocalize("Ping wheel key (hold to choose)"), "+tc_pingwheel");
 
 	View.HSplitTop(MarginSmall * 4, nullptr, &View);
-	static CButtonContainer s_QuickZoomReaderButton, s_QuickZoomClearButton;
-	DoLine_KeyReader(View, s_QuickZoomReaderButton, s_QuickZoomClearButton, "一键缩放按键（按一下切换，再按恢复）", "tc_quick_zoom");
 	View.HSplitTop(LineSize, &Button, &View);
-	DoSliderFloat(&g_Config.m_TcQuickZoom, &g_Config.m_TcQuickZoom, &Button, "一键缩放目标", 0.0f, 20.0f, 0.1f, "");
+	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelVolume, &g_Config.m_TcPingwheelVolume, &Button, TCLocalize("Signal sound volume"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+	View.HSplitTop(LineSize, &Button, &View);
+	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelSoundRange, &g_Config.m_TcPingwheelSoundRange, &Button, TCLocalize("Sound audible range (0 = whole map)"), 0, 5000, &CUi::ms_LinearScrollbarScale, 0, "");
 	View.HSplitTop(MarginSmall * 4, nullptr, &View);
 
 	// 只调顺序：8 行 = 预览 + 名称 + 序号 + 上/下
@@ -2289,11 +2300,11 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 
 		// 上/下（交换相邻扇区，实时写存档）
 		Row.VSplitRight(44.0f, &Row, &Btn);
-		if(DoButton_Menu(&s_aDownButtons[Slot], "下", 0, &Btn))
+		if(DoButton_Menu(&s_aDownButtons[Slot], TCLocalize("Down"), 0, &Btn))
 			GameClient()->m_PingWheel.LayoutMove(Slot, 1);
 		Row.VSplitRight(4.0f, &Row, nullptr);
 		Row.VSplitRight(44.0f, &Row, &Btn);
-		if(DoButton_Menu(&s_aUpButtons[Slot], "上", 0, &Btn))
+		if(DoButton_Menu(&s_aUpButtons[Slot], TCLocalize("Up"), 0, &Btn))
 			GameClient()->m_PingWheel.LayoutMove(Slot, -1);
 	}
 	// 说明
@@ -3299,4 +3310,57 @@ void CMenus::RenderSettingsTClientConfigs(CUIRect MainView)
 	CUIRect EndPad{Content.x, Content.y, Content.w, 5.0f};
 	s_ScrollRegion.AddRect(EndPad);
 	s_ScrollRegion.End();
+}
+
+void CMenus::RenderSettingsMe(CUIRect MainView)
+{
+	CUIRect LeftView, RightView, Button, Label;
+	MainView.Margin(Margin, &MainView);
+	MainView.VSplitMid(&LeftView, &RightView, MarginBetweenViews);
+
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Streamer Mode"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerMode, TCLocalize("Enable streamer mode"), &g_Config.m_MeStreamerMode, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerFilterWords, TCLocalize("Filter sensitive words (chat, names, clans)"), &g_Config.m_MeStreamerFilterWords, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerHideNames, TCLocalize("Hide non-friend names (show client ID) and clans"), &g_Config.m_MeStreamerHideNames, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerHideSkins, TCLocalize("Non-friends use default skin"), &g_Config.m_MeStreamerHideSkins, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerDefaultFlags, TCLocalize("Hide country flags everywhere"), &g_Config.m_MeStreamerDefaultFlags, &LeftView, LineSize);
+
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	LeftView.HSplitTop(LineSize + MarginExtraSmall, &Button, &LeftView);
+	Button.VSplitLeft(140.0f, &Label, &Button);
+	Ui()->DoLabel(&Label, TCLocalize("Custom word list file"), FontSize, TEXTALIGN_ML);
+	static CLineInput s_WordsFile(g_Config.m_MeStreamerWordsFile, sizeof(g_Config.m_MeStreamerWordsFile));
+	s_WordsFile.SetEmptyText(TCLocalize("One word per line, # starts a comment"));
+	Ui()->DoEditBox(&s_WordsFile, &Button, EditBoxFontSize);
+
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	LeftView.HSplitTop(LineSize, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("You and your friends are never hidden. Sub-options only apply while the master switch is on."), EditBoxFontSize, TEXTALIGN_TL);
+
+	// 一键缩放（从 Ping 页挪来）
+	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Quick zoom"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	static CButtonContainer s_QuickZoomReaderButton, s_QuickZoomClearButton;
+	DoLine_KeyReader(LeftView, s_QuickZoomReaderButton, s_QuickZoomClearButton, TCLocalize("Quick zoom key (press to toggle, press again to restore)"), "tc_quick_zoom");
+	LeftView.HSplitTop(LineSize, &Button, &LeftView);
+	DoSliderFloat(&g_Config.m_TcQuickZoom, &g_Config.m_TcQuickZoom, &Button, TCLocalize("Quick zoom target"), 0.0f, 20.0f, 0.1f, "");
+
+	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
+	Ui()->DoLabel(&Label, TCLocalize("Message muting"), HeadlineFontSize, TEXTALIGN_ML);
+	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
+
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeMuteTeamChat, TCLocalize("Mute team chat"), &g_Config.m_MeMuteTeamChat, &RightView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeMuteWhisper, TCLocalize("Mute whispers"), &g_Config.m_MeMuteWhisper, &RightView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeMuteSystemChat, TCLocalize("Mute system messages"), &g_Config.m_MeMuteSystemChat, &RightView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeMuteKillFeed, TCLocalize("Mute kill feed"), &g_Config.m_MeMuteKillFeed, &RightView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeMuteFinishFeed, TCLocalize("Mute finish feed"), &g_Config.m_MeMuteFinishFeed, &RightView, LineSize);
+
+	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
+	RightView.HSplitTop(LineSize * 3, &Label, &RightView);
+	Ui()->DoLabel(&Label, TCLocalize("Console commands: me_mute_team_chat / me_mute_whisper / me_mute_system_chat / me_mute_kill_feed / me_mute_finish_feed"), EditBoxFontSize, TEXTALIGN_TL);
 }

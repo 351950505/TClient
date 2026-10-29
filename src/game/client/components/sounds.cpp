@@ -72,6 +72,13 @@ void CSounds::UpdateChannels()
 		Sound()->SetChannel(CSounds::CHN_MAPSOUND, m_MapSoundVolume, 1.0f);
 	}
 
+	const float NewPingWheelVolume = g_Config.m_TcPingwheelVolume / 100.0f;
+	if(NewPingWheelVolume != m_PingWheelVolume)
+	{
+		m_PingWheelVolume = NewPingWheelVolume;
+		Sound()->SetChannel(CSounds::CHN_PINGWHEEL, m_PingWheelVolume, 0.0f);
+	}
+
 	const float NewBackgroundMusicVolume = g_Config.m_SndBackgroundMusicVolume / 100.0f;
 	if(NewBackgroundMusicVolume != m_BackgroundMusicVolume)
 	{

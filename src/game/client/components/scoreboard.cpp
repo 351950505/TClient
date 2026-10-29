@@ -403,7 +403,7 @@ void CScoreboard::RenderSpectators(CUIRect Spectators)
 			TextRender()->TextColor(color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClAuthedPlayerColor)));
 		}
 
-		TextRender()->TextEx(&Cursor, GameClient()->m_aClients[pInfo->m_ClientId].m_aName);
+		TextRender()->TextEx(&Cursor, GameClient()->StreamerName(pInfo->m_ClientId));
 		TextRender()->TextColor(TextRender()->DefaultTextColor());
 
 		CommaNeeded = true;
@@ -801,11 +801,11 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 					char aClientId[16];
 					GameClient()->FormatClientId(pInfo->m_ClientId, aClientId, EClientIdFormat::INDENT_AUTO);
 					str_copy(aBuf, aClientId);
-					str_append(aBuf, ClientData.m_aName);
+					str_append(aBuf, GameClient()->StreamerName(pInfo->m_ClientId));
 				}
 				else
 				{
-					str_copy(aBuf, ClientData.m_aName);
+					str_copy(aBuf, GameClient()->StreamerName(pInfo->m_ClientId));
 				}
 				ColorRGBA NameColor = TextColor;
 				if(ClientData.m_AuthLevel)
@@ -852,12 +852,12 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 					ClanColor = GameClient()->m_WarList.GetClanColor(pInfo->m_ClientId);
 				}
 
-				Player.m_Clan.Update(TextRender(), ClientData.m_aClan, FontSize, ClanLength, TEXTFLAG_RENDER | TEXTFLAG_ELLIPSIS_AT_END);
+				Player.m_Clan.Update(TextRender(), GameClient()->StreamerClan(pInfo->m_ClientId), FontSize, ClanLength, TEXTFLAG_RENDER | TEXTFLAG_ELLIPSIS_AT_END);
 				Player.m_Clan.Render(TextRender(), vec2(ClanOffset + (ClanLength - std::min(Player.m_Clan.Width(), ClanLength)) / 2.0f, TextY), ClanColor);
 			}
 
 			// country flag
-			GameClient()->m_CountryFlags.Render(ClientData.m_Country, ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f),
+			GameClient()->m_CountryFlags.Render(GameClient()->StreamerDefaultFlags() ? -1 : ClientData.m_Country, ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f),
 				CountryOffset, Row.y + (Spacing + TeeSizeMod * 5.0f) / 2.0f, CountryLength, Row.h - Spacing - TeeSizeMod * 5.0f);
 
 			// ping

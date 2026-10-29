@@ -1592,6 +1592,20 @@ static bool IsMostlyChineseOrNoText(const char *pText)
 	return Han * 2 >= Han + Letters;
 }
 
+// 文字是否已经是目标语言，是则不必再翻。目前只对中文做判定（本项目的主要
+// 使用场景是中英互转）；其它目标语言一律返回 false，交给后端处理。
+static bool IsAlreadyTargetLanguage(const char *pText, const char *pTargetLang)
+{
+	if(!pText || pText[0] == '\0' || !pTargetLang)
+		return false;
+	const bool TargetIsChinese = str_comp_nocase(pTargetLang, "zh") == 0 ||
+				     str_comp_nocase(pTargetLang, "zh-cn") == 0 ||
+				     str_comp_nocase(pTargetLang, "zh-tw") == 0;
+	if(!TargetIsChinese)
+		return false;
+	return IsMostlyChineseOrNoText(pText);
+}
+
 void CTranslate::AutoTranslate(CChat::CLine &Line)
 {
 	if(!g_Config.m_TcTranslateAuto)
@@ -1599,7 +1613,7 @@ void CTranslate::AutoTranslate(CChat::CLine &Line)
 	// 只翻玩家发言：系统/服务器消息（ClientId<0）不处理
 	if(Line.m_ClientId < 0)
 		return;
-	if(IsMostlyChineseOrNoText(Line.m_aText))
+	if(IsAlreadyTargetLanguage(Line.m_aText, g_Config.m_TcTranslateTarget))
 		return;
 	for(const int Id : GameClient()->m_aLocalIds)
 	{
@@ -1613,6 +1627,8 @@ bool CTranslate::ChatDoTranslateOutgoing(int Team, const char *pText)
 {
 	// Don't translate server commands (e.g. "/w name msg"), translating would break their syntax
 	if(!g_Config.m_TcTranslateOutgoing || pText[0] == '\0' || pText[0] == '/')
+		return false;
+	if(IsAlreadyTargetLanguage(pText, g_Config.m_TcTranslateOutgoingTarget))
 		return false;
 
 	if(m_vJobs.size() > 15)

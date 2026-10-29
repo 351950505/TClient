@@ -2737,7 +2737,7 @@ public:
 				IdleH = Height * 0.42f;
 			}
 
-			const float IdleX = (ScreenW - IdleW) * 0.5f + OffsetX;
+			const float IdleX = std::clamp((ScreenW - IdleW) * 0.5f + OffsetX, 8.0f, std::max(8.0f, ScreenW - IdleW - 8.0f));
 			if(g_Config.m_TcIslandTransparent == 0)
 				DrawPanel(IdleX, PillY, IdleW, IdleH, PillRounding, PillCorners, false);
 			if(ShowIdleTime)
@@ -2799,8 +2799,10 @@ public:
 		const float CoverSize = 44.0f * Scale;
 		const float ClockPad = 19.0f * Scale;          // padding inside the clock cell
 		const float DiscPad = 15.0f * Scale;           // padding either side of the disc
+		// 端帽是半径 = Height/2 的半圆，右边缘要留出整个端帽宽度再放柱子，
+		// 否则柱子的右半截会被圆角裁掉（玩家反馈的"右边没了"）。
+		const float EqPadR = Height * 0.5f + 8.0f * Scale;
 		const float EqPadL = 18.0f * Scale;            // divider -> equaliser
-		const float EqPadR = 20.0f * Scale;            // equaliser -> right edge
 
 		// measure the text column width. The capsule is dynamic: it grows to
 		// fit the whole lyric/title line so we never crop the tail. Only when a
@@ -2839,7 +2841,9 @@ public:
 		(void)TextW;
 		const float Width = std::floor(std::clamp(MaxPillW, MinPillW, MaxPillW) / 8.0f) * 8.0f;
 
-		const float X = (ScreenW - Width) * 0.5f + OffsetX;
+		// 夹住水平位置：偏移量很大时（滑条 ±600 还要乘缩放）胶囊会被推出屏幕，
+		// 右端的圆头和等化器被裁掉，看起来就是"右边没了"。留 8px 边距。
+		const float X = std::clamp((ScreenW - Width) * 0.5f + OffsetX, 8.0f, std::max(8.0f, ScreenW - Width - 8.0f));
 
 		// ---- draw the capsule body ------------------------------------------
 		// Gauge style: no halo, no glow. One inset hairline marks the rim, and the

@@ -364,7 +364,6 @@ MACRO_CONFIG_INT(TcIslandEnable, tc_island_enable, 1, 0, 1, CFGFLAG_CLIENT | CFG
 MACRO_CONFIG_INT(TcIslandNotch, tc_island_notch, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island notch style (attach to top edge)")
 MACRO_CONFIG_INT(TcIslandShowLyrics, tc_island_show_lyrics, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show synced lyrics")
 MACRO_CONFIG_INT(TcIslandShowProgress, tc_island_show_progress, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show game clock (round timer)")
-MACRO_CONFIG_INT(TcIslandShowClock, tc_island_show_clock, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show real-world time (HH:MM)")
 MACRO_CONFIG_INT(TcIslandShowSongProgress, tc_island_show_song_progress, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island song progress rail at the bottom")
 MACRO_CONFIG_STR(TcIslandFont, tc_island_font, 128, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island font face (empty = follow the global custom font)")
 MACRO_CONFIG_INT(TcIslandSize, tc_island_size, 100, 60, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island size (%)")

@@ -2514,31 +2514,13 @@ public:
 			char aIdleTime[32];
 			GetGameTimeString(aIdleTime, sizeof(aIdleTime));
 			const bool ShowIdleTime = g_Config.m_TcIslandShowProgress && aIdleTime[0] != '\0';
-			// 真实时钟（电脑时间）：空闲时填充胶囊，不再只有一个小点
-			const bool ShowIdleClock = g_Config.m_TcIslandShowClock != 0;
-			char aRealClock[8];
-			{
-				const int64_t DaySec = time_timestamp() % 86400;
-				str_format(aRealClock, sizeof(aRealClock), "%02d:%02d", (int)(DaySec / 3600), (int)((DaySec % 3600) / 60));
-			}
-			const float IdleClockW = m_pTextRender->TextWidth(IdleTimerSize, "00:00");
-			const float IdleGap = 18.0f * Scale;
 
 			float IdleW, IdleH;
-			if(ShowIdleTime || ShowIdleClock)
+			if(ShowIdleTime)
 			{
 				// 固定宽度：计时器数字宽度会随时间变化（1:09 -> 1:10），跟着它伸缩
 				// 每次都要换一张端帽纹理。这里按 8px 网格取一个不会变的上限宽度。
-				float Content = IdlePad * 2.0f;
-				if(ShowIdleTime)
-					Content += m_pTextRender->TextWidth(IdleTimerSize, "00:00:00");
-				if(ShowIdleClock)
-				{
-					if(ShowIdleTime)
-						Content += IdleGap;
-					Content += IdleClockW;
-				}
-				IdleW = std::ceil(Content / 8.0f) * 8.0f;
+				IdleW = std::ceil((m_pTextRender->TextWidth(IdleTimerSize, "00:00:00") + IdlePad * 2.0f) / 8.0f) * 8.0f;
 				IdleH = Height;
 			}
 			else
@@ -2558,32 +2540,13 @@ public:
 				DrawShadow(IdleX - IdleH * 0.25f, PillY + IdleH * 0.12f, IdleW + IdleH * 0.5f, IdleH * 0.9f,
 					IdleH * 0.45f, IGraphics::CORNER_ALL, ScrimBlur, ColorRGBA(0.0f, 0.0f, 0.0f, 0.42f));
 			}
-			if(ShowIdleTime || ShowIdleClock)
+			if(ShowIdleTime)
 			{
-				// 布局：游戏计时在左，真实时钟在其右侧（用户指定时钟靠右）
-				float Content = 0.0f;
-				if(ShowIdleTime)
-					Content += m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
-				if(ShowIdleClock)
-				{
-					if(ShowIdleTime)
-						Content += IdleGap;
-					Content += IdleClockW;
-				}
-				float CursorX = IdleX + (IdleW - Content) * 0.5f;
+				const float IdleTextW = m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
-				if(ShowIdleTime)
-				{
-					const float W = m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
-					m_pTextRender->Text((int)CursorX,
-						(int)(PillY + (IdleH - IdleTimerSize) * 0.5f),
-						IdleTimerSize, aIdleTime);
-					CursorX += W + (ShowIdleClock ? IdleGap : 0.0f);
-				}
-				if(ShowIdleClock)
-					m_pTextRender->Text((int)CursorX,
-						(int)(PillY + (IdleH - IdleTimerSize) * 0.5f),
-						IdleTimerSize, aRealClock);
+				m_pTextRender->Text((int)(IdleX + (IdleW - IdleTextW) * 0.5f),
+					(int)(PillY + (IdleH - IdleTimerSize) * 0.5f),
+					IdleTimerSize, aIdleTime);
 			}
 			RestoreFace();
 			return;
@@ -2630,17 +2593,6 @@ public:
 		const float EqBarGap = 3.0f * Scale;
 		const float EqW = NumBars * EqBarW + (NumBars - 1) * EqBarGap;
 
-		// TClient: 真实时钟（电脑时间）单元，放在等化器左侧的右段
-		const bool ShowRealClock = g_Config.m_TcIslandShowClock != 0;
-		char aRealClock[8];
-		{
-			const int64_t DaySec = time_timestamp() % 86400;
-			str_format(aRealClock, sizeof(aRealClock), "%02d:%02d", (int)(DaySec / 3600), (int)((DaySec % 3600) / 60));
-		}
-		const float RealClockPad = 19.0f * Scale;
-		const float RealClockW = ShowRealClock ? m_pTextRender->TextWidth(TimerSize, "00:00") : 0.0f;
-		const float RealClockCellW = ShowRealClock ? RealClockPad + RealClockW + RealClockPad : 0.0f;
-
 		// ---- layout: gauge cells split by hairline dividers -----------------
 		// Each zone is a cell with its own horizontal padding; a 1 px rule sits on
 		// the left edge of every cell but the first. This reads as a machined
@@ -2677,7 +2629,7 @@ public:
 		const float TextGapL = 14.0f * Scale;          // disc cell -> lyric text
 		const float TextGapR = 14.0f * Scale;          // lyric text -> divider
 		const float LeftChrome = (ShowGameTime ? ClockCellW : 0.0f) + DiscCellW + TextGapL;
-		const float RightChrome = TextGapR + EqCellW + RealClockCellW;
+		const float RightChrome = TextGapR + EqCellW;
 		const float ChromeW = LeftChrome + RightChrome;
 		// the widest the capsule may get on this screen: keep it on-screen with a
 		// comfortable margin, but never below the compact minimum.
@@ -2866,17 +2818,8 @@ public:
 		// ---- lyric / title column -------------------------------------------
 		const float TextX = DiscCellX + DiscCellW + TextGapL;
 		const float EqCellX = X + Width - EqCellW;
-		const float RealClockCellX = EqCellX - RealClockCellW;
-		const float TextRight = (ShowRealClock ? RealClockCellX : EqCellX) - TextGapR;
+		const float TextRight = EqCellX - TextGapR;
 		DrawDivider(EqCellX);
-		if(ShowRealClock)
-		{
-			DrawDivider(RealClockCellX);
-			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
-			m_pTextRender->Text(RealClockCellX + RealClockPad,
-				PillY + (Height - TimerSize) * 0.5f, TimerSize, aRealClock);
-			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
-		}
 
 		// ---- right cell: equaliser ------------------------------------------
 		// Four bars, animated from the playback clock. No label, no numbers: the

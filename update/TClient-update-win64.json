@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.5",
+  "version": "1.7.8.6",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64430442,
-  "sha256": "9d334a2cfb94c3237d2adf7e0abe1a72bdc78dd3f6d8aefaf658d272a7939b24",
-  "notes": "清单走 raw 源、zip 走 release 直链",
+  "size": 64429863,
+  "sha256": "2bea3d349c7e8911d04172f5895c495d5489ca5cd68457d2343fc6e52e85cdf4",
+  "notes": "回滚灵动岛本地时间显示（有问题）",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 299008,

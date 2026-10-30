@@ -810,15 +810,27 @@ void CTClient::UpdateFail(const char *pFormat, ...)
 
 void CTClient::ResetUpdateTasks()
 {
+	// 必须四个任务全清：残留的 sig/helper 任务会让下一次检查读到旧结果，
+	// 甚至在 abort 后仍被 Finish* 解引用（崩溃）。
 	if(m_pUpdateManifestTask)
 	{
 		m_pUpdateManifestTask->Abort();
 		m_pUpdateManifestTask = nullptr;
 	}
+	if(m_pUpdateManifestSigTask)
+	{
+		m_pUpdateManifestSigTask->Abort();
+		m_pUpdateManifestSigTask = nullptr;
+	}
 	if(m_pUpdateDownloadTask)
 	{
 		m_pUpdateDownloadTask->Abort();
 		m_pUpdateDownloadTask = nullptr;
+	}
+	if(m_pUpdateHelperTask)
+	{
+		m_pUpdateHelperTask->Abort();
+		m_pUpdateHelperTask = nullptr;
 	}
 }
 
@@ -876,23 +888,31 @@ void CTClient::FetchUpdateManifest()
 
 void CTClient::FinishUpdateManifest()
 {
-	// 验签优先于任何解析：清单字节 + Ed25519 签名（公钥内嵌），签名不符直接拒绝
+	// 先把任务指针抓到局部：UpdateFail 会 ResetUpdateTasks() 把成员置空，
+	// 之后仍要用清单结果解析，成员指针已经不在了。
+	std::shared_ptr<IHttpRequest> pManifestTask = m_pUpdateManifestTask;
+	std::shared_ptr<IHttpRequest> pSigTask = m_pUpdateManifestSigTask;
+	if(!pManifestTask || !pSigTask)
 	{
-		unsigned char *pManifest;
-		size_t ManifestSize;
-		m_pUpdateManifestTask->Result(&pManifest, &ManifestSize);
-		unsigned char *pSig;
-		size_t SigSize;
-		m_pUpdateManifestSigTask->Result(&pSig, &SigSize);
-		if(!VerifyUpdateManifestSignature(pManifest, ManifestSize, pSig, SigSize))
-		{
-			UpdateFail(TCLocalize("Update rejected: manifest signature is invalid"));
-			return;
-		}
-		log_info("tclient-update", "manifest signature verified");
+		UpdateFail(TCLocalize("Update check failed: the manifest could not be downloaded"));
+		return;
 	}
 
-	json_value *pJson = m_pUpdateManifestTask->ResultJson();
+	// 验签优先于任何解析：清单字节 + Ed25519 签名（公钥内嵌），签名不符直接拒绝
+	unsigned char *pManifest = nullptr;
+	size_t ManifestSize = 0;
+	unsigned char *pSig = nullptr;
+	size_t SigSize = 0;
+	pManifestTask->Result(&pManifest, &ManifestSize);
+	pSigTask->Result(&pSig, &SigSize);
+	if(!pManifest || !pSig || !VerifyUpdateManifestSignature(pManifest, ManifestSize, pSig, SigSize))
+	{
+		UpdateFail(TCLocalize("Update rejected: manifest signature is invalid"));
+		return;
+	}
+	log_info("tclient-update", "manifest signature verified");
+
+	json_value *pJson = pManifestTask->ResultJson();
 	if(!pJson || pJson->type != json_object)
 	{
 		if(pJson)
@@ -1052,7 +1072,9 @@ void CTClient::StartDownloadTask()
 
 void CTClient::FinishUpdateDownload()
 {
-	if(m_pUpdateDownloadTask->State() != EHttpState::DONE)
+	// 同 FinishUpdateManifest：UpdateFail 会置空成员，先抓局部快照
+	std::shared_ptr<IHttpRequest> pDownloadTask = m_pUpdateDownloadTask;
+	if(!pDownloadTask || pDownloadTask->State() != EHttpState::DONE)
 	{
 		// 哈希不符或传输中断：临时文件由 HTTP 层删掉，这里只报告。
 		UpdateFail(TCLocalize("Download failed or the file is corrupted"));

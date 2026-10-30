@@ -1311,3 +1311,18 @@ Installing updates is only supported on Windows
 
 Country flags are always hidden while streamer mode is on
 == 开启主播模式时始终隐藏国旗
+
+Spectator
+== 观战
+
+Show friends as a separate group in the spectator selector
+== 观战选择器中好友单独分组展示
+
+Friends are listed first with their own group title, then everyone else.
+== 好友带分组标题排在最前，其余玩家紧随其后。
+
+Friends
+== 好友
+
+Others
+== 其他

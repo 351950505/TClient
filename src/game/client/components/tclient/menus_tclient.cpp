@@ -3526,6 +3526,15 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(LineSize, &Button, &LeftView);
 	DoSliderFloat(&g_Config.m_TcQuickZoom, &g_Config.m_TcQuickZoom, &Button, TCLocalize("Quick zoom target"), 0.0f, 20.0f, 0.1f, "");
 
+	// 观战选择器好友分列（学习 QmClient）
+	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Spectator"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcSpectatorFriendsFirst, TCLocalize("Show friends as a separate group in the spectator selector"), &g_Config.m_TcSpectatorFriendsFirst, &LeftView, LineSize);
+	LeftView.HSplitTop(LineSize, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Friends are listed first with their own group title, then everyone else."), EditBoxFontSize, TEXTALIGN_TL);
+
 	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
 	Ui()->DoLabel(&Label, TCLocalize("Message muting"), HeadlineFontSize, TEXTALIGN_ML);
 	RightView.HSplitTop(MarginSmall, nullptr, &RightView);

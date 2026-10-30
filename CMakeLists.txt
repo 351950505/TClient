@@ -2902,6 +2902,7 @@ if(CLIENT)
     components/tclient/pet.h
     components/tclient/pingwheel.cpp
     components/tclient/pingwheel.h
+    components/tclient/spectator_friends.h
     components/tclient/player_indicator.cpp
     components/tclient/player_display_privacy.h
     components/tclient/player_indicator.h

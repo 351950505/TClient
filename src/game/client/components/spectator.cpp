@@ -13,6 +13,7 @@
 
 #include <game/client/animstate.h>
 #include <game/client/gameclient.h>
+#include <game/client/components/tclient/spectator_friends.h>
 #include <game/localization.h>
 
 #include <limits>
@@ -268,18 +269,32 @@ void CSpectator::OnRender()
 	float TeeSizeMod = 1.0f;
 	float RoundRadius = 30.0f;
 	bool MultiViewSelected = false;
-	int TotalPlayers = 0;
 	int PerLine = 8;
 	float BoxMove = -10.0f;
 	float BoxOffset = 0.0f;
 
-	for(const auto &pInfo : GameClient()->m_Snap.m_apInfoByDDTeamName)
+	// TClient: 好友分列展示。先收集非观战玩家（保持 m_apInfoByDDTeamName 的
+	// DD 队伍 + 名字序），再稳定分区把好友排到最前 —— 组内相对顺序不变。
+	struct SSpecEntry
 	{
+		const CNetObj_PlayerInfo *m_pInfo;
+		int m_DdTeam;
+		bool m_Friend;
+	};
+	SSpecEntry aDisplay[MAX_CLIENTS];
+	bool aIsFriend[MAX_CLIENTS];
+	int aDisplayOrder[MAX_CLIENTS];
+	int TotalPlayers = 0;
+	for(int i = 0; i < MAX_CLIENTS; ++i)
+	{
+		const CNetObj_PlayerInfo *pInfo = GameClient()->m_Snap.m_apInfoByDDTeamName[i];
 		if(!pInfo || pInfo->m_Team == TEAM_SPECTATORS)
 			continue;
-
+		aDisplay[TotalPlayers] = {pInfo, GameClient()->m_Teams.Team(pInfo->m_ClientId), GameClient()->m_aClients[pInfo->m_ClientId].m_Friend != 0};
+		aIsFriend[TotalPlayers] = aDisplay[TotalPlayers].m_Friend;
 		++TotalPlayers;
 	}
+	const int FriendCount = tclient_spectator_friends::BuildFriendFirstOrder(aIsFriend, TotalPlayers, aDisplayOrder, g_Config.m_TcSpectatorFriendsFirst != 0);
 
 	if(TotalPlayers > 96)
 	{
@@ -316,9 +331,17 @@ void CSpectator::OnRender()
 		ObjWidth = 600.0f;
 	}
 
+	// TClient: 分组标题占所在列高度，面板按最高一列向下加长，避免底部被裁掉。
+	const float TitleHeight = std::clamp(LineHeight * 0.5f, 12.0f, 15.0f);
+	const float TitleFontSize = TitleHeight * 0.8f;
+	const float ExtraHeight = FriendCount > 0 && FriendCount < TotalPlayers
+						  ? tclient_spectator_friends::MaxColumnHeight(TotalPlayers, FriendCount, PerLine, LineHeight, TitleHeight) -
+							  tclient_spectator_friends::BaseMaxColumnHeight(TotalPlayers, PerLine, LineHeight)
+						  : 0.0f;
+
 	const vec2 ScreenSize = vec2(Width, Height);
 	const vec2 ScreenCenter = ScreenSize / 2.0f;
-	CUIRect SpectatorRect = {Width / 2.0f - ObjWidth, Height / 2.0f - 300.0f, ObjWidth * 2.0f, 600.0f};
+	CUIRect SpectatorRect = {Width / 2.0f - ObjWidth, Height / 2.0f - 300.0f, ObjWidth * 2.0f, 600.0f + ExtraHeight};
 	CUIRect SpectatorMouseRect;
 	SpectatorRect.Margin(20.0f, &SpectatorMouseRect);
 
@@ -419,62 +442,55 @@ void CSpectator::OnRender()
 
 	int OldDDTeam = -1;
 
-	for(int i = 0, Count = 0; i < MAX_CLIENTS; ++i)
+	// TClient: 好友 / 其余玩家 两组标题（QmClient 同款：好友组标题用好友色）
+	const auto DrawGroupTitle = [&](const char *pTitle, const ColorRGBA &TitleColor) {
+		const float TitleLeft = Width / 2.0f + x - 10.0f + BoxOffset;
+		const float TitleTop = Height / 2.0f + y + BoxMove;
+		TextRender()->TextColor(TitleColor);
+		TextRender()->Text(TitleLeft, TitleTop + (TitleHeight - TitleFontSize) / 2.0f, TitleFontSize, pTitle, -1.0f);
+		Graphics()->DrawRect(TitleLeft, TitleTop + TitleHeight - 1.0f, 270.0f - BoxOffset, 1.0f,
+			ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_NONE, 0.0f);
+		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
+		y += TitleHeight;
+	};
+
+	for(int i = 0; i < TotalPlayers; ++i)
 	{
-		if(!GameClient()->m_Snap.m_apInfoByDDTeamName[i] || GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_Team == TEAM_SPECTATORS)
-			continue;
-
-		++Count;
-
+		const int Count = i + 1;
 		if(Count == PerLine + 1 || (Count > PerLine + 1 && (Count - 1) % PerLine == 0))
 		{
 			x += 290.0f;
 			y = StartY;
 		}
 
-		const CNetObj_PlayerInfo *pInfo = GameClient()->m_Snap.m_apInfoByDDTeamName[i];
-		int DDTeam = GameClient()->m_Teams.Team(pInfo->m_ClientId);
-		int NextDDTeam = 0;
+		if(FriendCount > 0 && i == 0)
+			DrawGroupTitle(TCLocalize("Friends"), color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClMessageFriendColor)));
+		else if(FriendCount > 0 && i == FriendCount)
+			DrawGroupTitle(TCLocalize("Others"), ColorRGBA(1.0f, 1.0f, 1.0f, 0.85f));
 
-		for(int j = i + 1; j < MAX_CLIENTS; j++)
-		{
-			const CNetObj_PlayerInfo *pInfo2 = GameClient()->m_Snap.m_apInfoByDDTeamName[j];
-
-			if(!pInfo2 || pInfo2->m_Team == TEAM_SPECTATORS)
-				continue;
-
-			NextDDTeam = GameClient()->m_Teams.Team(pInfo2->m_ClientId);
-			break;
-		}
-
-		if(OldDDTeam == -1)
-		{
-			for(int j = i - 1; j >= 0; j--)
-			{
-				const CNetObj_PlayerInfo *pInfo2 = GameClient()->m_Snap.m_apInfoByDDTeamName[j];
-
-				if(!pInfo2 || pInfo2->m_Team == TEAM_SPECTATORS)
-					continue;
-
-				OldDDTeam = GameClient()->m_Teams.Team(pInfo2->m_ClientId);
-				break;
-			}
-		}
+		const SSpecEntry &Entry = aDisplay[aDisplayOrder[i]];
+		const CNetObj_PlayerInfo *pInfo = Entry.m_pInfo;
+		const int SpectatorClientId = pInfo->m_ClientId;
+		const int DDTeam = Entry.m_DdTeam;
+		// 好友边界和列边界都断开队伍底色，标题行两侧不连成一块
+		const bool StartsGroup = i % PerLine == 0 || (FriendCount > 0 && i == FriendCount);
+		const bool EndsGroup = i + 1 == TotalPlayers || (i + 1) % PerLine == 0 || (FriendCount > 0 && i + 1 == FriendCount);
+		const int NextDDTeam = EndsGroup ? 0 : aDisplay[aDisplayOrder[i + 1]].m_DdTeam;
 
 		if(DDTeam != TEAM_FLOCK)
 		{
 			const ColorRGBA Color = GameClient()->GetDDTeamColor(DDTeam).WithAlpha(0.5f);
 			int Corners = 0;
-			if(OldDDTeam != DDTeam)
+			if(StartsGroup || OldDDTeam != DDTeam)
 				Corners |= IGraphics::CORNER_TL | IGraphics::CORNER_TR;
-			if(NextDDTeam != DDTeam)
+			if(EndsGroup || NextDDTeam != DDTeam)
 				Corners |= IGraphics::CORNER_BL | IGraphics::CORNER_BR;
 			Graphics()->DrawRect(Width / 2.0f + x - 10.0f + BoxOffset, Height / 2.0f + y + BoxMove, 270.0f - BoxOffset, LineHeight, Color, Corners, RoundRadius);
 		}
 
 		OldDDTeam = DDTeam;
 
-		if((Client()->State() == IClient::STATE_DEMOPLAYBACK && GameClient()->m_DemoSpecId == GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId) || (Client()->State() != IClient::STATE_DEMOPLAYBACK && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId == GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId))
+		if((Client()->State() == IClient::STATE_DEMOPLAYBACK && GameClient()->m_DemoSpecId == SpectatorClientId) || (Client()->State() != IClient::STATE_DEMOPLAYBACK && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId == SpectatorClientId))
 		{
 			Graphics()->DrawRect(Width / 2.0f + x - 10.0f + BoxOffset, Height / 2.0f + y + BoxMove, 270.0f - BoxOffset, LineHeight, ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_ALL, RoundRadius);
 		}
@@ -483,7 +499,7 @@ void CSpectator::OnRender()
 		if(m_SelectorMouse.x >= x - 10.0f && m_SelectorMouse.x < x + 260.0f &&
 			m_SelectorMouse.y >= y - (LineHeight / 6.0f) && m_SelectorMouse.y < y + (LineHeight * 5.0f / 6.0f))
 		{
-			m_SelectedSpectatorId = GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId;
+			m_SelectedSpectatorId = SpectatorClientId;
 			PlayerSelected = true;
 			if(MousePressed)
 			{
@@ -518,7 +534,7 @@ void CSpectator::OnRender()
 		}
 		float TeeAlpha;
 		if(Client()->State() == IClient::STATE_DEMOPLAYBACK &&
-			!GameClient()->m_Snap.m_aCharacters[GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId].m_Active)
+			!GameClient()->m_Snap.m_aCharacters[SpectatorClientId].m_Active)
 		{
 			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.25f);
 			TeeAlpha = 0.5f;
@@ -536,21 +552,21 @@ void CSpectator::OnRender()
 		if(g_Config.m_ClShowIds)
 		{
 			char aClientId[16];
-			GameClient()->FormatClientId(GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId, aClientId, EClientIdFormat::INDENT_AUTO);
+			GameClient()->FormatClientId(SpectatorClientId, aClientId, EClientIdFormat::INDENT_AUTO);
 			TextRender()->TextEx(&NameCursor, aClientId);
 		}
 
 		// TClient
-		if(pInfo && pInfo->m_ClientId > 0 && g_Config.m_TcWarList && g_Config.m_TcWarListSpectate && GameClient()->m_WarList.GetAnyWar(pInfo->m_ClientId))
+		if(pInfo->m_ClientId > 0 && g_Config.m_TcWarList && g_Config.m_TcWarListSpectate && GameClient()->m_WarList.GetAnyWar(pInfo->m_ClientId))
 		{
 			TextRender()->TextColor(GameClient()->m_WarList.GetPriorityColor(pInfo->m_ClientId));
 		}
 
-		TextRender()->TextEx(&NameCursor, GameClient()->StreamerName(GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId));
+		TextRender()->TextEx(&NameCursor, GameClient()->StreamerName(SpectatorClientId));
 
 		if(GameClient()->m_MultiViewActivated)
 		{
-			if(GameClient()->m_aMultiViewId[GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId])
+			if(GameClient()->m_aMultiViewId[SpectatorClientId])
 			{
 				TextRender()->TextColor(0.1f, 1.0f, 0.1f, PlayerSelected ? 1.0f : 0.5f);
 				TextRender()->Text(Width / 2.0f + x + 50.0f + 180.0f, Height / 2.0f + y + BoxMove + (LineHeight - FontSize) / 2.f, FontSize - 3, "⬤", 220.0f);
@@ -564,9 +580,9 @@ void CSpectator::OnRender()
 
 		// flag
 		if(GameClient()->m_Snap.m_pGameInfoObj && (GameClient()->m_Snap.m_pGameInfoObj->m_GameFlags & GAMEFLAG_FLAGS) &&
-			GameClient()->m_Snap.m_pGameDataObj && (GameClient()->m_Snap.m_pGameDataObj->m_FlagCarrierRed == GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId || GameClient()->m_Snap.m_pGameDataObj->m_FlagCarrierBlue == GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId))
+			GameClient()->m_Snap.m_pGameDataObj && (GameClient()->m_Snap.m_pGameDataObj->m_FlagCarrierRed == SpectatorClientId || GameClient()->m_Snap.m_pGameDataObj->m_FlagCarrierBlue == SpectatorClientId))
 		{
-			if(GameClient()->m_Snap.m_pGameDataObj->m_FlagCarrierBlue == GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId)
+			if(GameClient()->m_Snap.m_pGameDataObj->m_FlagCarrierBlue == SpectatorClientId)
 				Graphics()->TextureSet(GameClient()->m_GameSkin.m_SpriteFlagBlue);
 			else
 				Graphics()->TextureSet(GameClient()->m_GameSkin.m_SpriteFlagRed);
@@ -580,7 +596,7 @@ void CSpectator::OnRender()
 			Graphics()->QuadsEnd();
 		}
 
-		CTeeRenderInfo TeeInfo = GameClient()->m_aClients[GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId].m_RenderInfo;
+		CTeeRenderInfo TeeInfo = GameClient()->m_aClients[SpectatorClientId].m_RenderInfo;
 		TeeInfo.m_Size *= TeeSizeMod;
 
 		const CAnimState *pIdleState = CAnimState::GetIdle();
@@ -590,7 +606,7 @@ void CSpectator::OnRender()
 
 		RenderTools()->RenderTee(pIdleState, &TeeInfo, EMOTE_NORMAL, vec2(1.0f, 0.0f), TeeRenderPos, TeeAlpha);
 
-		if(GameClient()->m_aClients[GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId].m_Friend)
+		if(Entry.m_Friend)
 		{
 			TextRender()->TextColor(color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClMessageFriendColor)));
 			TextRender()->Text(Width / 2.0f + x - TeeInfo.m_Size / 2.0f, Height / 2.0f + y + BoxMove + (LineHeight - FontSize) / 2.f, FontSize, "♥", 220.0f);

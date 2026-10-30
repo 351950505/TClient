@@ -97,7 +97,7 @@ private:
 	void TryLoadIcons();
 	void TryLoadSounds();
 	void PlaySignalSound(int Signal, vec2 WorldPos);
-	void AddMarker(int Signal, vec2 WorldPos, int ClientId = -1); // ClientId >= 0 时在聊天框画一条图标行
+	void AddMarker(int Signal, vec2 WorldPos);
 	void RenderMarkers();
 	vec2 GetPingWorldPos() const;
 	vec2 WorldToUi(vec2 WorldPos) const;
@@ -123,7 +123,6 @@ public:
 	// 从消息解析信号类型（⟨B: 新格式 / ⟨P: 旧格式），失败返回 -1；
 	// chat.cpp 用它把 ping 行改写成图标行（QmClient 式聊天可视化）
 	static int SignalFromMessage(const char *pMessage);
-	static const char *SignalChatIcon(int Signal);
 	// TC 设置 Ping 页用的顺序管理
 	int LayoutType(int Sector) const;                 // 扇区 → 信号类型
 	void LayoutMove(int Sector, int Dir);             // 交换相邻扇区并写回 cvar

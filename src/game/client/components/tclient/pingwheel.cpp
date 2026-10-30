@@ -2,8 +2,6 @@
 #include "pingwheel.h"
 
 #include <base/io.h>
-
-#include <engine/font_icons.h>
 #include <base/log.h>
 #include <base/time.h>
 
@@ -332,23 +330,6 @@ vec2 CPingWheel::WorldToUi(vec2 WorldPos) const
 	return vec2(pUiScreen->x, pUiScreen->y) + Fraction * vec2(pUiScreen->w, pUiScreen->h);
 }
 
-const char *CPingWheel::SignalChatIcon(int Signal)
-{
-	static const char *const apIcons[] = {
-		FontIcon::TRIANGLE_EXCLAMATION, // 危险
-		FontIcon::BACKWARD_STEP,        // 撤退
-		FontIcon::FORWARD_FAST,         // 推进
-		FontIcon::FORWARD_STEP,         // 赶来
-		FontIcon::ICON_USERS,           // 集合
-		FontIcon::HEART,                // 支援
-		FontIcon::EYE_SLASH,            // 敌消
-		FontIcon::PAUSE,                // 等等
-	};
-	if(Signal < 0 || Signal >= NUM_SIGNALS)
-		return "";
-	return apIcons[Signal];
-}
-
 int CPingWheel::SignalFromMessage(const char *pMessage)
 {
 	int Signal, X, Y;
@@ -360,7 +341,7 @@ int CPingWheel::SignalFromMessage(const char *pMessage)
 	return -1;
 }
 
-void CPingWheel::AddMarker(int Signal, vec2 WorldPos, int ClientId)
+void CPingWheel::AddMarker(int Signal, vec2 WorldPos)
 {
 	// 找空槽，满了换最老的
 	CMarker *pSlot = &m_aMarkers[0];
@@ -377,14 +358,6 @@ void CPingWheel::AddMarker(int Signal, vec2 WorldPos, int ClientId)
 	pSlot->m_Type = Signal;
 	pSlot->m_WorldPos = WorldPos;
 	pSlot->m_StartTime = Client()->LocalTime();
-	// QmClient 式聊天可视化：聊天框显示一条图标行（自己发的用系统行，收到的
-	// 是"名字: 图标"行）。原版客户端无此行；走聊天通道时原版看到的是短码。
-	char aIcon[16];
-	str_format(aIcon, sizeof(aIcon), "%s", SignalChatIcon(Signal));
-	if(ClientId >= 0)
-		GameClient()->m_Chat.AddLine(ClientId, 0, aIcon);
-	else
-		GameClient()->m_Chat.Echo(aIcon);
 }
 
 void CPingWheel::OnRelayPayload(const char *pText)
@@ -507,7 +480,7 @@ void CPingWheel::OnMessage(int MsgType, void *pRawMsg)
 				m_EmoteRecvCount = -1;
 				if(Sig >= 0 && Sig < NUM_SIGNALS)
 				{
-					AddMarker(Sig, vec2((float)Px, (float)Py), pMsg->m_ClientId);
+					AddMarker(Sig, vec2((float)Px, (float)Py));
 					PlaySignalSound(Sig, vec2((float)Px, (float)Py));
 				}
 			}
@@ -537,7 +510,7 @@ void CPingWheel::OnMessage(int MsgType, void *pRawMsg)
 		if(Client()->State() != IClient::STATE_DEMOPLAYBACK &&
 			pMsg->m_ClientId == GameClient()->m_Snap.m_LocalClientId)
 			return; // 自己在线时的回声不重复显示（发送时已本地出标记）
-		AddMarker(Signal, vec2((float)X, (float)Y), pMsg->m_ClientId);
+		AddMarker(Signal, vec2((float)X, (float)Y));
 		PlaySignalSound(Signal, vec2((float)X, (float)Y));
 		return;
 	}

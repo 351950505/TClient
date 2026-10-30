@@ -1216,7 +1216,9 @@ void CTClient::PollUpdateTasks()
 		}
 		if(!m_pUpdateManifestSigTask)
 		{
-			m_pUpdateManifestSigTask = HttpGet(m_aUpdateManifestSigUrl);
+			char aSigUrl[512];
+			str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
 			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
 			m_pUpdateManifestSigTask->MaxResponseSize(1024);
 			m_pUpdateManifestSigTask->FailOnErrorStatus(true);
@@ -1257,7 +1259,9 @@ void CTClient::PollUpdateTasks()
 		}
 		if(m_UpdateState == EUpdateState::CHECKING && m_pUpdateManifestTask && !m_pUpdateManifestSigTask)
 		{
-			m_pUpdateManifestSigTask = HttpGet(m_aUpdateManifestSigUrl);
+			char aSigUrl[512];
+			str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
 			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
 			m_pUpdateManifestSigTask->MaxResponseSize(1024);
 			m_pUpdateManifestSigTask->FailOnErrorStatus(true);

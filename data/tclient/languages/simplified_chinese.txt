@@ -1229,13 +1229,13 @@ You are on the latest version
 == 已是最新版本
 
 An update is available
-== 有可用更新
+== 发现新版本
 
 Version %s is available
 == 发现新版本 %s
 
 Validating update manifest...
-== 正在校验更新清单……
+== 正在校验清单签名……
 
 Downloading update...
 == 正在下载更新……
@@ -1259,7 +1259,7 @@ Update check failed: the release list could not be downloaded
 == 检查更新失败：版本列表下载失败
 
 Update check failed: the manifest is not valid JSON
-== 检查更新失败：更新清单格式错误
+== 检查更新失败：清单不是有效的 JSON
 
 Update check failed: the manifest could not be downloaded
 == 检查更新失败：更新清单下载失败
@@ -1289,7 +1289,7 @@ Update rejected: not newer than the current version
 == 已拒绝更新：版本不比当前版本新
 
 No verified update available
-== 没有已通过校验的更新
+== 暂无通过校验的更新
 
 Download failed or the file is corrupted
 == 下载失败或文件已损坏
@@ -1301,13 +1301,13 @@ Download failed: the file size does not match the manifest
 == 下载失败：文件大小与清单不一致
 
 Could not start the update helper
-== 无法启动更新助手
+== 无法启动更新 Helper
 
 Update helper %s is missing
-== 更新助手 %s 缺失
+== 更新 Helper %s 缺失
 
 Installing updates is only supported on Windows
-== 仅 Windows 支持自动安装更新
+== 自动安装更新仅支持 Windows
 
 Country flags are always hidden while streamer mode is on
 == 开启主播模式时始终隐藏国旗

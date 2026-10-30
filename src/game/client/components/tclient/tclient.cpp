@@ -899,12 +899,11 @@ void CTClient::FetchUpdateManifest()
 	Http()->Run(m_pUpdateManifestTask);
 }
 
-void CTClient::FinishUpdateManifest()
+void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask)
 {
-	// 先把任务指针抓到局部：UpdateFail 会 ResetUpdateTasks() 把成员置空，
-	// 之后仍要用清单结果解析，成员指针已经不在了。
+	// 清单任务在此刻仍在成员上（UpdateFail 会清它），先取局部快照；
+	// 签名任务由调用方传入（调用点已把成员置空，避免重复处理）。
 	std::shared_ptr<IHttpRequest> pManifestTask = m_pUpdateManifestTask;
-	std::shared_ptr<IHttpRequest> pSigTask = m_pUpdateManifestSigTask;
 	if(!pManifestTask || !pSigTask)
 	{
 		UpdateFail(TCLocalize("Update check failed: the manifest could not be downloaded"));
@@ -1336,11 +1335,13 @@ void CTClient::PollUpdateTasks()
 	}
 	if(m_pUpdateManifestSigTask && m_pUpdateManifestSigTask->Done())
 	{
-		const bool SigOk = m_pUpdateManifestSigTask->State() == EHttpState::DONE;
+		// 注意：不能先把 sig 任务置空再调 Finish —— Finish 内部要用它取签名字节。
+		std::shared_ptr<IHttpRequest> pSigTask = m_pUpdateManifestSigTask;
 		m_pUpdateManifestSigTask = nullptr;
+		const bool SigOk = pSigTask->State() == EHttpState::DONE;
 		if(SigOk)
 		{
-			FinishUpdateManifest();
+			FinishUpdateManifest(pSigTask);
 			return;
 		}
 		if(m_UpdateDownloadAttempt < 3)

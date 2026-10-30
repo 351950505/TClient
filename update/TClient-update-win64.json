@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.6",
+  "version": "1.7.8.7",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64429863,
-  "sha256": "2bea3d349c7e8911d04172f5895c495d5489ca5cd68457d2343fc6e52e85cdf4",
-  "notes": "回滚灵动岛本地时间显示（有问题）",
+  "size": 64429961,
+  "sha256": "7fc5d1be4ea1ba2974ae2061ed1fc764f3a45aab23b2715c71394a642d67535c",
+  "notes": "修复检查更新误报清单下载失败（签名任务被提前置空）",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 299008,

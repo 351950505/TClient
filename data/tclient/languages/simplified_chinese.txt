@@ -1335,3 +1335,18 @@ Font size
 
 Show real-world time (HH:MM)
 == 显示真实时间（时:分）
+
+UI scale
+== 界面缩放
+
+Switching to the fallback update source...
+== 正在切换备用更新源……
+
+Update check failed: the manifest signature could not be downloaded
+== 检查更新失败：签名文件下载失败
+
+Update rejected: manifest signature is invalid
+== 已拒绝更新：清单签名无效
+
+Update rejected: missing bootstrap helper
+== 已拒绝更新：缺少自举 helper

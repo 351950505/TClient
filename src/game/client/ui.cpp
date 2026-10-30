@@ -452,7 +452,9 @@ float CUi::ButtonColorMul(const void *pId)
 
 const CUIRect *CUi::Screen()
 {
-	m_Screen.h = 600.0f;
+	// TClient: 全局界面缩放（tc_ui_scale 百分比）。虚拟屏高度缩小 = 界面放大；
+	// 鼠标坐标同源推导（m_MousePos 由该矩形换算），缩放后命中判定自动一致。
+	m_Screen.h = 600.0f / (g_Config.m_TcUiScale / 100.0f);
 	m_Screen.w = Graphics()->ScreenAspect() * m_Screen.h;
 	return &m_Screen;
 }

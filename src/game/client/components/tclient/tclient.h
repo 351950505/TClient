@@ -110,6 +110,7 @@ private:
 	char m_aUpdateHelperUrl[512] = "";
 	char m_aUpdateBootstrapPath[IO_MAX_PATH_LENGTH] = "";
 	bool BootstrapHelperPending = false;
+	bool m_UpdateViaFallback = false;
 	std::shared_ptr<IHttpRequest> m_pUpdateHelperTask = nullptr;
 	int m_UpdateDownloadAttempt = 0;
 	float m_UpdateRetryAt = -1.0f;

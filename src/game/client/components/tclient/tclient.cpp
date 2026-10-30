@@ -52,6 +52,12 @@ static constexpr const char *TCLIENT_INFO_URL = "https://update.tclient.app/info
 //   TClient-update-win64.zip   整包，由独立的 TClientUpdater.exe 在主进程退出后替换
 // 旧的 update.tclient.app 逐文件更新器与本流程无关，也不受这里影响。
 static constexpr const char *TCLIENT_UPDATE_RELEASES_URL = "https://api.github.com/repos/351950505/TClient/releases?per_page=20";
+// 备用检查源：api.github.com 在部分网络不可达时，改用 GitHub 官方的
+// latest/download 固定地址直接取最新发布的清单/签名/包（无 API 限流）
+static constexpr const char *TCLIENT_UPDATE_FALLBACK_MANIFEST_URL = "https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json";
+static constexpr const char *TCLIENT_UPDATE_FALLBACK_SIG_URL = "https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json.sig";
+static constexpr const char *TCLIENT_UPDATE_FALLBACK_ZIP_URL = "https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.zip";
+static constexpr const char *TCLIENT_UPDATE_FALLBACK_HELPER_URL = "https://github.com/351950505/TClient/releases/latest/download/TClientUpdater.exe";
 static constexpr const char *TCLIENT_UPDATE_PRODUCT = "TClient";
 static constexpr const char *TCLIENT_UPDATE_CHANNEL = "stable";
 static constexpr const char *TCLIENT_UPDATE_PLATFORM = "win64";
@@ -847,6 +853,7 @@ void CTClient::UpdateCheck(bool Force)
 	m_aUpdateManifestSigUrl[0] = '\0';
 	m_aUpdateHelperUrl[0] = '\0';
 	m_aUpdateBootstrapPath[0] = '\0';
+	m_UpdateViaFallback = false;
 	BootstrapHelperPending = false;
 	m_LastUpdateCheck = time_timestamp();
 	m_UpdateState = EUpdateState::CHECKING;
@@ -1018,7 +1025,7 @@ void CTClient::FinishUpdateManifest()
 		pError = TCLocalize("Update rejected: wrong channel");
 	else if(!pPlatform || str_comp(pPlatform, TCLIENT_UPDATE_PLATFORM) != 0)
 		pError = TCLocalize("Update rejected: wrong platform");
-	else if(!pVersion || str_comp(pVersion, m_UpdateRelease.m_aVersion) != 0)
+	else if(!pVersion || (str_comp(pVersion, m_UpdateRelease.m_aVersion) != 0 && !m_UpdateViaFallback))
 		pError = TCLocalize("Update rejected: version does not match the release");
 	else if(!pAsset || str_comp(pAsset, TCLIENT_UPDATE_ZIP_ASSET) != 0)
 		pError = TCLocalize("Update rejected: unexpected asset name");
@@ -1051,6 +1058,12 @@ void CTClient::FinishUpdateManifest()
 	}
 	str_copy(m_UpdateRelease.m_aHelperSha256, pHelperSha);
 	m_UpdateRelease.m_HelperSize = JsonGetInt(HelperSize, -1);
+	if(m_UpdateViaFallback)
+	{
+		// 备用源没有 release 元数据：清单即真相，tag = 版本号
+		str_format(m_UpdateRelease.m_aTag, sizeof(m_UpdateRelease.m_aTag), "v%s", pVersion);
+		str_copy(m_UpdateRelease.m_aVersion, pVersion);
+	}
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
 
@@ -1313,10 +1326,23 @@ void CTClient::PollUpdateTasks()
 	if(m_pUpdateReleasesTask && m_pUpdateReleasesTask->Done())
 	{
 		if(m_pUpdateReleasesTask->State() == EHttpState::DONE)
+		{
 			FinishUpdateReleases();
-		else
-			UpdateFail(TCLocalize("Update check failed: the release list could not be downloaded"));
+			return;
+		}
+		// API 不可达（部分网络封禁 api.github.com）时切备用源：
+		// latest/download 直链，无 API、无限流
 		m_pUpdateReleasesTask = nullptr;
+		ResetUpdateTasks();
+		log_warn("tclient-update", "releases API unreachable, switching to fallback source");
+		SetUpdateStatus(TCLocalize("Switching to the fallback update source..."));
+		str_copy(m_aUpdateManifestUrl, TCLIENT_UPDATE_FALLBACK_MANIFEST_URL);
+		str_copy(m_aUpdateManifestSigUrl, TCLIENT_UPDATE_FALLBACK_SIG_URL);
+		str_copy(m_UpdateRelease.m_aZipUrl, TCLIENT_UPDATE_FALLBACK_ZIP_URL);
+		str_copy(m_aUpdateHelperUrl, TCLIENT_UPDATE_FALLBACK_HELPER_URL);
+		m_UpdateViaFallback = true;
+		m_UpdateState = EUpdateState::CHECKING;
+		FetchUpdateManifest();
 		return;
 	}
 	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done())

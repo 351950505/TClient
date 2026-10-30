@@ -556,6 +556,8 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	Column.HSplitTop(LineSize, &Button, &Column);
 	static int s_LastFontSize = g_Config.m_TcFontSize;
 	Ui()->DoScrollbarOption(&g_Config.m_TcFontSize, &g_Config.m_TcFontSize, &Button, TCLocalize("Font size"), 50, 200, &CUi::ms_LinearScrollbarScale, 0, "%");
+	Column.HSplitTop(LineSize, &Button, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiScale, &g_Config.m_TcUiScale, &Button, TCLocalize("UI scale"), 50, 200, &CUi::ms_LinearScrollbarScale, 0, "%");
 	if(s_LastFontSize != g_Config.m_TcFontSize)
 	{
 		s_LastFontSize = g_Config.m_TcFontSize;

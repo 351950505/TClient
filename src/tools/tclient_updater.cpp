@@ -1788,7 +1788,23 @@ namespace
 			else
 			{
 				ClearReadOnly(Destination);
-				if(MoveFileExW(LongPath(Source).c_str(), LongPath(Destination).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
+				bool Replaced = false;
+				// 被占用的文件（比如客户端拉起的后台监控进程还没退干净）
+				// 短暂重试，而不是立刻整体回滚
+				for(int Retry = 0; Retry < 10; ++Retry)
+				{
+					if(MoveFileExW(LongPath(Source).c_str(), LongPath(Destination).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
+					{
+						Replaced = true;
+						break;
+					}
+					const DWORD MoveError = GetLastError();
+					if(MoveError != ERROR_ACCESS_DENIED && MoveError != ERROR_SHARING_VIOLATION)
+						break;
+					Sleep(200);
+					ClearReadOnly(Destination);
+				}
+				if(Replaced)
 					continue;
 				g_Logger.Error("could not replace '%s': %s", Utf8FromWide(Destination).c_str(), FormatLastError(GetLastError()).c_str());
 			}
@@ -1856,6 +1872,12 @@ int wmain(int argc, wchar_t **argv)
 	}
 
 	const std::wstring LogPath = GetFullPath(Options.m_LogPath);
+	{
+		std::string LogDirError;
+		const size_t LogSlash = LogPath.find_last_of(L'\\');
+		if(LogSlash != std::wstring::npos)
+			EnsureDirectory(LogPath.substr(0, LogSlash), LogDirError);
+	}
 	if(!g_Logger.Open(LogPath))
 		fprintf(stderr, "warning: could not open log file '%s': %s\n", Utf8FromWide(LogPath).c_str(), FormatLastError(GetLastError()).c_str());
 

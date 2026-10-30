@@ -9,6 +9,8 @@
 #include <base/process.h>
 #include <base/time.h>
 
+
+
 #include <engine/client.h>
 #include <engine/client/enums.h>
 #include <engine/external/regex.h>
@@ -27,6 +29,15 @@
 #include <game/client/ui.h>
 #include <game/localization.h>
 #include <game/version.h>
+
+#if defined(CONF_FAMILY_WINDOWS)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <base/windows.h>
+#include <windows.h>
+#include <tlhelp32.h>
+#endif
 
 #include <cstdarg>
 
@@ -994,6 +1005,51 @@ void CTClient::FinishUpdateManifest()
 	log_info("tclient-update", "update available: %s -> %s (%lld bytes)", TCLIENT_APP_VERSION, m_UpdateRelease.m_aVersion, (long long)m_UpdateRelease.m_Size);
 }
 
+#if defined(CONF_FAMILY_WINDOWS)
+// 更新前结束本客户端拉起的后台监控进程：它们会锁住自己的 exe，导致 helper
+// 替换失败并整体回滚（2026-10-31 实测 island_media_monitor.exe 拒绝访问）。
+// 只杀安装目录匹配的进程，不碰其他安装/其他用户的同名进程。
+static void StopOwnHelperProcesses(const wchar_t *pInstallDir)
+{
+	HANDLE Snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if(Snapshot == INVALID_HANDLE_VALUE)
+		return;
+	std::wstring LowerInstall = pInstallDir;
+	for(wchar_t &c : LowerInstall)
+		c = towlower(c);
+
+	PROCESSENTRY32W Entry;
+	Entry.dwSize = sizeof(Entry);
+	if(Process32FirstW(Snapshot, &Entry))
+	{
+		do
+		{
+			if(_wcsicmp(Entry.szExeFile, L"island_media_monitor.exe") != 0 &&
+				_wcsicmp(Entry.szExeFile, L"netease-watcher.exe") != 0)
+				continue;
+			HANDLE Process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, FALSE, Entry.th32ProcessID);
+			if(!Process)
+				continue;
+			wchar_t aPath[MAX_PATH + 8];
+			DWORD PathSize = std::size(aPath);
+			if(QueryFullProcessImageNameW(Process, 0, aPath, &PathSize))
+			{
+				std::wstring LowerPath = aPath;
+				for(wchar_t &c : LowerPath)
+					c = towlower(c);
+				if(LowerPath.rfind(LowerInstall, 0) == 0)
+				{
+					TerminateProcess(Process, 0);
+					WaitForSingleObject(Process, 2000);
+				}
+			}
+			CloseHandle(Process);
+		} while(Process32NextW(Snapshot, &Entry));
+	}
+	CloseHandle(Snapshot);
+}
+#endif
+
 void CTClient::UpdateStartDownload()
 {
 	if(!m_UpdateRelease.m_Valid)
@@ -1110,6 +1166,14 @@ void CTClient::UpdateInstallAndRestart()
 		"--target", aTarget,
 		"--restart", aExe,
 		"--log", aLog};
+#if defined(CONF_FAMILY_WINDOWS)
+	{
+		wchar_t aWideTarget[IO_MAX_PATH_LENGTH];
+		MultiByteToWideChar(CP_UTF8, 0, aTarget, -1, aWideTarget, std::size(aWideTarget));
+		StopOwnHelperProcesses(aWideTarget);
+		Sleep(300);
+	}
+#endif
 	log_info("tclient-update", "starting helper: %s (pid %s, target %s)", aHelper, aPid, aTarget);
 	const PROCESS Helper = process_execute(aHelper, EShellExecuteWindowState::BACKGROUND, apArguments, std::size(apArguments));
 	if(Helper == INVALID_PROCESS)

@@ -1012,7 +1012,13 @@ add_library(json EXCLUDE_FROM_ALL OBJECT ${DEP_JSON_SRC})
 set_src(DEP_MD5_SRC GLOB src/engine/external/md5 md5.c md5.h)
 add_library(md5 EXCLUDE_FROM_ALL OBJECT ${DEP_MD5_SRC})
 
-list(APPEND TARGETS_DEP json md5)
+# ed25519 (public domain, orlp/ed25519): 更新清单签名验证
+set_src(DEP_ED25519_SRC GLOB src/engine/external/ed25519 verify.c sha512.c fe.c ge.c sc.c add_scalar.c)
+add_library(ed25519 EXCLUDE_FROM_ALL OBJECT ${DEP_ED25519_SRC})
+target_include_directories(ed25519 PRIVATE ${PROJECT_SOURCE_DIR}/src/engine/external/ed25519)
+set(DEP_ED25519 $<TARGET_OBJECTS:ed25519>)
+
+list(APPEND TARGETS_DEP json md5 ed25519)
 set(DEP_JSON $<TARGET_OBJECTS:json>)
 set(DEP_MD5)
 if(NOT CRYPTO_FOUND)
@@ -2551,6 +2557,8 @@ file(GLOB_RECURSE ENGINE_EXTERNAL_CHAISCRIPT
 )
 list(APPEND ENGINE_EXTERNAL ${ENGINE_EXTERNAL_CHAISCRIPT})
 
+
+
 set_src(ENGINE_GFX GLOB src/engine/gfx
   # tidy-alphabetical-start
   image.cpp
@@ -2622,7 +2630,7 @@ set(GAME_GENERATED_SHARED
   src/generated/protocolglue.h
   # tidy-alphabetical-end
 )
-set(DEPS ${DEP_JSON} ${DEP_MD5} ${ZLIB_DEP})
+set(DEPS ${DEP_JSON} ${DEP_MD5} ${DEP_ED25519} ${ZLIB_DEP})
 
 # Libraries
 set(LIBS

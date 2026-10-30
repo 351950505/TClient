@@ -3,6 +3,7 @@
 
 #include <engine/client/enums.h>
 #include <engine/external/regex.h>
+#include <base/io.h>
 #include <engine/http.h>
 #include <engine/shared/console.h>
 
@@ -38,6 +39,8 @@ public:
 		char m_aAsset[64] = "";
 		char m_aSha256[65] = "";
 		int64_t m_Size = 0;
+		char m_aHelperSha256[65] = "";
+		int64_t m_HelperSize = 0;
 		char m_aZipUrl[512] = "";
 	};
 
@@ -96,8 +99,18 @@ private:
 	void FinishUpdateManifest();
 	void FinishUpdateDownload();
 	void StartDownloadTask();
+	void FinishUpdateBootstrap();
 	void ResetUpdateTasks();
 	bool UpdateShouldAutoCheck() const;
+	bool VerifyUpdateManifestSignature(const unsigned char *pManifest, size_t ManifestSize, const unsigned char *pSignature, size_t SignatureSize);
+
+	// 签名链：清单 Ed25519 验签（公钥内嵌）+ 自举（从已验证包里提取新 helper 运行）
+	std::shared_ptr<IHttpRequest> m_pUpdateManifestSigTask = nullptr;
+	char m_aUpdateManifestSigUrl[512] = "";
+	char m_aUpdateHelperUrl[512] = "";
+	char m_aUpdateBootstrapPath[IO_MAX_PATH_LENGTH] = "";
+	bool BootstrapHelperPending = false;
+	std::shared_ptr<IHttpRequest> m_pUpdateHelperTask = nullptr;
 	int m_UpdateDownloadAttempt = 0;
 	float m_UpdateRetryAt = -1.0f;
 

@@ -38,6 +38,8 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #endif
+#include <engine/external/ed25519/ed25519.h>
+#include "update_public_key.h"
 
 #include <cstdarg>
 
@@ -56,6 +58,9 @@ static constexpr const char *TCLIENT_UPDATE_PLATFORM = "win64";
 static constexpr const char *TCLIENT_UPDATE_MANIFEST_ASSET = "TClient-update-win64.json";
 static constexpr const char *TCLIENT_UPDATE_ZIP_ASSET = "TClient-update-win64.zip";
 static constexpr const char *TCLIENT_UPDATE_HELPER = "TClientUpdater.exe";
+static constexpr const char *TCLIENT_UPDATE_MANIFEST_SIG_ASSET = "TClient-update-win64.json.sig";
+static constexpr const char *TCLIENT_UPDATE_HELPER_ASSET = "TClientUpdater.exe";
+static constexpr const char *TCLIENT_UPDATE_BOOTSTRAP_PATH = "update/TClientUpdater.boot.exe";
 static constexpr const char *TCLIENT_UPDATE_ZIP_PATH = "update/TClient-update-win64.zip";
 // 自动检查节奏：启动后先等 12 秒（别和首帧/地图加载抢带宽），之后每 6 小时最多一次。
 static constexpr float TCLIENT_UPDATE_FIRST_CHECK_DELAY = 12.0f;
@@ -788,6 +793,8 @@ void CTClient::UpdateFail(const char *pFormat, ...)
 	va_end(Args);
 	m_UpdateState = EUpdateState::FAILED;
 	m_UpdateRelease.m_Valid = false;
+	// 失败即中止所有在途任务，避免 PollUpdateTasks 下一帧重复触发
+	ResetUpdateTasks();
 	log_warn("tclient-update", "%s", m_aUpdateStatus);
 }
 
@@ -810,6 +817,13 @@ void CTClient::ResetUpdateTasks()
 	}
 }
 
+// 更新清单 Ed25519 验签：公钥内嵌（update_public_key.h），签名由发布脚本
+// 用私钥生成。验签不过 = 清单被篡改或来源不对，直接拒绝，不进入下载。
+bool CTClient::VerifyUpdateManifestSignature(const unsigned char *pManifest, size_t ManifestSize, const unsigned char *pSignature, size_t SignatureSize)
+{
+	return ed25519_verify(pSignature, pManifest, ManifestSize, s_aUpdateEd25519PublicKey) == 1;
+}
+
 bool CTClient::UpdateShouldAutoCheck() const
 {
 	if(m_UpdateState == EUpdateState::CHECKING || m_UpdateState == EUpdateState::DOWNLOADING || m_UpdateState == EUpdateState::DOWNLOADED)
@@ -830,6 +844,10 @@ void CTClient::UpdateCheck(bool Force)
 	m_UpdateRelease = SUpdateRelease();
 	m_aUpdateReleaseTag[0] = '\0';
 	m_aUpdateManifestUrl[0] = '\0';
+	m_aUpdateManifestSigUrl[0] = '\0';
+	m_aUpdateHelperUrl[0] = '\0';
+	m_aUpdateBootstrapPath[0] = '\0';
+	BootstrapHelperPending = false;
 	m_LastUpdateCheck = time_timestamp();
 	m_UpdateState = EUpdateState::CHECKING;
 	SetUpdateStatus(TCLocalize("Checking for updates..."));
@@ -865,6 +883,8 @@ void CTClient::FinishUpdateReleases()
 	char aBestVersion[32] = "";
 	char aBestManifestUrl[512] = "";
 	char aBestZipUrl[512] = "";
+	char aBestSigUrl[512] = "";
+	char aBestHelperUrl[512] = "";
 	int Best[3] = {-1, -1, -1};
 	const int NumReleases = json_array_length(pJson);
 	for(int i = 0; i < NumReleases; i++)
@@ -890,6 +910,8 @@ void CTClient::FinishUpdateReleases()
 		// browser_download_url（不自己拼 URL，避免指向错误主机）。
 		char aManifestUrl[512] = "";
 		char aZipUrl[512] = "";
+		char aSigUrl[512] = "";
+		char aHelperUrl[512] = "";
 		for(int j = 0; j < json_array_length(&Assets); j++)
 		{
 			const json_value &Asset = Assets[j];
@@ -901,8 +923,12 @@ void CTClient::FinishUpdateReleases()
 				str_copy(aManifestUrl, pUrl);
 			else if(str_comp(pName, TCLIENT_UPDATE_ZIP_ASSET) == 0)
 				str_copy(aZipUrl, pUrl);
+			else if(str_comp(pName, TCLIENT_UPDATE_MANIFEST_SIG_ASSET) == 0)
+				str_copy(aSigUrl, pUrl);
+			else if(str_comp(pName, TCLIENT_UPDATE_HELPER_ASSET) == 0)
+				str_copy(aHelperUrl, pUrl);
 		}
-		if(!aManifestUrl[0] || !aZipUrl[0])
+		if(!aManifestUrl[0] || !aZipUrl[0] || !aSigUrl[0] || !aHelperUrl[0])
 			continue;
 		if(Best[0] >= 0 && CompareAppVersion(pVersion, aBestVersion) <= 0)
 			continue;
@@ -928,6 +954,8 @@ void CTClient::FinishUpdateReleases()
 	str_copy(m_UpdateRelease.m_aTag, aBestTag);
 	str_copy(m_UpdateRelease.m_aVersion, aBestVersion);
 	str_copy(m_aUpdateManifestUrl, aBestManifestUrl);
+	str_copy(m_aUpdateManifestSigUrl, aBestSigUrl);
+	str_copy(m_aUpdateHelperUrl, aBestHelperUrl);
 	str_copy(m_UpdateRelease.m_aZipUrl, aBestZipUrl);
 	json_value_free(pJson);
 
@@ -947,6 +975,22 @@ void CTClient::FetchUpdateManifest()
 
 void CTClient::FinishUpdateManifest()
 {
+	// 验签优先于任何解析：清单字节 + Ed25519 签名（公钥内嵌），签名不符直接拒绝
+	{
+		unsigned char *pManifest;
+		size_t ManifestSize;
+		m_pUpdateManifestTask->Result(&pManifest, &ManifestSize);
+		unsigned char *pSig;
+		size_t SigSize;
+		m_pUpdateManifestSigTask->Result(&pSig, &SigSize);
+		if(!VerifyUpdateManifestSignature(pManifest, ManifestSize, pSig, SigSize))
+		{
+			UpdateFail(TCLocalize("Update rejected: manifest signature is invalid"));
+			return;
+		}
+		log_info("tclient-update", "manifest signature verified");
+	}
+
 	json_value *pJson = m_pUpdateManifestTask->ResultJson();
 	if(!pJson || pJson->type != json_object)
 	{
@@ -995,6 +1039,18 @@ void CTClient::FinishUpdateManifest()
 	str_copy(m_UpdateRelease.m_aAsset, pAsset);
 	str_copy(m_UpdateRelease.m_aSha256, pSha256);
 	m_UpdateRelease.m_Size = Size;
+	// 自举：清单同时携带新 helper 的哈希，客户端下载后验哈希再用它安装
+	const json_value &Helper = JsonObj(*pJson, "helper");
+	const char *pHelperSha = JsonStr(JsonObj(Helper, "sha256"));
+	const json_value &HelperSize = JsonObj(Helper, "size");
+	if(!pHelperSha || !IsHexSha256(pHelperSha) || JsonGetInt(HelperSize, -1) <= 0)
+	{
+		json_value_free(pJson);
+		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
+		return;
+	}
+	str_copy(m_UpdateRelease.m_aHelperSha256, pHelperSha);
+	m_UpdateRelease.m_HelperSize = JsonGetInt(HelperSize, -1);
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
 
@@ -1113,9 +1169,48 @@ void CTClient::FinishUpdateDownload()
 		UpdateFail(TCLocalize("Download failed: the file size does not match the manifest"));
 		return;
 	}
+	// 自举：从服务器取新版 helper（清单内含其哈希），装包由它执行 ——
+	// 运行的永远是验签链上的新 helper，而不是安装目录里的旧版
+	ResetUpdateTasks();
+	m_UpdateState = EUpdateState::DOWNLOADING;
+	SetUpdateStatus(TCLocalize("Fetching the update helper..."));
+	SHA256_DIGEST HelperDigest;
+	if(sha256_from_str(&HelperDigest, m_UpdateRelease.m_aHelperSha256) != 0)
+	{
+		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
+		return;
+	}
+	Storage()->GetCompletePath(IStorage::TYPE_SAVE, TCLIENT_UPDATE_BOOTSTRAP_PATH, m_aUpdateBootstrapPath, sizeof(m_aUpdateBootstrapPath));
+	m_pUpdateHelperTask = HttpGetFile(m_aUpdateHelperUrl, Storage(), TCLIENT_UPDATE_BOOTSTRAP_PATH, IStorage::TYPE_SAVE);
+	m_pUpdateHelperTask->Timeout(CTimeout{20000, 0, 800, 60});
+	m_pUpdateHelperTask->IpResolve(IPRESOLVE::V4);
+	m_pUpdateHelperTask->FailOnErrorStatus(true);
+	m_pUpdateHelperTask->ExpectSha256(HelperDigest);
+	m_pUpdateHelperTask->AllowResume(true);
+	Http()->Run(m_pUpdateHelperTask);
+}
+
+void CTClient::FinishUpdateBootstrap()
+{
+	char aPath[IO_MAX_PATH_LENGTH];
+	Storage()->GetCompletePath(IStorage::TYPE_SAVE, TCLIENT_UPDATE_BOOTSTRAP_PATH, aPath, sizeof(aPath));
+	IOHANDLE File = io_open(aPath, IOFLAG_READ);
+	if(!File)
+	{
+		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
+		return;
+	}
+	const int64_t Length = io_length(File);
+	io_close(File);
+	if(m_UpdateRelease.m_HelperSize > 0 && Length != m_UpdateRelease.m_HelperSize)
+	{
+		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
+		return;
+	}
+	BootstrapHelperPending = true;
 	m_UpdateState = EUpdateState::DOWNLOADED;
 	SetUpdateStatus(TCLocalize("Update downloaded, ready to install"));
-	log_info("tclient-update", "download verified: %s (%lld bytes)", aPath, (long long)Length);
+	log_info("tclient-update", "download verified: %s (%lld bytes), bootstrap helper ready", aPath, (long long)Length);
 }
 
 bool CTClient::UpdateHelperExists() const
@@ -1132,9 +1227,13 @@ void CTClient::UpdateInstallAndRestart()
 #else
 	char aZip[IO_MAX_PATH_LENGTH];
 	Storage()->GetCompletePath(IStorage::TYPE_SAVE, TCLIENT_UPDATE_ZIP_PATH, aZip, sizeof(aZip));
+	// 自举优先：用随包下载并验过哈希的新 helper；不存在时退回安装目录里的
 	char aHelper[IO_MAX_PATH_LENGTH];
-	Storage()->GetBinaryPathAbsolute(TCLIENT_UPDATE_HELPER, aHelper, sizeof(aHelper));
-	if(!Storage()->FileExists(TCLIENT_UPDATE_HELPER, IStorage::TYPE_ALL))
+	if(BootstrapHelperPending)
+		str_copy(aHelper, m_aUpdateBootstrapPath);
+	else
+		Storage()->GetBinaryPathAbsolute(TCLIENT_UPDATE_HELPER, aHelper, sizeof(aHelper));
+	if(!fs_is_file(aHelper))
 	{
 		char aMsg[128];
 		str_format(aMsg, sizeof(aMsg), TCLocalize("Update helper %s is missing"), TCLIENT_UPDATE_HELPER);
@@ -1222,11 +1321,61 @@ void CTClient::PollUpdateTasks()
 	}
 	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done())
 	{
-		if(m_pUpdateManifestTask->State() == EHttpState::DONE)
-			FinishUpdateManifest();
-		else
+		// 清单下载完成后先拉签名，验签通过才解析
+		if(m_pUpdateManifestTask->State() != EHttpState::DONE)
+		{
 			UpdateFail(TCLocalize("Update check failed: the manifest could not be downloaded"));
-		m_pUpdateManifestTask = nullptr;
+			ResetUpdateTasks();
+			return;
+		}
+		if(!m_pUpdateManifestSigTask)
+		{
+			m_pUpdateManifestSigTask = HttpGet(m_aUpdateManifestSigUrl);
+			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
+			m_pUpdateManifestSigTask->MaxResponseSize(1024);
+			m_pUpdateManifestSigTask->FailOnErrorStatus(true);
+			Http()->Run(m_pUpdateManifestSigTask);
+			return;
+		}
+	}
+	if(m_pUpdateHelperTask && m_pUpdateHelperTask->Done())
+	{
+		const bool HelperOk = m_pUpdateHelperTask->State() == EHttpState::DONE;
+		m_pUpdateHelperTask = nullptr;
+		if(HelperOk)
+		{
+			FinishUpdateBootstrap();
+			return;
+		}
+		// helper 很小，失败直接重试一次链条（zip 已在本地，不会重新下载）
+		if(m_UpdateDownloadAttempt < 3)
+		{
+			++m_UpdateDownloadAttempt;
+			char aStatus[128];
+			str_format(aStatus, sizeof(aStatus), TCLocalize("Download failed, retrying (%d/%d)..."), m_UpdateDownloadAttempt, 3);
+			SetUpdateStatus(aStatus);
+			m_UpdateRetryAt = Client()->LocalTime() + 2.0f;
+			return;
+		}
+		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
+		return;
+	}
+	if(m_UpdateRetryAt > 0 && Client()->LocalTime() >= m_UpdateRetryAt && m_UpdateState == EUpdateState::DOWNLOADING && !m_pUpdateDownloadTask && !m_pUpdateHelperTask)
+	{
+		// zip 已在本地时 ShouldSkipRequest 会秒过，重试代价极小
+		StartDownloadTask();
+		return;
+	}
+	if(m_pUpdateManifestSigTask && m_pUpdateManifestSigTask->Done())
+	{
+		const bool SigOk = m_pUpdateManifestSigTask->State() == EHttpState::DONE;
+		m_pUpdateManifestSigTask = nullptr;
+		if(!SigOk)
+		{
+			UpdateFail(TCLocalize("Update check failed: the manifest signature could not be downloaded"));
+			return;
+		}
+		FinishUpdateManifest();
 		return;
 	}
 	if(m_pUpdateDownloadTask && m_pUpdateDownloadTask->Done())

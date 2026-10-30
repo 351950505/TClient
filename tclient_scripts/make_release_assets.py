@@ -33,6 +33,8 @@ from pathlib import Path
 
 ASSET_NAME = "TClient-update-win64.zip"
 MANIFEST_NAME = "TClient-update-win64.json"
+MANIFEST_SIG_NAME = MANIFEST_NAME + ".sig"
+HELPER_NAME = "TClientUpdater.exe"
 
 # Fixed timestamp for every entry (the earliest value a zip file can store) so that the archive
 # is reproducible.
@@ -200,6 +202,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 	parser.add_argument("--output", required=True, help="Directory the two assets are written to")
 	parser.add_argument("--notes", default=None, help="Release notes stored in the manifest")
 	parser.add_argument("--notes-file", default=None, help="Read the release notes from this file instead")
+	parser.add_argument("--private-key", help="Ed25519 private key PEM; when given the manifest is signed (TClient-update-win64.json.sig)")
 	parser.add_argument("--product", default="TClient", help="Product name in the manifest (default: TClient)")
 	parser.add_argument("--channel", default="stable", help="Update channel in the manifest (default: stable)")
 	parser.add_argument("--platform", default="win64", help="Platform in the manifest (default: win64)")
@@ -241,7 +244,37 @@ def main(argv: list[str]) -> int:
 			"sha256": digest,
 			"notes": notes,
 		}
-		manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+		# 自举 helper：更新包里自带新版 TClientUpdater.exe，客户端验哈希后
+		# 用它执行安装（运行的永远是验签链上的新 helper）
+		helper_path = source / HELPER_NAME
+		if not helper_path.is_file():
+			raise PackageError(f"bootstrap helper missing from the package: {helper_path}")
+		helper_digest = sha256_of(helper_path)
+		helper_size = helper_path.stat().st_size
+
+		manifest["helper"] = {
+			"name": HELPER_NAME,
+			"size": helper_size,
+			"sha256": helper_digest,
+		}
+		manifest_bytes = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+		# Ed25519 签名（学习 QmClient）：私钥只在发布者本地；客户端内嵌公钥验签
+		if args.private_key:
+			from cryptography.hazmat.primitives import serialization
+			from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+			private_key = serialization.load_pem_private_key(Path(args.private_key).read_bytes(), password=None)
+			if not isinstance(private_key, Ed25519PrivateKey):
+				raise PackageError("private key is not an Ed25519 key")
+			public_hex = private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+			signature = private_key.sign(manifest_bytes)
+			manifest_path.write_bytes(manifest_bytes)
+			(output / MANIFEST_SIG_NAME).write_bytes(signature)
+			if not args.quiet:
+				print(f"signed with ed25519, public key: {public_hex}")
+		else:
+			manifest_path.write_bytes(manifest_bytes)
+			print("warning: manifest is UNSIGNED (no --private-key)", file=sys.stderr)
 
 		if not args.quiet:
 			print(f"source: {source}")
@@ -251,6 +284,7 @@ def main(argv: list[str]) -> int:
 		print()
 		print(f"zip:      {zip_path}")
 		print(f"manifest: {manifest_path}")
+		print(f"helper:   {helper_size} bytes, sha256 {helper_digest[:16]}...")
 		print(f"files:    {len(files)}")
 		print(f"raw size: {human_size(uncompressed)}")
 		print(f"zip size: {human_size(size)} ({size} bytes)")

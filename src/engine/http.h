@@ -74,6 +74,9 @@ public:
 	// `OnValidation(true)` has been called.
 	void ValidateBeforeOverwrite(bool ValidateBeforeOverwrite) { m_ValidateBeforeOverwrite = ValidateBeforeOverwrite; }
 	void ExpectSha256(const SHA256_DIGEST &Sha256) { m_ExpectedSha256 = Sha256; }
+	// 允许从上次失败的 .tmp 文件断点续传：只有明确设置的下载任务才启用，
+	// 其他 HTTP 用户（地图下载、DDNet info 等）行为不变。
+	void AllowResume(bool Allow) { m_AllowResume = Allow; }
 
 	void Head();
 	void Post(const unsigned char *pData, size_t DataLength);
@@ -154,6 +157,8 @@ protected:
 	bool m_FailOnErrorStatus = true;
 	bool m_ValidateBeforeOverwrite = false;
 	std::optional<SHA256_DIGEST> m_ExpectedSha256 = std::nullopt;
+	bool m_AllowResume = false;
+	int64_t m_ResumeFrom = 0;
 	int64_t m_IfModifiedSince = -1;
 
 	// Result

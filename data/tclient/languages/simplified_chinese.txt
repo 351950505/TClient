@@ -1326,3 +1326,6 @@ Friends
 
 Others
 == 其他
+
+Download failed, retrying (%d/%d)...
+== 下载失败，正在重试（%d/%d）……

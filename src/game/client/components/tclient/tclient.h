@@ -95,8 +95,11 @@ private:
 	void FinishUpdateReleases();
 	void FinishUpdateManifest();
 	void FinishUpdateDownload();
+	void StartDownloadTask();
 	void ResetUpdateTasks();
 	bool UpdateShouldAutoCheck() const;
+	int m_UpdateDownloadAttempt = 0;
+	float m_UpdateRetryAt = -1.0f;
 
 public:
 	CTClient();

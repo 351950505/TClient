@@ -1003,6 +1003,12 @@ void CTClient::UpdateStartDownload()
 	}
 	if(m_UpdateState == EUpdateState::DOWNLOADING)
 		return;
+	m_UpdateDownloadAttempt = 0;
+	StartDownloadTask();
+}
+
+void CTClient::StartDownloadTask()
+{
 	SHA256_DIGEST Expected;
 	if(sha256_from_str(&Expected, m_UpdateRelease.m_aSha256) != 0)
 	{
@@ -1015,11 +1021,15 @@ void CTClient::UpdateStartDownload()
 	log_info("tclient-update", "downloading %s (%lld bytes)", m_UpdateRelease.m_aZipUrl, (long long)m_UpdateRelease.m_Size);
 
 	m_pUpdateDownloadTask = HttpGetFile(m_UpdateRelease.m_aZipUrl, Storage(), TCLIENT_UPDATE_ZIP_PATH, IStorage::TYPE_SAVE);
-	m_pUpdateDownloadTask->Timeout(CTimeout{20000, 0, 800, 30});
+	m_pUpdateDownloadTask->Timeout(CTimeout{20000, 0, 800, 60});
 	m_pUpdateDownloadTask->IpResolve(IPRESOLVE::V4);
 	m_pUpdateDownloadTask->FailOnErrorStatus(true);
 	m_pUpdateDownloadTask->ExpectSha256(Expected);
-	m_pUpdateDownloadTask->ValidateBeforeOverwrite(true);
+	// 注意不能开 ValidateBeforeOverwrite：开了之后文件停在 .tmp，必须再调
+	// OnValidation(true) 才落盘，而这里没有回调链。ExpectSha256 已经保证
+	// 哈希不符时 HTTP 层报 ERROR 且不会把 tmp 搬进位，安全性等价。
+	m_pUpdateDownloadTask->ValidateBeforeOverwrite(false);
+	m_pUpdateDownloadTask->AllowResume(true);
 	Http()->Run(m_pUpdateDownloadTask);
 }
 
@@ -1157,8 +1167,32 @@ void CTClient::PollUpdateTasks()
 	}
 	if(m_pUpdateDownloadTask && m_pUpdateDownloadTask->Done())
 	{
-		FinishUpdateDownload();
+		const bool Ok = m_pUpdateDownloadTask->State() == EHttpState::DONE;
 		m_pUpdateDownloadTask = nullptr;
+		if(Ok)
+		{
+			FinishUpdateDownload();
+			return;
+		}
+		// 下载失败自动重试：这条 GitHub 大文件线路不稳定，中断是常态。
+		// 断点续传由 HTTP 层负责（AllowResume），这里只管发起下一轮。
+		if(m_UpdateDownloadAttempt < 3)
+		{
+			++m_UpdateDownloadAttempt;
+			char aStatus[128];
+			str_format(aStatus, sizeof(aStatus), TCLocalize("Download failed, retrying (%d/%d)..."), m_UpdateDownloadAttempt, 3);
+			SetUpdateStatus(aStatus);
+			log_warn("tclient-update", "download attempt %d failed, retrying", m_UpdateDownloadAttempt);
+			m_UpdateRetryAt = Client()->LocalTime() + 2.0f;
+			return;
+		}
+		FinishUpdateDownload();
+		return;
+	}
+	if(m_UpdateRetryAt > 0 && Client()->LocalTime() >= m_UpdateRetryAt)
+	{
+		m_UpdateRetryAt = -1.0f;
+		StartDownloadTask();
 	}
 }
 

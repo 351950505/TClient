@@ -260,7 +260,32 @@ bool IHttpRequest::BeforeInit()
 			return false;
 		}
 
-		m_File = io_open(m_aDestAbsoluteTmp, IOFLAG_WRITE);
+		// 断点续传：上次失败留下的 .tmp 还有剩余部分可用时，从它的长度继续，
+		// 并把已有字节先喂进 SHA-256 上下文，保证最终哈希覆盖完整文件。
+		m_ResumeFrom = 0;
+		if(m_AllowResume && fs_is_file(m_aDestAbsoluteTmp))
+		{
+			IOHANDLE Existing = io_open(m_aDestAbsoluteTmp, IOFLAG_READ);
+			if(Existing)
+			{
+				const int64_t ExistingSize = io_length(Existing);
+				if(ExistingSize > 0)
+				{
+					void *pPrefix;
+					unsigned PrefixLength;
+					if(io_read_all(Existing, &pPrefix, &PrefixLength))
+					{
+						sha256_update(&m_ActualSha256Ctx, pPrefix, PrefixLength);
+						free(pPrefix);
+						m_ResumeFrom = ExistingSize;
+						log_info("http", "resuming download of %s from %lld bytes", m_aDest, (long long)m_ResumeFrom);
+					}
+				}
+				io_close(Existing);
+			}
+		}
+
+		m_File = io_open(m_aDestAbsoluteTmp, m_ResumeFrom > 0 ? IOFLAG_APPEND : IOFLAG_WRITE);
 		if(!m_File)
 		{
 			log_error("http", "i/o error, cannot open file: %s", m_aDest);
@@ -340,7 +365,9 @@ void IHttpRequest::OnCompletionInternal(EHttpState State)
 
 		if(State == EHttpState::ERROR || State == EHttpState::ABORTED)
 		{
-			(void)fs_remove(m_aDestAbsoluteTmp);
+			// 允许续传的任务保留 .tmp 供下次断点续传；其余照旧删除
+			if(!m_AllowResume)
+				(void)fs_remove(m_aDestAbsoluteTmp);
 		}
 		else if(m_IfModifiedSince >= 0 && m_StatusCode == 304) // 304 Not Modified
 		{

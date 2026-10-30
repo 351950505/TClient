@@ -1657,62 +1657,6 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		}
 	}
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
-
-	// ***** Updates (v1.4 起，GitHub Releases) ***** //
-	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	s_SectionBoxes.push_back(Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Updates"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
-
-	{
-		CTClient &TC = GameClient()->m_TClient;
-		char aLine[256];
-		str_format(aLine, sizeof(aLine), TCLocalize("Current version: %s"), TCLIENT_APP_VERSION);
-		Column.HSplitTop(LineSize, &Label, &Column);
-		Ui()->DoLabel(&Label, aLine, FontSize, TEXTALIGN_ML);
-
-		Column.HSplitTop(LineSize, &Label, &Column);
-		Ui()->DoLabel(&Label, TC.UpdateStateText(), FontSize, TEXTALIGN_ML);
-
-		const CTClient::EUpdateState State = TC.GetUpdateState();
-		if(State == CTClient::EUpdateState::FAILED || State == CTClient::EUpdateState::CHECKING || State == CTClient::EUpdateState::DOWNLOADING || State == CTClient::EUpdateState::AVAILABLE || State == CTClient::EUpdateState::DOWNLOADED)
-		{
-			Column.HSplitTop(LineSize, &Label, &Column);
-			Ui()->DoLabel(&Label, TC.UpdateStatusText(), EditBoxFontSize, TEXTALIGN_ML);
-		}
-		if(State == CTClient::EUpdateState::DOWNLOADING)
-		{
-			Column.HSplitTop(LineSize, &Button, &Column);
-			Ui()->RenderProgressBar(Button, std::clamp(TC.UpdateDownloadPercent() / 100.0f, 0.0f, 1.0f));
-		}
-
-		// 三个动作：检查 / 下载 / 安装并重启。每一步都要用户点，客户端从不自己
-		// 下载或退出，避免在对局里被打断。
-		static CButtonContainer s_CheckButton, s_DownloadButton, s_InstallButton;
-		CUIRect Row;
-		Column.HSplitTop(LineSize + MarginExtraSmall, &Row, &Column);
-		CUIRect CheckRect, DownloadRect, InstallRect;
-		Row.VSplitLeft(120.0f, &CheckRect, &Row);
-		Row.VSplitLeft(MarginSmall, nullptr, &Row);
-		Row.VSplitLeft(120.0f, &DownloadRect, &Row);
-		Row.VSplitLeft(MarginSmall, nullptr, &Row);
-		Row.VSplitLeft(160.0f, &InstallRect, &Row);
-
-		if(DoButton_Menu(&s_CheckButton, TCLocalize("Check now"), 0, &CheckRect) && State != CTClient::EUpdateState::CHECKING && State != CTClient::EUpdateState::DOWNLOADING)
-			TC.UpdateCheck(true);
-		if(DoButton_Menu(&s_DownloadButton, TCLocalize("Download"), 0, &DownloadRect) && State == CTClient::EUpdateState::AVAILABLE)
-			TC.UpdateStartDownload();
-		if(DoButton_Menu(&s_InstallButton, TCLocalize("Install and restart"), 0, &InstallRect) && State == CTClient::EUpdateState::DOWNLOADED)
-			TC.UpdateInstallAndRestart();
-
-		Column.HSplitTop(MarginSmall, nullptr, &Column);
-		Column.HSplitTop(LineSize, &Label, &Column);
-		Ui()->DoLabel(&Label, TCLocalize("Updates are downloaded from the public GitHub releases of this client. Your config, demos and custom fonts are not touched."), EditBoxFontSize, TEXTALIGN_TL);
-	}
-	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
-
 	// ***** END OF PAGE 1 SETTINGS ***** //
 	RightView = Column;
 
@@ -3793,4 +3737,56 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
 	RightView.HSplitTop(LineSize * 3, &Label, &RightView);
 	Ui()->DoLabel(&Label, TCLocalize("Console commands: me_mute_team_chat / me_mute_whisper / me_mute_system_chat / me_mute_kill_feed / me_mute_finish_feed"), EditBoxFontSize, TEXTALIGN_TL);
+
+	// ***** Updates (v1.4 起，GitHub Releases) ***** //
+	RightView.HSplitTop(MarginBetweenSections, nullptr, &RightView);
+	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
+	Ui()->DoLabel(&Label, TCLocalize("Updates"), HeadlineFontSize, TEXTALIGN_ML);
+	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
+
+	{
+		CTClient &TC = GameClient()->m_TClient;
+		char aLine[256];
+		str_format(aLine, sizeof(aLine), TCLocalize("Current version: %s"), TCLIENT_APP_VERSION);
+		RightView.HSplitTop(LineSize, &Label, &RightView);
+		Ui()->DoLabel(&Label, aLine, FontSize, TEXTALIGN_ML);
+
+		RightView.HSplitTop(LineSize, &Label, &RightView);
+		Ui()->DoLabel(&Label, TC.UpdateStateText(), FontSize, TEXTALIGN_ML);
+
+		const CTClient::EUpdateState State = TC.GetUpdateState();
+		if(State == CTClient::EUpdateState::FAILED || State == CTClient::EUpdateState::CHECKING || State == CTClient::EUpdateState::DOWNLOADING || State == CTClient::EUpdateState::AVAILABLE || State == CTClient::EUpdateState::DOWNLOADED)
+		{
+			RightView.HSplitTop(LineSize, &Label, &RightView);
+			Ui()->DoLabel(&Label, TC.UpdateStatusText(), EditBoxFontSize, TEXTALIGN_ML);
+		}
+		if(State == CTClient::EUpdateState::DOWNLOADING)
+		{
+			RightView.HSplitTop(LineSize, &Button, &RightView);
+			Ui()->RenderProgressBar(Button, std::clamp(TC.UpdateDownloadPercent() / 100.0f, 0.0f, 1.0f));
+		}
+
+		// 三个动作：检查 / 下载 / 安装并重启。每一步都要用户点，客户端从不自己
+		// 下载或退出，避免在对局里被打断。
+		static CButtonContainer s_CheckButton, s_DownloadButton, s_InstallButton;
+		CUIRect Row;
+		RightView.HSplitTop(LineSize + MarginExtraSmall, &Row, &RightView);
+		CUIRect CheckRect, DownloadRect, InstallRect;
+		Row.VSplitLeft(120.0f, &CheckRect, &Row);
+		Row.VSplitLeft(MarginSmall, nullptr, &Row);
+		Row.VSplitLeft(120.0f, &DownloadRect, &Row);
+		Row.VSplitLeft(MarginSmall, nullptr, &Row);
+		Row.VSplitLeft(160.0f, &InstallRect, &Row);
+
+		if(DoButton_Menu(&s_CheckButton, TCLocalize("Check now"), 0, &CheckRect) && State != CTClient::EUpdateState::CHECKING && State != CTClient::EUpdateState::DOWNLOADING)
+			TC.UpdateCheck(true);
+		if(DoButton_Menu(&s_DownloadButton, TCLocalize("Download"), 0, &DownloadRect) && State == CTClient::EUpdateState::AVAILABLE)
+			TC.UpdateStartDownload();
+		if(DoButton_Menu(&s_InstallButton, TCLocalize("Install and restart"), 0, &InstallRect) && State == CTClient::EUpdateState::DOWNLOADED)
+			TC.UpdateInstallAndRestart();
+
+		RightView.HSplitTop(MarginSmall, nullptr, &RightView);
+		RightView.HSplitTop(LineSize, &Label, &RightView);
+		Ui()->DoLabel(&Label, TCLocalize("Updates are downloaded from the public GitHub releases of this client. Your config, demos and custom fonts are not touched."), EditBoxFontSize, TEXTALIGN_TL);
+	}
 }

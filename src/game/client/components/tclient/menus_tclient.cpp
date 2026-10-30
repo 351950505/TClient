@@ -1169,6 +1169,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandNotch, TCLocalize("Notch style (attach to top edge)"), &g_Config.m_TcIslandNotch, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowLyrics, TCLocalize("Show synced lyrics"), &g_Config.m_TcIslandShowLyrics, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowProgress, TCLocalize("Show game clock"), &g_Config.m_TcIslandShowProgress, &Column, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowClock, TCLocalize("Show real-world time (HH:MM)"), &g_Config.m_TcIslandShowClock, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowSongProgress, TCLocalize("Show song progress bar"), &g_Config.m_TcIslandShowSongProgress, &Column, LineSize);
 
 		// 灵动岛字体：独立于全局自定义字体；选"跟随全局"时 tc_island_font 留空

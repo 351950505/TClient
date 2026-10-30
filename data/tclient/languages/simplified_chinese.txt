@@ -1332,3 +1332,6 @@ Download failed, retrying (%d/%d)...
 
 Font size
 == 字体大小
+
+Show real-world time (HH:MM)
+== 显示真实时间（时:分）

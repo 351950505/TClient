@@ -27,21 +27,16 @@ void CRelayClient::FormatStatus(char *pBuf, int Size) const
 	if(!GameServerAddr(aGame, sizeof(aGame)))
 		str_copy(aGame, "(未连接游戏服)");
 	const float Age = Client()->LocalTime() - m_LastServerReply;
-	int Direct = 0;
-	for(const SPeer &Peer : m_vPeers)
-		if(PeerDirect(Peer))
-			Direct++;
 	const float SinceReg = Client()->LocalTime() - m_LastRegTime;
 	str_format(pBuf, Size,
-		"信令: %s | 服 %s | 回执 %.1fs 前 | REG %.1fs 前 | %s | 中转 %s | P2P %d/%d | 待发 %d",
+		"信令: %s | 服 %s | 回执 %.1fs 前 | REG %.1fs 前 | %s | 中转 %s | P2P %s | 待发 %d",
 		Online() ? "已连接" : "未连接",
 		aGame,
 		Age < 1e8f ? Age : -1.0f,
 		SinceReg < 1e8f ? SinceReg : -1.0f,
 		m_aFailure,
 		m_RelayAddrValid ? g_Config.m_TcRelayAddr : "(地址无效)",
-		Direct,
-		(int)m_vPeers.size(),
+		g_Config.m_TcRelayP2p ? "开" : "关",
 		(int)m_vSendQueue.size());
 }
 
@@ -228,23 +223,26 @@ void CRelayClient::Broadcast(const char *pPayload)
 {
 	if(!m_SocketValid || str_length(pPayload) > 160)
 		return;
-	// P2P 优先：已打通的成员直接点对点发（省延迟、不经信令）
-	int SentDirect = 0;
-	for(const SPeer &Peer : m_vPeers)
+	// P2P 直发默认关闭（2026-10-31 用户反馈）：走 P2P 的接收方只有已打通的
+	// 客户端玩家，其他人看不到 ping。tc_relay_p2p=1 可临时开回测试。
+	if(g_Config.m_TcRelayP2p)
 	{
-		if(!PeerDirect(Peer))
-			continue;
-		char aBuf[192];
-		str_format(aBuf, sizeof(aBuf), "D %s", pPayload);
-		net_udp_send(m_Socket, &Peer.m_Addr, aBuf, str_length(aBuf) + 1);
-		SentDirect++;
-	}
-	if(SentDirect > 0)
-	{
-		// 只在"直连通道首次可用"时记一条，正常每条 ping 不再打印。
-		char aPeers[16];
-		str_format(aPeers, sizeof(aPeers), "%d", SentDirect);
-		LogOnce("p2p direct send", aPeers);
+		int SentDirect = 0;
+		for(const SPeer &Peer : m_vPeers)
+		{
+			if(!PeerDirect(Peer))
+				continue;
+			char aBuf[192];
+			str_format(aBuf, sizeof(aBuf), "D %s", pPayload);
+			net_udp_send(m_Socket, &Peer.m_Addr, aBuf, str_length(aBuf) + 1);
+			SentDirect++;
+		}
+		if(SentDirect > 0)
+		{
+			char aPeers[16];
+			str_format(aPeers, sizeof(aPeers), "%d", SentDirect);
+			LogOnce("p2p direct send", aPeers);
+		}
 	}
 	// 还有成员没打通（或还不知道有谁）时走信令中转兜底
 	if(AllPeersDirect() || !Online())
@@ -358,15 +356,18 @@ void CRelayClient::PumpSend()
 	const float RegInterval = Online() ? 10.0f : 2.0f;
 	if(Now - m_LastRegTime > RegInterval && !SendReg())
 		return;
-	// 打洞探针：所有成员每秒探一次（同时维持本端 NAT 映射不被回收）
-	for(SPeer &Peer : m_vPeers)
+	// 打洞探针：P2P 关闭时不发（保存 NAT 映射无意义）
+	if(g_Config.m_TcRelayP2p)
 	{
-		if(Now - Peer.m_LastProbe < 1.0f)
-			continue;
-		Peer.m_LastProbe = Now;
-		char aBuf[64];
-		str_format(aBuf, sizeof(aBuf), "P %s", m_aUid);
-		net_udp_send(m_Socket, &Peer.m_Addr, aBuf, str_length(aBuf) + 1);
+		for(SPeer &Peer : m_vPeers)
+		{
+			if(Now - Peer.m_LastProbe < 1.0f)
+				continue;
+			Peer.m_LastProbe = Now;
+			char aBuf[64];
+			str_format(aBuf, sizeof(aBuf), "P %s", m_aUid);
+			net_udp_send(m_Socket, &Peer.m_Addr, aBuf, str_length(aBuf) + 1);
+		}
 	}
 	// 30s 没被信令再推送的成员视为已离线
 	for(size_t i = 0; i < m_vPeers.size();)

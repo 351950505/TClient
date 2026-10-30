@@ -1167,13 +1167,14 @@ void CTClient::PollUpdateTasks()
 	}
 	if(m_pUpdateDownloadTask && m_pUpdateDownloadTask->Done())
 	{
+		// 注意顺序：FinishUpdateDownload 会读取任务状态，必须先调用再置空，
+		// 否则下载失败（这条线路很常见）时这里就是必然的空指针闪退。
 		const bool Ok = m_pUpdateDownloadTask->State() == EHttpState::DONE;
+		if(Ok)
+			FinishUpdateDownload();
 		m_pUpdateDownloadTask = nullptr;
 		if(Ok)
-		{
-			FinishUpdateDownload();
 			return;
-		}
 		// 下载失败自动重试：这条 GitHub 大文件线路不稳定，中断是常态。
 		// 断点续传由 HTTP 层负责（AllowResume），这里只管发起下一轮。
 		if(m_UpdateDownloadAttempt < 3)

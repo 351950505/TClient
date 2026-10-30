@@ -1194,3 +1194,9 @@ Translate recent messages key
 
 How many recent messages
 == 翻译最近几条
+
+Pinging too fast, %.0f s until you can ping again
+== 信号发送过于频繁，还剩 %.0f 秒才能再次发送
+
+Max %d signals per 10 s, sending blocked for %.0f s
+== 10 秒内最多发送 %d 个信号，已限制发送 %.0f 秒

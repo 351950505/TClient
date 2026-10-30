@@ -93,6 +93,16 @@ private:
 	void EmotePing(int Signal, int X, int Y);
 	void PumpEmoteQueue();
 
+	// 发送限速：滑动窗口内最多 PING_RATE_COUNT 次，超限后禁发 PING_RATE_BAN 秒。
+	// 客户端侧统一做（P2P 直连不经过信令服务器，服务端限速管不到）。
+	static constexpr int PING_RATE_COUNT = 10;
+	static constexpr float PING_RATE_WINDOW = 10.0f;
+	static constexpr float PING_RATE_BAN = 30.0f;
+	std::vector<float> m_vPingTimes; // 窗口内已发送时刻
+	float m_PingBanUntil = -1e9f;    // 禁发截止时刻
+	bool PingRateLimited();          // true = 本次被拦（已 ECHO 提示）
+	float m_LastRateEchoTime = -1e9f;
+
 	void TryLoadIcons();
 	void TryLoadSounds();
 	void PlaySignalSound(int Signal, vec2 WorldPos);

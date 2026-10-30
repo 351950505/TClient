@@ -16,6 +16,7 @@
 #include <game/client/components/controls.h>
 #include <game/client/gameclient.h>
 #include <game/client/render.h>
+#include <game/localization.h>
 
 static const char *const s_apSignalNames[] = {"危险", "撤退", "推进", "赶来", "集合", "支援", "敌消", "等等"};
 static const char *const s_apSignalShorts[] = {"危", "退", "推", "来", "集", "援", "消", "等"};
@@ -214,6 +215,9 @@ void CPingWheel::OnReset()
 	m_vEmoteQueue.clear();
 	m_EmoteRecvCount = -1;
 	m_EmoteFrameDoneTime = -1e9f;
+	m_vPingTimes.clear();
+	m_PingBanUntil = -1e9f;
+	m_LastRateEchoTime = -1e9f;
 	for(CMarker &Marker : m_aMarkers)
 		Marker.m_StartTime = -1.0f;
 }
@@ -370,9 +374,56 @@ void CPingWheel::OnRelayPayload(const char *pText)
 	PlaySignalSound(Signal, vec2((float)X, (float)Y));
 }
 
+// 发送限速：滑动窗口 PING_RATE_WINDOW 秒内最多 PING_RATE_COUNT 次，
+// 超限则禁发 PING_RATE_BAN 秒。返回 true 表示本次发送被拦下。
+// 放在客户端而不是信令服务器：P2P 直连的包根本不经过服务器，服务端限速拦不住。
+bool CPingWheel::PingRateLimited()
+{
+	const float Now = Client()->LocalTime();
+
+	if(Now < m_PingBanUntil)
+	{
+		// 禁发期内重复按轮盘时最多每 2 秒提示一次，避免刷屏
+		if(Now - m_LastRateEchoTime > 2.0f)
+		{
+			char aBuf[96];
+			str_format(aBuf, sizeof(aBuf), TCLocalize("Pinging too fast, %.0f s until you can ping again"), m_PingBanUntil - Now);
+			GameClient()->m_Chat.Echo(aBuf);
+			m_LastRateEchoTime = Now;
+		}
+		return true;
+	}
+
+	// 清掉滑出窗口的记录
+	for(auto It = m_vPingTimes.begin(); It != m_vPingTimes.end();)
+	{
+		if(Now - *It > PING_RATE_WINDOW)
+			It = m_vPingTimes.erase(It);
+		else
+			++It;
+	}
+
+	if((int)m_vPingTimes.size() >= PING_RATE_COUNT)
+	{
+		m_PingBanUntil = Now + PING_RATE_BAN;
+		m_vPingTimes.clear();
+		char aBuf[96];
+		str_format(aBuf, sizeof(aBuf), TCLocalize("Max %d signals per 10 s, sending blocked for %.0f s"), PING_RATE_COUNT, PING_RATE_BAN);
+		GameClient()->m_Chat.Echo(aBuf);
+		m_LastRateEchoTime = Now;
+		return true;
+	}
+
+	m_vPingTimes.push_back(Now);
+	return false;
+}
+
 void CPingWheel::Ping(int Signal, vec2 WorldPos)
 {
 	if(!g_Config.m_TcPingwheel)
+		return;
+
+	if(PingRateLimited())
 		return;
 
 	const bool Alive = GameClient()->m_Snap.m_pLocalCharacter != nullptr;

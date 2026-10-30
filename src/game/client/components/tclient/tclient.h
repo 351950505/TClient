@@ -83,7 +83,6 @@ private:
 	int64_t m_LastUpdateCheck = 0; // unix timestamp of the last automatic check
 	bool m_UpdateCheckDone = false;
 
-	std::shared_ptr<IHttpRequest> m_pUpdateReleasesTask = nullptr;
 	std::shared_ptr<IHttpRequest> m_pUpdateManifestTask = nullptr;
 	std::shared_ptr<IHttpRequest> m_pUpdateDownloadTask = nullptr;
 
@@ -93,9 +92,7 @@ private:
 	void SetUpdateStatus(const char *pStatus);
 	void UpdateFail(const char *pFormat, ...) [[gnu::format(printf, 2, 3)]];
 	void PollUpdateTasks();
-	void FetchUpdateReleases();
 	void FetchUpdateManifest();
-	void FinishUpdateReleases();
 	void FinishUpdateManifest();
 	void FinishUpdateDownload();
 	void StartDownloadTask();
@@ -110,7 +107,6 @@ private:
 	char m_aUpdateHelperUrl[512] = "";
 	char m_aUpdateBootstrapPath[IO_MAX_PATH_LENGTH] = "";
 	bool BootstrapHelperPending = false;
-	bool m_UpdateViaFallback = false;
 	std::shared_ptr<IHttpRequest> m_pUpdateHelperTask = nullptr;
 	int m_UpdateDownloadAttempt = 0;
 	float m_UpdateRetryAt = -1.0f;

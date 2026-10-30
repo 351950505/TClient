@@ -51,13 +51,7 @@ static constexpr const char *TCLIENT_INFO_URL = "https://update.tclient.app/info
 //   TClient-update-win64.json  清单（product/channel/version/platform/asset/size/sha256）
 //   TClient-update-win64.zip   整包，由独立的 TClientUpdater.exe 在主进程退出后替换
 // 旧的 update.tclient.app 逐文件更新器与本流程无关，也不受这里影响。
-static constexpr const char *TCLIENT_UPDATE_RELEASES_URL = "https://api.github.com/repos/351950505/TClient/releases?per_page=20";
-// 备用检查源：api.github.com 在部分网络不可达时，改用 GitHub 官方的
-// latest/download 固定地址直接取最新发布的清单/签名/包（无 API 限流）
-static constexpr const char *TCLIENT_UPDATE_FALLBACK_MANIFEST_URL = "https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json";
-static constexpr const char *TCLIENT_UPDATE_FALLBACK_SIG_URL = "https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json.sig";
-static constexpr const char *TCLIENT_UPDATE_FALLBACK_ZIP_URL = "https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.zip";
-static constexpr const char *TCLIENT_UPDATE_FALLBACK_HELPER_URL = "https://github.com/351950505/TClient/releases/latest/download/TClientUpdater.exe";
+static constexpr const char *TCLIENT_UPDATE_LATEST_URL = "https://github.com/351950505/TClient/releases/latest/download/";
 static constexpr const char *TCLIENT_UPDATE_PRODUCT = "TClient";
 static constexpr const char *TCLIENT_UPDATE_CHANNEL = "stable";
 static constexpr const char *TCLIENT_UPDATE_PLATFORM = "win64";
@@ -806,11 +800,6 @@ void CTClient::UpdateFail(const char *pFormat, ...)
 
 void CTClient::ResetUpdateTasks()
 {
-	if(m_pUpdateReleasesTask)
-	{
-		m_pUpdateReleasesTask->Abort();
-		m_pUpdateReleasesTask = nullptr;
-	}
 	if(m_pUpdateManifestTask)
 	{
 		m_pUpdateManifestTask->Abort();
@@ -853,126 +842,21 @@ void CTClient::UpdateCheck(bool Force)
 	m_aUpdateManifestSigUrl[0] = '\0';
 	m_aUpdateHelperUrl[0] = '\0';
 	m_aUpdateBootstrapPath[0] = '\0';
-	m_UpdateViaFallback = false;
 	BootstrapHelperPending = false;
 	m_LastUpdateCheck = time_timestamp();
 	m_UpdateState = EUpdateState::CHECKING;
 	SetUpdateStatus(TCLocalize("Checking for updates..."));
-	log_info("tclient-update", "checking releases (force=%d, current=%s)", Force ? 1 : 0, TCLIENT_APP_VERSION);
-	FetchUpdateReleases();
-}
-
-void CTClient::FetchUpdateReleases()
-{
-	m_pUpdateReleasesTask = HttpGet(TCLIENT_UPDATE_RELEASES_URL);
-	m_pUpdateReleasesTask->Timeout(CTimeout{15000, 0, 800, 10});
-	m_pUpdateReleasesTask->IpResolve(IPRESOLVE::V4);
-	m_pUpdateReleasesTask->MaxResponseSize(4 * 1024 * 1024);
-	m_pUpdateReleasesTask->FailOnErrorStatus(true);
-	m_pUpdateReleasesTask->HeaderString("Accept", "application/vnd.github+json");
-	m_pUpdateReleasesTask->HeaderString("X-GitHub-Api-Version", "2022-11-28");
-	Http()->Run(m_pUpdateReleasesTask);
-}
-
-void CTClient::FinishUpdateReleases()
-{
-	json_value *pJson = m_pUpdateReleasesTask->ResultJson();
-	if(!pJson || pJson->type != json_array)
-	{
-		if(pJson)
-			json_value_free(pJson);
-		UpdateFail(TCLocalize("Update check failed: could not read the release list"));
-		return;
-	}
-
-	// 只接受稳定版（非 draft / 非 prerelease）且版本严格高于当前发行版。
-	char aBestTag[64] = "";
-	char aBestVersion[32] = "";
-	char aBestManifestUrl[512] = "";
-	char aBestZipUrl[512] = "";
-	char aBestSigUrl[512] = "";
-	char aBestHelperUrl[512] = "";
-	int Best[3] = {-1, -1, -1};
-	const int NumReleases = json_array_length(pJson);
-	for(int i = 0; i < NumReleases; i++)
-	{
-		const json_value &Release = (*pJson)[i];
-		if(Release.type != json_object)
-			continue;
-		if(JsonGetBool(JsonObj(Release, "draft"), false) || JsonGetBool(JsonObj(Release, "prerelease"), false))
-			continue;
-		const char *pTag = JsonStr(JsonObj(Release, "tag_name"));
-		if(!pTag || !pTag[0])
-			continue;
-		const char *pVersion = (pTag[0] == 'v' || pTag[0] == 'V') ? pTag + 1 : pTag;
-		int aVersion[3];
-		if(!ParseAppVersion(pVersion, aVersion))
-			continue;
-		if(CompareAppVersion(pVersion, TCLIENT_APP_VERSION) <= 0)
-			continue;
-		const json_value &Assets = JsonObj(Release, "assets");
-		if(Assets.type != json_array)
-			continue;
-		// 两个资产都必须在同一个 release 里，且直链只取自 GitHub 返回的
-		// browser_download_url（不自己拼 URL，避免指向错误主机）。
-		char aManifestUrl[512] = "";
-		char aZipUrl[512] = "";
-		char aSigUrl[512] = "";
-		char aHelperUrl[512] = "";
-		for(int j = 0; j < json_array_length(&Assets); j++)
-		{
-			const json_value &Asset = Assets[j];
-			const char *pName = JsonStr(JsonObj(Asset, "name"));
-			const char *pUrl = JsonStr(JsonObj(Asset, "browser_download_url"));
-			if(!pName || !pUrl)
-				continue;
-			if(str_comp(pName, TCLIENT_UPDATE_MANIFEST_ASSET) == 0)
-				str_copy(aManifestUrl, pUrl);
-			else if(str_comp(pName, TCLIENT_UPDATE_ZIP_ASSET) == 0)
-				str_copy(aZipUrl, pUrl);
-			else if(str_comp(pName, TCLIENT_UPDATE_MANIFEST_SIG_ASSET) == 0)
-				str_copy(aSigUrl, pUrl);
-			else if(str_comp(pName, TCLIENT_UPDATE_HELPER_ASSET) == 0)
-				str_copy(aHelperUrl, pUrl);
-		}
-		if(!aManifestUrl[0] || !aZipUrl[0] || !aSigUrl[0] || !aHelperUrl[0])
-			continue;
-		if(Best[0] >= 0 && CompareAppVersion(pVersion, aBestVersion) <= 0)
-			continue;
-		str_copy(aBestTag, pTag);
-		str_copy(aBestVersion, pVersion);
-		str_copy(aBestManifestUrl, aManifestUrl);
-		str_copy(aBestZipUrl, aZipUrl);
-		Best[0] = aVersion[0];
-		Best[1] = aVersion[1];
-		Best[2] = aVersion[2];
-	}
-
-	if(!aBestTag[0])
-	{
-		json_value_free(pJson);
-		m_UpdateState = EUpdateState::UP_TO_DATE;
-		SetUpdateStatus(TCLocalize("You are on the latest version"));
-		log_info("tclient-update", "no newer stable release (current=%s)", TCLIENT_APP_VERSION);
-		return;
-	}
-
-	str_copy(m_aUpdateReleaseTag, aBestTag);
-	str_copy(m_UpdateRelease.m_aTag, aBestTag);
-	str_copy(m_UpdateRelease.m_aVersion, aBestVersion);
-	str_copy(m_aUpdateManifestUrl, aBestManifestUrl);
-	str_copy(m_aUpdateManifestSigUrl, aBestSigUrl);
-	str_copy(m_aUpdateHelperUrl, aBestHelperUrl);
-	str_copy(m_UpdateRelease.m_aZipUrl, aBestZipUrl);
-	json_value_free(pJson);
-
-	SetUpdateStatus(TCLocalize("Validating update manifest..."));
+	log_info("tclient-update", "checking for update (force=%d, current=%s)", Force ? 1 : 0, TCLIENT_APP_VERSION);
 	FetchUpdateManifest();
 }
 
+
+
 void CTClient::FetchUpdateManifest()
 {
-	m_pUpdateManifestTask = HttpGet(m_aUpdateManifestUrl);
+	char aUrl[512];
+	str_format(aUrl, (int)sizeof(aUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_MANIFEST_ASSET);
+	m_pUpdateManifestTask = HttpGet(aUrl);
 	m_pUpdateManifestTask->Timeout(CTimeout{15000, 0, 800, 10});
 	m_pUpdateManifestTask->IpResolve(IPRESOLVE::V4);
 	m_pUpdateManifestTask->MaxResponseSize(64 * 1024);
@@ -1025,7 +909,7 @@ void CTClient::FinishUpdateManifest()
 		pError = TCLocalize("Update rejected: wrong channel");
 	else if(!pPlatform || str_comp(pPlatform, TCLIENT_UPDATE_PLATFORM) != 0)
 		pError = TCLocalize("Update rejected: wrong platform");
-	else if(!pVersion || (str_comp(pVersion, m_UpdateRelease.m_aVersion) != 0 && !m_UpdateViaFallback))
+	else if(!pVersion)
 		pError = TCLocalize("Update rejected: version does not match the release");
 	else if(!pAsset || str_comp(pAsset, TCLIENT_UPDATE_ZIP_ASSET) != 0)
 		pError = TCLocalize("Update rejected: unexpected asset name");
@@ -1058,12 +942,10 @@ void CTClient::FinishUpdateManifest()
 	}
 	str_copy(m_UpdateRelease.m_aHelperSha256, pHelperSha);
 	m_UpdateRelease.m_HelperSize = JsonGetInt(HelperSize, -1);
-	if(m_UpdateViaFallback)
-	{
-		// 备用源没有 release 元数据：清单即真相，tag = 版本号
-		str_format(m_UpdateRelease.m_aTag, sizeof(m_UpdateRelease.m_aTag), "v%s", pVersion);
-		str_copy(m_UpdateRelease.m_aVersion, pVersion);
-	}
+	str_format(m_UpdateRelease.m_aTag, sizeof(m_UpdateRelease.m_aTag), "v%s", pVersion);
+	str_copy(m_UpdateRelease.m_aVersion, pVersion);
+	str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_ZIP_ASSET);
+	str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_HELPER_ASSET);
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
 
@@ -1323,28 +1205,6 @@ int CTClient::UpdateDownloadPercent() const
 
 void CTClient::PollUpdateTasks()
 {
-	if(m_pUpdateReleasesTask && m_pUpdateReleasesTask->Done())
-	{
-		if(m_pUpdateReleasesTask->State() == EHttpState::DONE)
-		{
-			FinishUpdateReleases();
-			return;
-		}
-		// API 不可达（部分网络封禁 api.github.com）时切备用源：
-		// latest/download 直链，无 API、无限流
-		m_pUpdateReleasesTask = nullptr;
-		ResetUpdateTasks();
-		log_warn("tclient-update", "releases API unreachable, switching to fallback source");
-		SetUpdateStatus(TCLocalize("Switching to the fallback update source..."));
-		str_copy(m_aUpdateManifestUrl, TCLIENT_UPDATE_FALLBACK_MANIFEST_URL);
-		str_copy(m_aUpdateManifestSigUrl, TCLIENT_UPDATE_FALLBACK_SIG_URL);
-		str_copy(m_UpdateRelease.m_aZipUrl, TCLIENT_UPDATE_FALLBACK_ZIP_URL);
-		str_copy(m_aUpdateHelperUrl, TCLIENT_UPDATE_FALLBACK_HELPER_URL);
-		m_UpdateViaFallback = true;
-		m_UpdateState = EUpdateState::CHECKING;
-		FetchUpdateManifest();
-		return;
-	}
 	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done())
 	{
 		// 清单下载完成后先拉签名，验签通过才解析

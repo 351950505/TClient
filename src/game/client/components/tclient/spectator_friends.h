@@ -41,25 +41,24 @@ namespace tclient_spectator_friends
 		return Friends;
 	}
 
-	// 分组标题占用所在列的高度，面板高度按最高的一列排布。
-	inline float MaxColumnHeight(int PlayerCount, int FriendCount, int PlayersPerColumn, float RowHeight, float TitleHeight)
+	// 分列布局：好友占自己的列，其余玩家强制从新的一列开始，两段并排。
+	// 返回内容总高度（含分组标题），按好友段与其余段分别取最高列。
+	// 在 QmClient MaxColumnHeight 的基础上改为分段计算，实现真正的两列分栏。
+	inline float SplitColumnHeight(int PlayerCount, int FriendCount, int PlayersPerColumn, float RowHeight, float TitleHeight)
 	{
 		if(PlayerCount <= 0 || PlayersPerColumn <= 0)
 			return 0.0f;
-
+		const int Friends = std::clamp(FriendCount, 0, PlayerCount);
+		const int Others = PlayerCount - Friends;
 		float Height = 0.0f;
-		for(int First = 0; First < PlayerCount; First += PlayersPerColumn)
-		{
-			const int Count = std::min(PlayersPerColumn, PlayerCount - First);
-			int Titles = FriendCount > 0 && First == 0 ? 1 : 0;
-			if(FriendCount > 0 && FriendCount < PlayerCount && FriendCount >= First && FriendCount < First + Count)
-				++Titles;
-			Height = std::max(Height, Count * RowHeight + Titles * TitleHeight);
-		}
+		if(Friends > 0)
+			Height = std::max(Height, TitleHeight + std::min(PlayersPerColumn, Friends) * RowHeight);
+		if(Others > 0)
+			Height = std::max(Height, (Friends > 0 ? TitleHeight : 0.0f) + std::min(PlayersPerColumn, Others) * RowHeight);
 		return Height;
 	}
 
-	// 无分组标题时的最高列高，用来推导面板需要额外长出多少。
+	// 无分组标题、不分段时的最高列高（旧布局基准），用来推导面板需要额外长出多少。
 	inline float BaseMaxColumnHeight(int PlayerCount, int PlayersPerColumn, float RowHeight)
 	{
 		if(PlayerCount <= 0 || PlayersPerColumn <= 0)

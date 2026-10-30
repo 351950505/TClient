@@ -331,13 +331,18 @@ void CSpectator::OnRender()
 		ObjWidth = 600.0f;
 	}
 
-	// TClient: 分组标题占所在列高度，面板按最高一列向下加长，避免底部被裁掉。
+	// TClient: 好友与其余玩家分列后总列数可能比旧布局多一列，按实际列数加宽面板
+	const int TotalColumns = (FriendCount > 0 ? (FriendCount + PerLine - 1) / PerLine : 0) +
+				 (TotalPlayers - FriendCount + PerLine - 1) / PerLine;
+	ObjWidth = std::max(ObjWidth, ((TotalColumns - 1) * 290.0f + 340.0f) / 2.0f);
+
+	// TClient: 分组标题占所在列高度，两段并排（好友列 + 其他列），
+	// 面板按最高一段向下加长，底部不被裁掉。
 	const float TitleHeight = std::clamp(LineHeight * 0.5f, 12.0f, 15.0f);
 	const float TitleFontSize = TitleHeight * 0.8f;
-	const float ExtraHeight = FriendCount > 0 && FriendCount < TotalPlayers
-						  ? tclient_spectator_friends::MaxColumnHeight(TotalPlayers, FriendCount, PerLine, LineHeight, TitleHeight) -
-							  tclient_spectator_friends::BaseMaxColumnHeight(TotalPlayers, PerLine, LineHeight)
-						  : 0.0f;
+	const float ExtraHeight = std::max(0.0f,
+		tclient_spectator_friends::SplitColumnHeight(TotalPlayers, FriendCount, PerLine, LineHeight, TitleHeight) -
+		tclient_spectator_friends::BaseMaxColumnHeight(TotalPlayers, PerLine, LineHeight));
 
 	const vec2 ScreenSize = vec2(Width, Height);
 	const vec2 ScreenCenter = ScreenSize / 2.0f;
@@ -454,13 +459,24 @@ void CSpectator::OnRender()
 		y += TitleHeight;
 	};
 
+	int SectionRows = 0; // 当前段在当前列已画的行数
 	for(int i = 0; i < TotalPlayers; ++i)
 	{
-		const int Count = i + 1;
-		if(Count == PerLine + 1 || (Count > PerLine + 1 && (Count - 1) % PerLine == 0))
+		// 好友段与其余段各自占列：进入新段（"其他"段）强制换新列，
+		// 段内列满才继续换列 —— 这就是"好友一列、其他一列"的分栏。
+		const bool SectionStart = i == 0 || i == FriendCount;
+		if(SectionStart)
+		{
+			if(i > 0)
+				x += 290.0f;
+			y = StartY;
+			SectionRows = 0;
+		}
+		else if(SectionRows == PerLine)
 		{
 			x += 290.0f;
 			y = StartY;
+			SectionRows = 0;
 		}
 
 		if(FriendCount > 0 && i == 0)
@@ -473,8 +489,8 @@ void CSpectator::OnRender()
 		const int SpectatorClientId = pInfo->m_ClientId;
 		const int DDTeam = Entry.m_DdTeam;
 		// 好友边界和列边界都断开队伍底色，标题行两侧不连成一块
-		const bool StartsGroup = i % PerLine == 0 || (FriendCount > 0 && i == FriendCount);
-		const bool EndsGroup = i + 1 == TotalPlayers || (i + 1) % PerLine == 0 || (FriendCount > 0 && i + 1 == FriendCount);
+		const bool StartsGroup = SectionRows == 0;
+		const bool EndsGroup = i + 1 == TotalPlayers || SectionRows + 1 == PerLine || i + 1 == FriendCount;
 		const int NextDDTeam = EndsGroup ? 0 : aDisplay[aDisplayOrder[i + 1]].m_DdTeam;
 
 		if(DDTeam != TEAM_FLOCK)
@@ -613,6 +629,7 @@ void CSpectator::OnRender()
 			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 		}
 
+		++SectionRows;
 		y += LineHeight;
 	}
 	TextRender()->TextColor(1.0f, 1.0f, 1.0f, 1.0f);

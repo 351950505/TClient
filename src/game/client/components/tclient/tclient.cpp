@@ -1246,22 +1246,44 @@ void CTClient::PollUpdateTasks()
 		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
 		return;
 	}
-	if(m_UpdateRetryAt > 0 && Client()->LocalTime() >= m_UpdateRetryAt && m_UpdateState == EUpdateState::DOWNLOADING && !m_pUpdateDownloadTask && !m_pUpdateHelperTask)
+	if(m_UpdateRetryAt > 0 && Client()->LocalTime() >= m_UpdateRetryAt)
 	{
-		// zip 已在本地时 ShouldSkipRequest 会秒过，重试代价极小
-		StartDownloadTask();
-		return;
+		m_UpdateRetryAt = -1.0f;
+		if(m_UpdateState == EUpdateState::DOWNLOADING && !m_pUpdateDownloadTask && !m_pUpdateHelperTask)
+		{
+			// zip 已在本地时 ShouldSkipRequest 会秒过，重试代价极小
+			StartDownloadTask();
+			return;
+		}
+		if(m_UpdateState == EUpdateState::CHECKING && m_pUpdateManifestTask && !m_pUpdateManifestSigTask)
+		{
+			m_pUpdateManifestSigTask = HttpGet(m_aUpdateManifestSigUrl);
+			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
+			m_pUpdateManifestSigTask->MaxResponseSize(1024);
+			m_pUpdateManifestSigTask->FailOnErrorStatus(true);
+			Http()->Run(m_pUpdateManifestSigTask);
+			return;
+		}
 	}
 	if(m_pUpdateManifestSigTask && m_pUpdateManifestSigTask->Done())
 	{
 		const bool SigOk = m_pUpdateManifestSigTask->State() == EHttpState::DONE;
 		m_pUpdateManifestSigTask = nullptr;
-		if(!SigOk)
+		if(SigOk)
 		{
-			UpdateFail(TCLocalize("Update check failed: the manifest signature could not be downloaded"));
+			FinishUpdateManifest();
 			return;
 		}
-		FinishUpdateManifest();
+		if(m_UpdateDownloadAttempt < 3)
+		{
+			++m_UpdateDownloadAttempt;
+			char aStatus[128];
+			str_format(aStatus, sizeof(aStatus), TCLocalize("Download failed, retrying (%d/%d)..."), m_UpdateDownloadAttempt, 3);
+			SetUpdateStatus(aStatus);
+			m_UpdateRetryAt = Client()->LocalTime() + 2.0f;
+			return;
+		}
+		UpdateFail(TCLocalize("Update check failed: the manifest signature could not be downloaded"));
 		return;
 	}
 	if(m_pUpdateDownloadTask && m_pUpdateDownloadTask->Done())

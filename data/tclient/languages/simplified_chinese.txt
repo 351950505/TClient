@@ -1159,6 +1159,9 @@ Horizontal offset
 Vertical offset
 == 垂直偏移
 
+Edge softness (drop shadow)
+== 边缘柔和度（投影）
+
 Transparent mode (drop the black capsule)
 == 透明模式（不画黑色胶囊底）
 

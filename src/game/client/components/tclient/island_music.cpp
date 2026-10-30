@@ -514,7 +514,7 @@ public:
 	// Key: width, height, radius*100, corner mask, inner inset (for rings).
 	struct SShapeKey
 	{
-		int m_W, m_H, m_Radius100, m_Corners, m_Inset100;
+		int m_W, m_H, m_Radius100, m_Corners, m_Inset100, m_Feather100;
 		bool operator<(const SShapeKey &O) const
 		{
 			if(m_W != O.m_W)
@@ -525,10 +525,14 @@ public:
 				return m_Radius100 < O.m_Radius100;
 			if(m_Corners != O.m_Corners)
 				return m_Corners < O.m_Corners;
-			return m_Inset100 < O.m_Inset100;
+			if(m_Inset100 != O.m_Inset100)
+				return m_Inset100 < O.m_Inset100;
+			return m_Feather100 < O.m_Feather100;
 		}
 	};
 	std::map<SShapeKey, IGraphics::CTextureHandle> m_ShapeCache;
+	// 投影专用缓存：键里带扩边量，和实体形状缓存分开，避免键空间互相污染。
+	std::map<SShapeKey, IGraphics::CTextureHandle> m_ShadowCache;
 
 	static float ShapeRadiusAt(float Px, float Py, float W, float H, float R, int Corners)
 	{
@@ -570,7 +574,7 @@ public:
 		// 允许圆角半径达到短边全长：胶囊端部是宽 H/2 的半圆，其半径就是 H/2，
 		// 旧的 min(W,H)*0.5 上限会把它压成 H/4，端部看起来不够圆。
 		const float R = std::clamp(Rounding, 0.0f, (float)std::min(W, H));
-		const SShapeKey Key{W, H, (int)std::lround(R * 100.0f), Corners, (int)std::lround(Inset * 100.0f)};
+		const SShapeKey Key{W, H, (int)std::lround(R * 100.0f), Corners, (int)std::lround(Inset * 100.0f), 0};
 		auto It = m_ShapeCache.find(Key);
 		if(It != m_ShapeCache.end() && It->second.IsValid())
 			return It->second;
@@ -683,6 +687,112 @@ public:
 		m_pGraphics->TextureClear();
 	}
 
+	// 投影纹理：把胶囊剪影光栅化成一层覆盖率遮罩，再做三遍盒式模糊（≈ 高斯），
+	// 得到向外渐隐的柔和边。模糊本身提供了过渡的灰度，所以这里按 1x 烘焙——
+	// 纹理尺寸直接等于显示尺寸，比实体形状的 2x 烘焙省四倍显存。
+	IGraphics::CTextureHandle EnsureShadowTexture(int W, int H, float Rounding, int Corners, float Blur)
+	{
+		if(W <= 0 || H <= 0 || Blur <= 0.5f)
+			return IGraphics::CTextureHandle();
+		const int Pad = (int)std::ceil(Blur * 2.0f);
+		const int TW = W + Pad * 2;
+		const int TH = H + Pad * 2;
+		const SShapeKey Key{TW, TH, (int)std::lround(Rounding * 100.0f), Corners, Pad, (int)std::lround(Blur * 100.0f)};
+		auto It = m_ShadowCache.find(Key);
+		if(It != m_ShadowCache.end() && It->second.IsValid())
+			return It->second;
+
+		if(m_ShadowCache.size() > 8)
+		{
+			for(auto &Entry : m_ShadowCache)
+			{
+				if(Entry.second.IsValid())
+					m_pGraphics->UnloadTexture(&Entry.second);
+			}
+			m_ShadowCache.clear();
+		}
+
+		const float R = std::clamp(Rounding, 0.0f, (float)std::min(W, H));
+		std::vector<uint8_t> Mask((size_t)TW * (size_t)TH, 0);
+		std::vector<uint8_t> Tmp(Mask.size(), 0);
+		// 光栅化：中心采样即可，锯齿会被后面的模糊完全抹掉。
+		for(int y = 0; y < TH; y++)
+		{
+			for(int x = 0; x < TW; x++)
+			{
+				if(ShapeCovers((float)x - (float)Pad + 0.5f, (float)y - (float)Pad + 0.5f, (float)W, (float)H, R, Corners))
+					Mask[(size_t)y * (size_t)TW + (size_t)x] = 255;
+			}
+		}
+
+		const int Radius = std::max(1, (int)std::lround(Blur * 0.6f));
+		auto BoxBlur = [](const std::vector<uint8_t> &Src, std::vector<uint8_t> &Dst, int W_, int H_, int Rad, bool Horizontal) {
+			const int Lines = Horizontal ? H_ : W_;
+			const int Len = Horizontal ? W_ : H_;
+			std::vector<int> Pref((size_t)Len + 1);
+			for(int Line = 0; Line < Lines; Line++)
+			{
+				Pref[0] = 0;
+				for(int i = 0; i < Len; i++)
+				{
+					const size_t Idx = Horizontal ? (size_t)Line * (size_t)W_ + (size_t)i : (size_t)i * (size_t)W_ + (size_t)Line;
+					Pref[(size_t)i + 1] = Pref[(size_t)i] + (int)Src[Idx];
+				}
+				for(int i = 0; i < Len; i++)
+				{
+					const int A = std::max(0, i - Rad);
+					const int B = std::min(Len - 1, i + Rad);
+					const int Sum = Pref[(size_t)B + 1] - Pref[(size_t)A];
+					const size_t Idx = Horizontal ? (size_t)Line * (size_t)W_ + (size_t)i : (size_t)i * (size_t)W_ + (size_t)Line;
+					Dst[Idx] = (uint8_t)((Sum + (B - A + 1) / 2) / (B - A + 1));
+				}
+			}
+		};
+		for(int Pass = 0; Pass < 3; Pass++)
+		{
+			BoxBlur(Mask, Tmp, TW, TH, Radius, true);
+			BoxBlur(Tmp, Mask, TW, TH, Radius, false);
+		}
+
+		CImageInfo Image;
+		Image.m_Width = (size_t)TW;
+		Image.m_Height = (size_t)TH;
+		Image.m_Format = CImageInfo::FORMAT_RGBA;
+		Image.Allocate();
+		if(!Image.m_pData)
+			return IGraphics::CTextureHandle();
+		for(size_t i = 0; i < Mask.size(); i++)
+		{
+			uint8_t *p = Image.m_pData + i * 4;
+			p[0] = p[1] = p[2] = 0; // 纯黑影，颜色交给 SetColor 的 alpha 调制
+			p[3] = Mask[i];
+		}
+
+		const IGraphics::CTextureHandle Tex = m_pGraphics->LoadTextureRawMove(Image, 0, "island-shadow");
+		if(Tex.IsValid())
+			m_ShadowCache[Key] = Tex;
+		return Tex;
+	}
+
+	void DrawShadow(float X, float Y, float W, float H, float Rounding, int Corners, float Blur, ColorRGBA Color)
+	{
+		const int IW = std::max(1, (int)std::lround(W));
+		const int IH = std::max(1, (int)std::lround(H));
+		const int Pad = (int)std::ceil(Blur * 2.0f);
+		const IGraphics::CTextureHandle Tex = EnsureShadowTexture(IW, IH, Rounding, Corners, Blur);
+		if(!Tex.IsValid())
+			return;
+		m_pGraphics->TextureSet(Tex);
+		m_pGraphics->QuadsBegin();
+		m_pGraphics->SetColor(Color);
+		m_pGraphics->QuadsSetSubset(0.0f, 0.0f, 1.0f, 1.0f);
+		const IGraphics::CQuadItem Quad((float)std::lround(X) - (float)Pad, (float)std::lround(Y) - (float)Pad,
+			(float)(IW + Pad * 2), (float)(IH + Pad * 2));
+		m_pGraphics->QuadsDrawTL(&Quad, 1);
+		m_pGraphics->QuadsEnd();
+		m_pGraphics->TextureClear();
+	}
+
 	// 胶囊 = 左右两个固定尺寸的端帽 + 中间一段实心矩形。
 	// 旧实现把整块胶囊烘焙成一张纹理，而纹理键里带宽度；歌词每换一行宽度就变，
 	// 于是每行都要重新做一次 2x 超采样的大图烘焙（1080p 下约 1100x150），
@@ -716,6 +826,16 @@ public:
 	void DrawPanel(float X, float Y, float W, float H, float Rounding, int Corners, bool Rim)
 	{
 		const ColorRGBA Body(0.027f, 0.031f, 0.039f, 1.0f);
+		// 投影先在胶囊和游戏画面之间铺一段渐变。纯黑不透明体直接压在高饱和的
+		// 游戏画面上时，交界只有一条硬边，看起来像贴上去的贴纸；投影给了它
+		// 悬浮的层次，边缘就不再"突兀"。偏移 +Y 假定光从上方来。
+		const float Strength = std::clamp((float)g_Config.m_TcIslandShadow / 100.0f, 0.0f, 1.0f);
+		if(Strength > 0.0f)
+		{
+			const float Blur = std::max(2.0f, H * 0.10f);
+			DrawShadow(X, Y + Blur * 0.30f, W, H, Rounding, Corners, Blur,
+				ColorRGBA(0.0f, 0.0f, 0.0f, 0.62f * Strength));
+		}
 		if(Rim)
 		{
 			DrawPill(X, Y, W, H, Corners, ColorRGBA(1.0f, 1.0f, 1.0f, 0.07f));
@@ -2314,6 +2434,13 @@ public:
 			const float IdleX = std::clamp((ScreenW - IdleW) * 0.5f + OffsetX, 8.0f, std::max(8.0f, ScreenW - IdleW - 8.0f));
 			if(g_Config.m_TcIslandTransparent == 0)
 				DrawPanel(IdleX, PillY, IdleW, IdleH, PillRounding, PillCorners, false);
+			else
+			{
+				// 透明模式的空闲态：同样的渐隐衬底，否则计时文字孤零零地浮在画面上
+				const float ScrimBlur = std::max(6.0f, IdleH * 0.55f);
+				DrawShadow(IdleX - IdleH * 0.25f, PillY + IdleH * 0.12f, IdleW + IdleH * 0.5f, IdleH * 0.9f,
+					IdleH * 0.45f, IGraphics::CORNER_ALL, ScrimBlur, ColorRGBA(0.0f, 0.0f, 0.0f, 0.42f));
+			}
 			if(ShowIdleTime)
 			{
 				const float IdleTextW = m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
@@ -2430,11 +2557,23 @@ public:
 		// left the arcs visibly stair-stepped.
 		// 透明模式：只画内容，不画黑色胶囊底（适合叠在游戏画面上或自己加遮罩）。
 		// 没有黑底后白字压在亮画面上会糊，所以透明模式给文字加一圈黑描边。
+		// 但描边本身是硬边（引擎按字形轮廓外扩 1px 生成），直接在花哨的游戏
+		// 画面上仍然"抠图感"很重。这里在内容区先铺一层无边界的高斯暗化层：
+		// 它在四周渐隐到全透明，等于给文字一个柔和衬底，且不会出现可见轮廓。
 		const bool TransparentMode = g_Config.m_TcIslandTransparent != 0;
 		if(TransparentMode)
+		{
 			m_pTextRender->TextOutlineColor(0.0f, 0.0f, 0.0f, std::clamp((float)g_Config.m_TcIslandTransparentTextShadow / 100.0f, 0.0f, 1.0f));
-		if(!TransparentMode)
+			// 渐隐衬底：比胶囊略大，模糊量给足，让边界落在画面之外看不出形状
+			const float ScrimBlur = std::max(6.0f, Height * 0.55f);
+			DrawShadow(X - Height * 0.25f, PillY + Height * 0.12f, Width + Height * 0.5f, Height * 0.9f,
+				(PillRounding > 0.0f ? Height * 0.45f : 0.0f), IGraphics::CORNER_ALL, ScrimBlur,
+				ColorRGBA(0.0f, 0.0f, 0.0f, 0.42f));
+		}
+		else
+		{
 			DrawPanel(X, PillY, Width, Height, PillRounding, PillCorners, !NotchStyle);
+		}
 
 		// ---- bottom progress rail -------------------------------------------
 		// A hairline of the track's elapsed fraction, clipped to the rounded body

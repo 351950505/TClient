@@ -1202,6 +1202,9 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		Ui()->DoScrollbarOption(&g_Config.m_TcIslandOffsetX, &g_Config.m_TcIslandOffsetX, &Button, TCLocalize("Horizontal offset"), -600, 600, &CUi::ms_LinearScrollbarScale, 0, "px");
 		Column.HSplitTop(LineSize, &Button, &Column);
 		Ui()->DoScrollbarOption(&g_Config.m_TcIslandOffsetY, &g_Config.m_TcIslandOffsetY, &Button, TCLocalize("Vertical offset"), -600, 600, &CUi::ms_LinearScrollbarScale, 0, "px");
+		// 投影强度：胶囊/衬底与游戏画面之间的柔和过渡，0 = 完全硬边
+		Column.HSplitTop(LineSize, &Button, &Column);
+		Ui()->DoScrollbarOption(&g_Config.m_TcIslandShadow, &g_Config.m_TcIslandShadow, &Button, TCLocalize("Edge softness (drop shadow)"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 		// 透明模式：单独开关 + 自己的调节项，跟在灵动岛基础选项下面
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandTransparent, TCLocalize("Transparent mode (drop the black capsule)"), &g_Config.m_TcIslandTransparent, &Column, LineSize);
 		if(g_Config.m_TcIslandTransparent)

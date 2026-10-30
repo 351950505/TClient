@@ -389,6 +389,7 @@ MACRO_CONFIG_INT(TcIslandOffsetX, tc_island_offset_x, 0, -2000, 2000, CFGFLAG_CL
 MACRO_CONFIG_INT(TcIslandOffsetY, tc_island_offset_y, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island vertical offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandTransparent, tc_island_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode (no black capsule, outlined text)")
 MACRO_CONFIG_INT(TcIslandTransparentTextShadow, tc_island_transparent_text_shadow, 85, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode text outline strength (%)")
+MACRO_CONFIG_INT(TcIslandShadow, tc_island_shadow, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island drop shadow strength under the capsule (softens the hard edge against the game)")
 MACRO_CONFIG_INT(TcPingwheelVolume, tc_pingwheel_volume, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal sound volume (%)")
 MACRO_CONFIG_INT(TcPingwheelSoundRange, tc_pingwheel_sound_range, 600, 0, 10000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel sound audible range in world units (0 = global, no falloff)")
 MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel fallback channel (no relay): 1 = emoticons (visible to all, only TClient decodes), 0 = local only")

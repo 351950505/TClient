@@ -270,6 +270,12 @@ def main(argv: list[str]) -> int:
 			signature = private_key.sign(manifest_bytes)
 			manifest_path.write_bytes(manifest_bytes)
 			(output / MANIFEST_SIG_NAME).write_bytes(signature)
+			# 同时写一份到 update/ 子目录：提交到仓库后即可作为
+			# raw.githubusercontent.com 清单源（国内可达性更好）
+			raw_dir = output / "update"
+			raw_dir.mkdir(exist_ok=True)
+			(raw_dir / MANIFEST_NAME).write_bytes(manifest_bytes)
+			(raw_dir / MANIFEST_SIG_NAME).write_bytes(signature)
 			if not args.quiet:
 				print(f"signed with ed25519, public key: {public_hex}")
 		else:

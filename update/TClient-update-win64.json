@@ -1,0 +1,15 @@
+{
+  "product": "TClient",
+  "channel": "stable",
+  "version": "1.7.8.3",
+  "platform": "win64",
+  "asset": "TClient-update-win64.zip",
+  "size": 64430327,
+  "sha256": "b17899a28863ef7d52ba3309845df41856410cb868bcdc9dfaff3fe5d7c58017",
+  "notes": "清单多源兜底（raw.githubusercontent 优先，github 直链备用）",
+  "helper": {
+    "name": "TClientUpdater.exe",
+    "size": 299008,
+    "sha256": "f1529faaabc8c16ca7e0449948372e73ae607cb6a2043b9145d4f011d4bc211a"
+  }
+}

@@ -52,6 +52,15 @@ static constexpr const char *TCLIENT_INFO_URL = "https://update.tclient.app/info
 //   TClient-update-win64.zip   整包，由独立的 TClientUpdater.exe 在主进程退出后替换
 // 旧的 update.tclient.app 逐文件更新器与本流程无关，也不受这里影响。
 static constexpr const char *TCLIENT_UPDATE_LATEST_URL = "https://github.com/351950505/TClient/releases/latest/download/";
+// 清单/签名的备用源（QmClient 做法）：raw.githubusercontent.com 不经过
+// release-assets 域名，国内可达性明显更好。发布时把清单+签名同时提交到
+// 仓库 update/ 目录即可。按顺序尝试，第一个成功的为准。
+static constexpr const char *TCLIENT_UPDATE_RAW_BASE = "https://raw.githubusercontent.com/351950505/TClient/master/update/";
+// 三个候选清单源（含 raw 直连与 release 直链），逐个尝试
+static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {
+	"https://raw.githubusercontent.com/351950505/TClient/master/update/TClient-update-win64.json",
+	"https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
+};
 static constexpr const char *TCLIENT_UPDATE_PRODUCT = "TClient";
 static constexpr const char *TCLIENT_UPDATE_CHANNEL = "stable";
 static constexpr const char *TCLIENT_UPDATE_PLATFORM = "win64";
@@ -865,6 +874,7 @@ void CTClient::UpdateCheck(bool Force)
 	m_aUpdateHelperUrl[0] = '\0';
 	m_aUpdateBootstrapPath[0] = '\0';
 	BootstrapHelperPending = false;
+	m_UpdateManifestSource = 0;
 	m_LastUpdateCheck = time_timestamp();
 	m_UpdateState = EUpdateState::CHECKING;
 	SetUpdateStatus(TCLocalize("Checking for updates..."));
@@ -876,9 +886,12 @@ void CTClient::UpdateCheck(bool Force)
 
 void CTClient::FetchUpdateManifest()
 {
-	char aUrl[512];
-	str_format(aUrl, (int)sizeof(aUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_MANIFEST_ASSET);
-	m_pUpdateManifestTask = HttpGet(aUrl);
+	if(m_UpdateManifestSource >= (int)(sizeof(TCLIENT_UPDATE_MANIFEST_SOURCES) / sizeof(TCLIENT_UPDATE_MANIFEST_SOURCES[0])))
+	{
+		UpdateFail(TCLocalize("Update check failed: the manifest could not be downloaded"));
+		return;
+	}
+	m_pUpdateManifestTask = HttpGet(TCLIENT_UPDATE_MANIFEST_SOURCES[m_UpdateManifestSource]);
 	m_pUpdateManifestTask->Timeout(CTimeout{15000, 0, 800, 10});
 	m_pUpdateManifestTask->IpResolve(IPRESOLVE::V4);
 	m_pUpdateManifestTask->MaxResponseSize(64 * 1024);
@@ -1242,6 +1255,15 @@ void CTClient::PollUpdateTasks()
 		// 清单下载完成后先拉签名，验签通过才解析
 		if(m_pUpdateManifestTask->State() != EHttpState::DONE)
 		{
+			// 当前源失败：换下一个候选源（raw → release 直链）
+			m_pUpdateManifestTask = nullptr;
+			++m_UpdateManifestSource;
+			if(m_UpdateManifestSource < (int)(sizeof(TCLIENT_UPDATE_MANIFEST_SOURCES) / sizeof(TCLIENT_UPDATE_MANIFEST_SOURCES[0])))
+			{
+				log_warn("tclient-update", "manifest source failed, trying next source");
+				FetchUpdateManifest();
+				return;
+			}
 			UpdateFail(TCLocalize("Update check failed: the manifest could not be downloaded"));
 			ResetUpdateTasks();
 			return;
@@ -1249,7 +1271,10 @@ void CTClient::PollUpdateTasks()
 		if(!m_pUpdateManifestSigTask)
 		{
 			char aSigUrl[512];
-			str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			if(m_UpdateManifestSource == 0)
+				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			else
+				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
 			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
 			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
 			m_pUpdateManifestSigTask->MaxResponseSize(1024);
@@ -1292,7 +1317,10 @@ void CTClient::PollUpdateTasks()
 		if(m_UpdateState == EUpdateState::CHECKING && m_pUpdateManifestTask && !m_pUpdateManifestSigTask)
 		{
 			char aSigUrl[512];
-			str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			if(m_UpdateManifestSource == 0)
+				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			else
+				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
 			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
 			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
 			m_pUpdateManifestSigTask->MaxResponseSize(1024);

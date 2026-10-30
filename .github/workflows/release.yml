@@ -113,6 +113,33 @@ jobs:
           echo "Listing ./artifacts directory:"
           ls -R ./artifacts
 
+      # Build the two autoupdate assets from the packaged Windows client:
+      # TClient-update-win64.zip (only the files an update replaces) and its json manifest.
+      - name: Generate autoupdate assets
+        env:
+          RELEASE_BODY: ${{ github.event.inputs.body }}
+          RELEASE_TAG: ${{ github.event.inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          rm -rf update-package
+          mkdir -p update-package
+          unzip -q "./artifacts/${{ env.CLIENT_NAME }}-windows.zip" -d update-package
+          source_dir=$(dirname "$(find update-package -type f -name 'DDNet.exe' | head -n 1)")
+          if [ -z "$source_dir" ] || [ ! -d "$source_dir" ]; then
+            echo "Could not find the packaged client in the Windows artifact" >&2
+            exit 1
+          fi
+          echo "Using packaged client from $source_dir"
+          printf '%s\n' "$RELEASE_BODY" > update-notes.txt
+          python3 tclient_scripts/make_release_assets.py \
+            --source "$source_dir" \
+            --version "$version" \
+            --output ./artifacts \
+            --notes-file update-notes.txt \
+            --quiet
+          ls -l ./artifacts/TClient-update-win64.zip ./artifacts/TClient-update-win64.json
+
       - name: Upload Ubuntu
         uses: actions/upload-release-asset@v1
         env:
@@ -133,6 +160,26 @@ jobs:
           asset_path: ./artifacts/${{ env.CLIENT_NAME }}-windows.zip
           asset_name: ${{ env.CLIENT_NAME }}-windows.zip
           asset_content_type: application/zip
+
+      - name: Upload Windows autoupdate zip
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/TClient-update-win64.zip
+          asset_name: TClient-update-win64.zip
+          asset_content_type: application/zip
+
+      - name: Upload Windows autoupdate manifest
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/TClient-update-win64.json
+          asset_name: TClient-update-win64.json
+          asset_content_type: application/json
 
       - name: Upload macOS
         uses: actions/upload-release-asset@v1

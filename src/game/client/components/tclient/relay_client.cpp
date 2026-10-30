@@ -31,11 +31,14 @@ void CRelayClient::FormatStatus(char *pBuf, int Size) const
 	for(const SPeer &Peer : m_vPeers)
 		if(PeerDirect(Peer))
 			Direct++;
+	const float SinceReg = Client()->LocalTime() - m_LastRegTime;
 	str_format(pBuf, Size,
-		"信令: %s | 服 %s | 回执 %.1fs 前 | 中转 %s | P2P %d/%d | 待发 %d",
+		"信令: %s | 服 %s | 回执 %.1fs 前 | REG %.1fs 前 | %s | 中转 %s | P2P %d/%d | 待发 %d",
 		Online() ? "已连接" : "未连接",
 		aGame,
 		Age < 1e8f ? Age : -1.0f,
+		SinceReg < 1e8f ? SinceReg : -1.0f,
+		m_aFailure,
 		m_RelayAddrValid ? g_Config.m_TcRelayAddr : "(地址无效)",
 		Direct,
 		(int)m_vPeers.size(),
@@ -57,6 +60,11 @@ void CRelayClient::OnInit()
 		return;
 	}
 	m_RelayAddrValid = true;
+	if(m_SocketValid)
+	{
+		net_udp_close(m_Socket);
+		m_SocketValid = false;
+	}
 	NETADDR Bind = {0};
 	Bind.type = NETTYPE_ALL;
 	m_Socket = net_udp_create(Bind);
@@ -70,11 +78,41 @@ void CRelayClient::OnInit()
 	str_format(m_aUid, sizeof(m_aUid), "%08x%08x", Seed1, Seed2);
 }
 
+void CRelayClient::LogOnce(const char *pReason, const char *pDetail)
+{
+	// 心跳每 10s（离线 2s）跑一次，逐次打印会把 F1 控制台刷满。这里按"原因"
+	// 分别记忆上次的细节：同一原因+同一细节重复发生直接丢弃；首次注册、切服、
+	// 掉线恢复、失败原因改变则各留一条。
+	const char *pDet = pDetail ? pDetail : "";
+	for(int i = 0; i < m_NumLogMemo; i++)
+	{
+		if(str_comp(m_aLogMemo[i].m_aReason, pReason) != 0)
+			continue;
+		if(str_comp(m_aLogMemo[i].m_aDetail, pDet) == 0)
+			return;
+		str_copy(m_aLogMemo[i].m_aDetail, pDet);
+		log_info("relaydiag", "%s%s%s", pReason, pDet[0] ? ": " : "", pDet);
+		return;
+	}
+	if(m_NumLogMemo < (int)(sizeof(m_aLogMemo) / sizeof(m_aLogMemo[0])))
+	{
+		str_copy(m_aLogMemo[m_NumLogMemo].m_aReason, pReason);
+		str_copy(m_aLogMemo[m_NumLogMemo].m_aDetail, pDet);
+		m_NumLogMemo++;
+	}
+	log_info("relaydiag", "%s%s%s", pReason, pDet[0] ? ": " : "", pDet);
+}
+
 void CRelayClient::OnReset()
 {
 	m_vSendQueue.clear();
 	m_vPeers.clear();
 	m_LastServerReply = -1e9f;
+	m_LastRegTime = -1e9f;
+	m_LastRenderTime = -1e9f;
+	m_aGameAddr[0] = 0;
+	str_copy(m_aFailure, "等待注册");
+	m_NumLogMemo = 0;
 	m_aLastRecvPayload[0] = 0;
 	m_LastRecvPayloadTime = -1e9f;
 }
@@ -122,15 +160,41 @@ bool CRelayClient::GameServerAddr(char *pBuf, int Size) const
 	return true;
 }
 
-void CRelayClient::SendReg()
+bool CRelayClient::SendReg()
 {
 	char aGameAddr[64];
 	if(!GameServerAddr(aGameAddr, sizeof(aGameAddr)))
-		return;
+	{
+		str_copy(m_aFailure, "未连接游戏服");
+		return false;
+	}
+	if(str_comp(m_aGameAddr, aGameAddr) != 0)
+	{
+		str_copy(m_aGameAddr, aGameAddr);
+		m_LastServerReply = -1e9f;
+		m_vPeers.clear();
+		LogOnce("game server changed", m_aGameAddr);
+	}
 	char aBuf[160];
 	str_format(aBuf, sizeof(aBuf), "REG %s %s %s", aGameAddr, m_aUid, g_Config.m_PlayerName);
-	net_udp_send(m_Socket, &m_RelayAddr, aBuf, str_length(aBuf) + 1);
 	m_LastRegTime = Client()->LocalTime();
+	if(net_udp_send(m_Socket, &m_RelayAddr, aBuf, str_length(aBuf) + 1) == -1)
+	{
+		str_copy(m_aFailure, "注册发送失败");
+		net_udp_close(m_Socket);
+		m_Socket = nullptr;
+		m_SocketValid = false;
+		m_LastSocketAttempt = Client()->LocalTime();
+		m_vPeers.clear();
+		m_vSendQueue.clear();
+		m_LastServerReply = -1e9f;
+		log_error("relaydiag", "failed to send REG for %s", aGameAddr);
+		return false;
+	}
+	str_copy(m_aFailure, "注册已发送，等待回执");
+	// 成功路径也走 LogOnce：心跳重复成功只留第一条，掉线后重新成功会再留一条。
+	LogOnce("registered", aGameAddr);
+	return true;
 }
 
 void CRelayClient::HandlePeer(const char *pUid, const char *pAddrStr)
@@ -157,7 +221,7 @@ void CRelayClient::HandlePeer(const char *pUid, const char *pAddrStr)
 	Peer.m_Addr = Addr;
 	Peer.m_LastSeen = Client()->LocalTime();
 	m_vPeers.push_back(Peer);
-	log_info("relaydiag", "peer added: %s @ %s", pUid, pAddrStr);
+	LogOnce("peer added", pUid);
 }
 
 void CRelayClient::Broadcast(const char *pPayload)
@@ -176,7 +240,12 @@ void CRelayClient::Broadcast(const char *pPayload)
 		SentDirect++;
 	}
 	if(SentDirect > 0)
-		log_info("relaydiag", "p2p send: %s -> %d peers", pPayload, SentDirect);
+	{
+		// 只在"直连通道首次可用"时记一条，正常每条 ping 不再打印。
+		char aPeers[16];
+		str_format(aPeers, sizeof(aPeers), "%d", SentDirect);
+		LogOnce("p2p direct send", aPeers);
+	}
 	// 还有成员没打通（或还不知道有谁）时走信令中转兜底
 	if(AllPeersDirect() || !Online())
 		return;
@@ -186,7 +255,7 @@ void CRelayClient::Broadcast(const char *pPayload)
 		Item.m_Payload = pPayload;
 		Item.m_UseRelay = true;
 		m_vSendQueue.push_back(Item);
-		log_info("relaydiag", "broadcast queued (relay): %s", pPayload);
+		LogOnce("broadcast queued (relay)", nullptr);
 	}
 }
 
@@ -201,17 +270,23 @@ void CRelayClient::PumpRecv()
 			break;
 		char aText[256];
 		str_truncate(aText, sizeof(aText), (const char *)pData, Bytes);
+		const bool FromRelay = net_addr_comp(&Addr, &m_RelayAddr) == 0;
 		if(str_startswith(aText, "REG_OK") || str_startswith(aText, "BC_OK"))
 		{
+			if(!FromRelay)
+				continue;
 			m_LastServerReply = Client()->LocalTime();
+			str_copy(m_aFailure, "已收到回执");
 			continue;
 		}
 		if(str_startswith(aText, "PEER "))
 		{
+			if(!FromRelay)
+				continue;
 			// PEER <gameaddr> <uid> <ip>:<port>；gameaddr 里不含空格
 			const char *pRest = aText + 5;
 			const char *pSpace1 = strchr(pRest, ' ');
-			if(!pSpace1)
+			if(!pSpace1 || pSpace1 - pRest != str_length(m_aGameAddr) || str_comp_num(pRest, m_aGameAddr, (int)(pSpace1 - pRest)) != 0)
 				continue;
 			const char *pUid = pSpace1 + 1;
 			const char *pSpace2 = strchr(pUid, ' ');
@@ -222,24 +297,26 @@ void CRelayClient::PumpRecv()
 			HandlePeer(aUid, pSpace2 + 1);
 			continue;
 		}
-		// 探针 P <uid>：收到即回探针（双向打洞），并把来源地址记为对方
-		// 真实可回地址——NAT 学习，比信令推送的映射更准。
+		// 仅已知 UID 可学习 NAT 地址；收发共用每 peer 一秒节流。
 		if(str_startswith(aText, "P "))
 		{
-			const char *pUid = aText + 2;
 			for(SPeer &Peer : m_vPeers)
 			{
-				if(str_comp(Peer.m_aUid, pUid) == 0)
+				if(str_comp(Peer.m_aUid, aText + 2) != 0)
+					continue;
+				const float Now = Client()->LocalTime();
+				Peer.m_Addr = Addr;
+				Peer.m_LastDirect = Now;
+				Peer.m_LastSeen = Now;
+				if(Now - Peer.m_LastProbe >= 1.0f)
 				{
-					Peer.m_Addr = Addr;
-					Peer.m_LastDirect = Client()->LocalTime();
-					Peer.m_LastSeen = Client()->LocalTime();
-					break;
+					Peer.m_LastProbe = Now;
+					char aReply[64];
+					str_format(aReply, sizeof(aReply), "P %s", m_aUid);
+					net_udp_send(m_Socket, &Addr, aReply, str_length(aReply) + 1);
 				}
+				break;
 			}
-			char aReply[64];
-			str_format(aReply, sizeof(aReply), "P %s", m_aUid);
-			net_udp_send(m_Socket, &Addr, aReply, str_length(aReply) + 1);
 			continue;
 		}
 		// 直连载荷 D <payload>
@@ -248,16 +325,18 @@ void CRelayClient::PumpRecv()
 		if(str_startswith(aText, "D "))
 		{
 			pPayload = aText + 2;
-			Direct = true;
 			for(SPeer &Peer : m_vPeers)
 			{
 				if(net_addr_comp(&Peer.m_Addr, &Addr) == 0)
 				{
 					Peer.m_LastDirect = Client()->LocalTime();
+					Direct = true;
 					break;
 				}
 			}
 		}
+		if(str_startswith(aText, "D ") ? !Direct : !FromRelay)
+			continue;
 		if(!str_startswith(pPayload, "\xE2\x9F\xA8"))
 			continue; // 非 ping 载荷（可能是扫描/误投），丢弃
 		// 去重：同一载荷可能同时经 P2P 与中转到达
@@ -267,7 +346,7 @@ void CRelayClient::PumpRecv()
 		str_copy(m_aLastRecvPayload, pPayload);
 		m_LastRecvPayloadTime = Now;
 		// 纯 transport：载荷原样转投，"这是什么/要不要收"由订阅方决定
-		log_info("relaydiag", "recv payload (%s): %s", Direct ? "p2p" : "relay", pPayload);
+		LogOnce("recv payload", Direct ? "p2p" : "relay");
 		GameClient()->m_PingWheel.OnRelayPayload(pPayload);
 	}
 }
@@ -275,15 +354,14 @@ void CRelayClient::PumpRecv()
 void CRelayClient::PumpSend()
 {
 	const float Now = Client()->LocalTime();
-	// 心跳：在线时每 10s 重注册（信令按 120s 过期）；离线（REG_OK 丢失/网络
-	// 抖动）时 2s 快速重试，单次回执丢失不再造成长达 10s 的"未连接"窗口
+	// 心跳：在线时每 10s 重注册；无回执时 2s 快速重试。
 	const float RegInterval = Online() ? 10.0f : 2.0f;
-	if(Now - m_LastRegTime > RegInterval)
-		SendReg();
-	// 打洞探针：未打通的成员每秒探一次（同时维持本端 NAT 映射不被回收）
+	if(Now - m_LastRegTime > RegInterval && !SendReg())
+		return;
+	// 打洞探针：所有成员每秒探一次（同时维持本端 NAT 映射不被回收）
 	for(SPeer &Peer : m_vPeers)
 	{
-		if(PeerDirect(Peer) || Now - Peer.m_LastProbe < 1.0f)
+		if(Now - Peer.m_LastProbe < 1.0f)
 			continue;
 		Peer.m_LastProbe = Now;
 		char aBuf[64];
@@ -314,13 +392,60 @@ void CRelayClient::PumpSend()
 	char aBuf[256];
 	str_format(aBuf, sizeof(aBuf), "BC %s %s %s", aGameAddr, m_aUid, Item.m_Payload.c_str());
 	net_udp_send(m_Socket, &m_RelayAddr, aBuf, str_length(aBuf) + 1);
-	log_info("relaydiag", "relay send: %s", aBuf);
+	LogOnce("relay send", nullptr);
 }
 
 void CRelayClient::OnRender()
 {
-	if(!m_SocketValid)
+	if(!g_Config.m_TcRelay)
+	{
+		if(m_SocketValid)
+		{
+			net_udp_close(m_Socket);
+			m_Socket = nullptr;
+			m_SocketValid = false;
+			OnReset();
+		}
 		return;
+	}
+	const float Now = Client()->LocalTime();
+	if(m_LastRenderTime > -1e8f && Now - m_LastRenderTime > 15.0f)
+	{
+		char aGap[32];
+		str_format(aGap, sizeof(aGap), "%.0fs", Now - m_LastRenderTime);
+		LogOnce("render resumed, retry registration", aGap);
+		m_LastRegTime = -1e9f;
+	}
+	m_LastRenderTime = Now;
+	if(!m_SocketValid)
+	{
+		if(Now - m_LastSocketAttempt < 5.0f)
+			return;
+		m_LastSocketAttempt = Now;
+		OnInit();
+		str_copy(m_aFailure, m_SocketValid ? "套接字已就绪" : "套接字或地址不可用");
+		if(!m_SocketValid)
+			return;
+	}
+	char aGameAddr[64];
+	if(!GameServerAddr(aGameAddr, sizeof(aGameAddr)))
+	{
+		if(m_aGameAddr[0])
+		{
+			char aState[16];
+			str_format(aState, sizeof(aState), "%d", Client()->State());
+			LogOnce("registration paused (not connected)", aState);
+			OnReset();
+		}
+		str_copy(m_aFailure, "未连接游戏服");
+		return;
+	}
+	if(str_comp(m_aGameAddr, aGameAddr) != 0)
+	{
+		OnReset();
+		str_copy(m_aGameAddr, aGameAddr);
+		LogOnce("registration resumed", aGameAddr);
+	}
 	PumpRecv();
 	PumpSend();
 }

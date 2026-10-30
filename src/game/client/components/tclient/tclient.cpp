@@ -2,7 +2,12 @@
 
 #include "data_version.h"
 
+#include <base/fs.h>
+#include <base/hash.h>
+#include <base/io.h>
 #include <base/log.h>
+#include <base/process.h>
+#include <base/time.h>
 
 #include <engine/client.h>
 #include <engine/client/enums.h>
@@ -11,6 +16,7 @@
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
 #include <engine/shared/json.h>
+#include <engine/storage.h>
 
 #include <generated/client_data.h>
 
@@ -22,7 +28,111 @@
 #include <game/localization.h>
 #include <game/version.h>
 
+#include <cstdarg>
+
 static constexpr const char *TCLIENT_INFO_URL = "https://update.tclient.app/info.json";
+
+// ---- v1.4 客户端自动更新 ----------------------------------------------------
+// 只认自有仓库的 GitHub Releases：https://github.com/351950505/TClient
+// 更新资产契约（发布脚本 tclient_scripts/make_release_assets.py 生成）：
+//   TClient-update-win64.json  清单（product/channel/version/platform/asset/size/sha256）
+//   TClient-update-win64.zip   整包，由独立的 TClientUpdater.exe 在主进程退出后替换
+// 旧的 update.tclient.app 逐文件更新器与本流程无关，也不受这里影响。
+static constexpr const char *TCLIENT_UPDATE_RELEASES_URL = "https://api.github.com/repos/351950505/TClient/releases?per_page=20";
+static constexpr const char *TCLIENT_UPDATE_PRODUCT = "TClient";
+static constexpr const char *TCLIENT_UPDATE_CHANNEL = "stable";
+static constexpr const char *TCLIENT_UPDATE_PLATFORM = "win64";
+static constexpr const char *TCLIENT_UPDATE_MANIFEST_ASSET = "TClient-update-win64.json";
+static constexpr const char *TCLIENT_UPDATE_ZIP_ASSET = "TClient-update-win64.zip";
+static constexpr const char *TCLIENT_UPDATE_HELPER = "TClientUpdater.exe";
+static constexpr const char *TCLIENT_UPDATE_ZIP_PATH = "update/TClient-update-win64.zip";
+// 自动检查节奏：启动后先等 12 秒（别和首帧/地图加载抢带宽），之后每 6 小时最多一次。
+static constexpr float TCLIENT_UPDATE_FIRST_CHECK_DELAY = 12.0f;
+static constexpr int64_t TCLIENT_UPDATE_CHECK_INTERVAL = 6 * 60 * 60;
+
+// 严格三段版本号：任何一段不是纯数字就视为无效（不用 atoi 的宽松解析）。
+static bool ParseAppVersion(const char *pVersion, int aOut[3])
+{
+	aOut[0] = aOut[1] = aOut[2] = 0;
+	if(!pVersion || !pVersion[0])
+		return false;
+	const char *p = pVersion;
+	for(int i = 0; i < 3; i++)
+	{
+		const char *pStart = p;
+		while(*p >= '0' && *p <= '9')
+			p++;
+		if(p == pStart)
+			return false;
+		if(p - pStart > 6)
+			return false;
+		int Value = 0;
+		for(const char *q = pStart; q < p; q++)
+			Value = Value * 10 + (*q - '0');
+		aOut[i] = Value;
+		if(i < 2)
+		{
+			if(*p != '.')
+				return false;
+			p++;
+		}
+	}
+	return *p == '\0';
+}
+
+// >0 表示 A 比 B 新
+static int CompareAppVersion(const char *pA, const char *pB)
+{
+	int a[3], b[3];
+	if(!ParseAppVersion(pA, a) || !ParseAppVersion(pB, b))
+		return 0;
+	for(int i = 0; i < 3; i++)
+	{
+		if(a[i] != b[i])
+			return a[i] > b[i] ? 1 : -1;
+	}
+	return 0;
+}
+
+static const json_value &JsonObj(const json_value &Obj, const char *pKey)
+{
+	return Obj[pKey];
+}
+
+static const char *JsonStr(const json_value &Value)
+{
+	return Value.type == json_string ? Value.u.string.ptr : nullptr;
+}
+
+// 注意：不能叫 JsonBool，engine/shared/json.h 里已有同名函数（bool -> "true"/"false"）。
+static bool JsonGetBool(const json_value &Value, bool Default)
+{
+	if(Value.type == json_boolean)
+		return Value.u.boolean != 0;
+	return Default;
+}
+
+static int64_t JsonGetInt(const json_value &Value, int64_t Default)
+{
+	if(Value.type == json_integer)
+		return (int64_t)Value.u.integer;
+	if(Value.type == json_double)
+		return (int64_t)Value.u.dbl;
+	return Default;
+}
+
+static bool IsHexSha256(const char *pStr)
+{
+	if(!pStr || str_length(pStr) != 64)
+		return false;
+	for(const char *p = pStr; *p; p++)
+	{
+		if(!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')))
+			return false;
+	}
+	return true;
+}
+
 
 CTClient::CTClient()
 {
@@ -421,6 +531,8 @@ void CTClient::OnConsoleInit()
 
 	Console()->Register("emote_cycle", "", CFGFLAG_CLIENT, ConEmoteCycle, this, "Cycle through emotes");
 
+	Console()->Register("tc_update_check", "", CFGFLAG_CLIENT, ConUpdateCheck, this, "Check GitHub releases for a newer TClient version");
+
 	Console()->Chain(
 		"tc_allow_any_res", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
 			pfnCallback(pResult, pCallbackUserData);
@@ -558,6 +670,18 @@ void CTClient::OnRender()
 	}
 
 	DoFinishCheck();
+
+	// 更新器状态机推进 + 启动后延迟一次自动检查。检查只查版本，
+	// 不下载、不安装、不退出——用户点了按钮才会继续。
+	PollUpdateTasks();
+	if(m_UpdateState == EUpdateState::IDLE && UpdateShouldAutoCheck())
+	{
+		static float s_FirstRenderTime = -1.0f;
+		if(s_FirstRenderTime < 0.0f)
+			s_FirstRenderTime = Client()->LocalTime();
+		if(Client()->LocalTime() - s_FirstRenderTime >= TCLIENT_UPDATE_FIRST_CHECK_DELAY)
+			UpdateCheck(false);
+	}
 }
 
 bool CTClient::NeedUpdate()
@@ -636,6 +760,416 @@ void CTClient::FinishTClientInfo()
 	}
 
 	json_value_free(pJson);
+}
+
+// ---- v1.4 客户端自动更新实现 ------------------------------------------------
+
+void CTClient::SetUpdateStatus(const char *pStatus)
+{
+	str_copy(m_aUpdateStatus, pStatus ? pStatus : "");
+}
+
+void CTClient::UpdateFail(const char *pFormat, ...)
+{
+	va_list Args;
+	va_start(Args, pFormat);
+	str_format_v(m_aUpdateStatus, sizeof(m_aUpdateStatus), pFormat, Args);
+	va_end(Args);
+	m_UpdateState = EUpdateState::FAILED;
+	m_UpdateRelease.m_Valid = false;
+	log_warn("tclient-update", "%s", m_aUpdateStatus);
+}
+
+void CTClient::ResetUpdateTasks()
+{
+	if(m_pUpdateReleasesTask)
+	{
+		m_pUpdateReleasesTask->Abort();
+		m_pUpdateReleasesTask = nullptr;
+	}
+	if(m_pUpdateManifestTask)
+	{
+		m_pUpdateManifestTask->Abort();
+		m_pUpdateManifestTask = nullptr;
+	}
+	if(m_pUpdateDownloadTask)
+	{
+		m_pUpdateDownloadTask->Abort();
+		m_pUpdateDownloadTask = nullptr;
+	}
+}
+
+bool CTClient::UpdateShouldAutoCheck() const
+{
+	if(m_UpdateState == EUpdateState::CHECKING || m_UpdateState == EUpdateState::DOWNLOADING || m_UpdateState == EUpdateState::DOWNLOADED)
+		return false;
+	if(m_UpdateState == EUpdateState::AVAILABLE)
+		return false;
+	const int64_t Now = time_timestamp();
+	if(m_LastUpdateCheck == 0)
+		return true;
+	return Now - m_LastUpdateCheck >= TCLIENT_UPDATE_CHECK_INTERVAL;
+}
+
+void CTClient::UpdateCheck(bool Force)
+{
+	if(m_UpdateState == EUpdateState::CHECKING || m_UpdateState == EUpdateState::DOWNLOADING)
+		return;
+	ResetUpdateTasks();
+	m_UpdateRelease = SUpdateRelease();
+	m_aUpdateReleaseTag[0] = '\0';
+	m_aUpdateManifestUrl[0] = '\0';
+	m_LastUpdateCheck = time_timestamp();
+	m_UpdateState = EUpdateState::CHECKING;
+	SetUpdateStatus(TCLocalize("Checking for updates..."));
+	log_info("tclient-update", "checking releases (force=%d, current=%s)", Force ? 1 : 0, TCLIENT_APP_VERSION);
+	FetchUpdateReleases();
+}
+
+void CTClient::FetchUpdateReleases()
+{
+	m_pUpdateReleasesTask = HttpGet(TCLIENT_UPDATE_RELEASES_URL);
+	m_pUpdateReleasesTask->Timeout(CTimeout{15000, 0, 800, 10});
+	m_pUpdateReleasesTask->IpResolve(IPRESOLVE::V4);
+	m_pUpdateReleasesTask->MaxResponseSize(4 * 1024 * 1024);
+	m_pUpdateReleasesTask->FailOnErrorStatus(true);
+	m_pUpdateReleasesTask->HeaderString("Accept", "application/vnd.github+json");
+	m_pUpdateReleasesTask->HeaderString("X-GitHub-Api-Version", "2022-11-28");
+	Http()->Run(m_pUpdateReleasesTask);
+}
+
+void CTClient::FinishUpdateReleases()
+{
+	json_value *pJson = m_pUpdateReleasesTask->ResultJson();
+	if(!pJson || pJson->type != json_array)
+	{
+		if(pJson)
+			json_value_free(pJson);
+		UpdateFail(TCLocalize("Update check failed: could not read the release list"));
+		return;
+	}
+
+	// 只接受稳定版（非 draft / 非 prerelease）且版本严格高于当前发行版。
+	char aBestTag[64] = "";
+	char aBestVersion[32] = "";
+	char aBestManifestUrl[512] = "";
+	char aBestZipUrl[512] = "";
+	int Best[3] = {-1, -1, -1};
+	const int NumReleases = json_array_length(pJson);
+	for(int i = 0; i < NumReleases; i++)
+	{
+		const json_value &Release = (*pJson)[i];
+		if(Release.type != json_object)
+			continue;
+		if(JsonGetBool(JsonObj(Release, "draft"), false) || JsonGetBool(JsonObj(Release, "prerelease"), false))
+			continue;
+		const char *pTag = JsonStr(JsonObj(Release, "tag_name"));
+		if(!pTag || !pTag[0])
+			continue;
+		const char *pVersion = (pTag[0] == 'v' || pTag[0] == 'V') ? pTag + 1 : pTag;
+		int aVersion[3];
+		if(!ParseAppVersion(pVersion, aVersion))
+			continue;
+		if(CompareAppVersion(pVersion, TCLIENT_APP_VERSION) <= 0)
+			continue;
+		const json_value &Assets = JsonObj(Release, "assets");
+		if(Assets.type != json_array)
+			continue;
+		// 两个资产都必须在同一个 release 里，且直链只取自 GitHub 返回的
+		// browser_download_url（不自己拼 URL，避免指向错误主机）。
+		char aManifestUrl[512] = "";
+		char aZipUrl[512] = "";
+		for(int j = 0; j < json_array_length(&Assets); j++)
+		{
+			const json_value &Asset = Assets[j];
+			const char *pName = JsonStr(JsonObj(Asset, "name"));
+			const char *pUrl = JsonStr(JsonObj(Asset, "browser_download_url"));
+			if(!pName || !pUrl)
+				continue;
+			if(str_comp(pName, TCLIENT_UPDATE_MANIFEST_ASSET) == 0)
+				str_copy(aManifestUrl, pUrl);
+			else if(str_comp(pName, TCLIENT_UPDATE_ZIP_ASSET) == 0)
+				str_copy(aZipUrl, pUrl);
+		}
+		if(!aManifestUrl[0] || !aZipUrl[0])
+			continue;
+		if(Best[0] >= 0 && CompareAppVersion(pVersion, aBestVersion) <= 0)
+			continue;
+		str_copy(aBestTag, pTag);
+		str_copy(aBestVersion, pVersion);
+		str_copy(aBestManifestUrl, aManifestUrl);
+		str_copy(aBestZipUrl, aZipUrl);
+		Best[0] = aVersion[0];
+		Best[1] = aVersion[1];
+		Best[2] = aVersion[2];
+	}
+
+	if(!aBestTag[0])
+	{
+		json_value_free(pJson);
+		m_UpdateState = EUpdateState::UP_TO_DATE;
+		SetUpdateStatus(TCLocalize("You are on the latest version"));
+		log_info("tclient-update", "no newer stable release (current=%s)", TCLIENT_APP_VERSION);
+		return;
+	}
+
+	str_copy(m_aUpdateReleaseTag, aBestTag);
+	str_copy(m_UpdateRelease.m_aTag, aBestTag);
+	str_copy(m_UpdateRelease.m_aVersion, aBestVersion);
+	str_copy(m_aUpdateManifestUrl, aBestManifestUrl);
+	str_copy(m_UpdateRelease.m_aZipUrl, aBestZipUrl);
+	json_value_free(pJson);
+
+	SetUpdateStatus(TCLocalize("Validating update manifest..."));
+	FetchUpdateManifest();
+}
+
+void CTClient::FetchUpdateManifest()
+{
+	m_pUpdateManifestTask = HttpGet(m_aUpdateManifestUrl);
+	m_pUpdateManifestTask->Timeout(CTimeout{15000, 0, 800, 10});
+	m_pUpdateManifestTask->IpResolve(IPRESOLVE::V4);
+	m_pUpdateManifestTask->MaxResponseSize(64 * 1024);
+	m_pUpdateManifestTask->FailOnErrorStatus(true);
+	Http()->Run(m_pUpdateManifestTask);
+}
+
+void CTClient::FinishUpdateManifest()
+{
+	json_value *pJson = m_pUpdateManifestTask->ResultJson();
+	if(!pJson || pJson->type != json_object)
+	{
+		if(pJson)
+			json_value_free(pJson);
+		UpdateFail(TCLocalize("Update check failed: the manifest is not valid JSON"));
+		return;
+	}
+
+	// 清单必须证明自己是"这个产品、这个渠道、这个平台、这个版本"的包，
+	// 否则一律不下载——防止拿到别的项目或别的平台的资产。
+	const char *pProduct = JsonStr(JsonObj(*pJson, "product"));
+	const char *pChannel = JsonStr(JsonObj(*pJson, "channel"));
+	const char *pVersion = JsonStr(JsonObj(*pJson, "version"));
+	const char *pPlatform = JsonStr(JsonObj(*pJson, "platform"));
+	const char *pAsset = JsonStr(JsonObj(*pJson, "asset"));
+	const char *pSha256 = JsonStr(JsonObj(*pJson, "sha256"));
+	const json_value &SizeValue = JsonObj(*pJson, "size");
+	const int64_t Size = JsonGetInt(SizeValue, -1);
+
+	const char *pError = nullptr;
+	if(!pProduct || str_comp(pProduct, TCLIENT_UPDATE_PRODUCT) != 0)
+		pError = TCLocalize("Update rejected: wrong product");
+	else if(!pChannel || str_comp(pChannel, TCLIENT_UPDATE_CHANNEL) != 0)
+		pError = TCLocalize("Update rejected: wrong channel");
+	else if(!pPlatform || str_comp(pPlatform, TCLIENT_UPDATE_PLATFORM) != 0)
+		pError = TCLocalize("Update rejected: wrong platform");
+	else if(!pVersion || str_comp(pVersion, m_UpdateRelease.m_aVersion) != 0)
+		pError = TCLocalize("Update rejected: version does not match the release");
+	else if(!pAsset || str_comp(pAsset, TCLIENT_UPDATE_ZIP_ASSET) != 0)
+		pError = TCLocalize("Update rejected: unexpected asset name");
+	else if(!IsHexSha256(pSha256))
+		pError = TCLocalize("Update rejected: missing or malformed SHA-256");
+	else if(Size <= 0)
+		pError = TCLocalize("Update rejected: missing file size");
+	else if(CompareAppVersion(pVersion, TCLIENT_APP_VERSION) <= 0)
+		pError = TCLocalize("Update rejected: not newer than the current version");
+
+	if(pError)
+	{
+		json_value_free(pJson);
+		UpdateFail("%s", pError);
+		return;
+	}
+
+	str_copy(m_UpdateRelease.m_aAsset, pAsset);
+	str_copy(m_UpdateRelease.m_aSha256, pSha256);
+	m_UpdateRelease.m_Size = Size;
+	m_UpdateRelease.m_Valid = true;
+	json_value_free(pJson);
+
+	m_UpdateState = EUpdateState::AVAILABLE;
+	char aStatus[128];
+	str_format(aStatus, sizeof(aStatus), TCLocalize("Version %s is available"), m_UpdateRelease.m_aVersion);
+	SetUpdateStatus(aStatus);
+	log_info("tclient-update", "update available: %s -> %s (%lld bytes)", TCLIENT_APP_VERSION, m_UpdateRelease.m_aVersion, (long long)m_UpdateRelease.m_Size);
+}
+
+void CTClient::UpdateStartDownload()
+{
+	if(!m_UpdateRelease.m_Valid)
+	{
+		UpdateFail(TCLocalize("No verified update available"));
+		return;
+	}
+	if(m_UpdateState == EUpdateState::DOWNLOADING)
+		return;
+	SHA256_DIGEST Expected;
+	if(sha256_from_str(&Expected, m_UpdateRelease.m_aSha256) != 0)
+	{
+		UpdateFail(TCLocalize("Update rejected: missing or malformed SHA-256"));
+		return;
+	}
+	ResetUpdateTasks();
+	m_UpdateState = EUpdateState::DOWNLOADING;
+	SetUpdateStatus(TCLocalize("Downloading update..."));
+	log_info("tclient-update", "downloading %s (%lld bytes)", m_UpdateRelease.m_aZipUrl, (long long)m_UpdateRelease.m_Size);
+
+	m_pUpdateDownloadTask = HttpGetFile(m_UpdateRelease.m_aZipUrl, Storage(), TCLIENT_UPDATE_ZIP_PATH, IStorage::TYPE_SAVE);
+	m_pUpdateDownloadTask->Timeout(CTimeout{20000, 0, 800, 30});
+	m_pUpdateDownloadTask->IpResolve(IPRESOLVE::V4);
+	m_pUpdateDownloadTask->FailOnErrorStatus(true);
+	m_pUpdateDownloadTask->ExpectSha256(Expected);
+	m_pUpdateDownloadTask->ValidateBeforeOverwrite(true);
+	Http()->Run(m_pUpdateDownloadTask);
+}
+
+void CTClient::FinishUpdateDownload()
+{
+	if(m_pUpdateDownloadTask->State() != EHttpState::DONE)
+	{
+		// 哈希不符或传输中断：临时文件由 HTTP 层删掉，这里只报告。
+		UpdateFail(TCLocalize("Download failed or the file is corrupted"));
+		return;
+	}
+	// 校验通过后 HTTP 层才会把临时文件搬到 update/ 下，这里确认一次大小。
+	char aPath[IO_MAX_PATH_LENGTH];
+	Storage()->GetCompletePath(IStorage::TYPE_SAVE, TCLIENT_UPDATE_ZIP_PATH, aPath, sizeof(aPath));
+	IOHANDLE File = io_open(aPath, IOFLAG_READ);
+	if(!File)
+	{
+		UpdateFail(TCLocalize("Download failed: the file could not be saved"));
+		return;
+	}
+	const int64_t Length = io_length(File);
+	io_close(File);
+	if(m_UpdateRelease.m_Size > 0 && Length != m_UpdateRelease.m_Size)
+	{
+		UpdateFail(TCLocalize("Download failed: the file size does not match the manifest"));
+		return;
+	}
+	m_UpdateState = EUpdateState::DOWNLOADED;
+	SetUpdateStatus(TCLocalize("Update downloaded, ready to install"));
+	log_info("tclient-update", "download verified: %s (%lld bytes)", aPath, (long long)Length);
+}
+
+bool CTClient::UpdateHelperExists() const
+{
+	return Storage()->FileExists(TCLIENT_UPDATE_HELPER, IStorage::TYPE_ALL) != 0;
+}
+
+void CTClient::UpdateInstallAndRestart()
+{
+	if(m_UpdateState != EUpdateState::DOWNLOADED)
+		return;
+#if !defined(CONF_FAMILY_WINDOWS)
+	UpdateFail(TCLocalize("Installing updates is only supported on Windows"));
+#else
+	char aZip[IO_MAX_PATH_LENGTH];
+	Storage()->GetCompletePath(IStorage::TYPE_SAVE, TCLIENT_UPDATE_ZIP_PATH, aZip, sizeof(aZip));
+	char aHelper[IO_MAX_PATH_LENGTH];
+	Storage()->GetBinaryPathAbsolute(TCLIENT_UPDATE_HELPER, aHelper, sizeof(aHelper));
+	if(!Storage()->FileExists(TCLIENT_UPDATE_HELPER, IStorage::TYPE_ALL))
+	{
+		char aMsg[128];
+		str_format(aMsg, sizeof(aMsg), TCLocalize("Update helper %s is missing"), TCLIENT_UPDATE_HELPER);
+		UpdateFail("%s", aMsg);
+		return;
+	}
+	// 安装目录 = 客户端 exe 所在目录；helper 只替换包内文件，不碰配置/录像/自定义字体。
+	char aExe[IO_MAX_PATH_LENGTH];
+	Storage()->GetBinaryPathAbsolute(CLIENT_EXEC PLAT_EXT, aExe, sizeof(aExe));
+	char aTarget[IO_MAX_PATH_LENGTH];
+	str_copy(aTarget, aExe);
+	char *pSlash = strrchr(aTarget, '/');
+	char *pBackslash = strrchr(aTarget, '\\');
+	char *pSep = (pBackslash > pSlash) ? pBackslash : pSlash;
+	if(pSep)
+		*pSep = '\0';
+	else
+		str_copy(aTarget, ".");
+
+	char aLog[IO_MAX_PATH_LENGTH];
+	str_format(aLog, sizeof(aLog), "%s/update/updater.log", aTarget);
+	char aPid[32];
+	str_format(aPid, sizeof(aPid), "%d", process_id());
+
+	const char *apArguments[] = {
+		"--pid", aPid,
+		"--zip", aZip,
+		"--sha256", m_UpdateRelease.m_aSha256,
+		"--target", aTarget,
+		"--restart", aExe,
+		"--log", aLog};
+	log_info("tclient-update", "starting helper: %s (pid %s, target %s)", aHelper, aPid, aTarget);
+	const PROCESS Helper = process_execute(aHelper, EShellExecuteWindowState::BACKGROUND, apArguments, std::size(apArguments));
+	if(Helper == INVALID_PROCESS)
+	{
+		UpdateFail(TCLocalize("Could not start the update helper"));
+		return;
+	}
+	SetUpdateStatus(TCLocalize("Closing the client to install the update..."));
+	m_UpdateState = EUpdateState::IDLE;
+	Client()->Quit();
+#endif
+}
+
+const char *CTClient::UpdateStateText() const
+{
+	switch(m_UpdateState)
+	{
+	case EUpdateState::IDLE: return TCLocalize("Not checked yet");
+	case EUpdateState::CHECKING: return TCLocalize("Checking for updates...");
+	case EUpdateState::UP_TO_DATE: return TCLocalize("You are on the latest version");
+	case EUpdateState::AVAILABLE: return TCLocalize("An update is available");
+	case EUpdateState::DOWNLOADING: return TCLocalize("Downloading update...");
+	case EUpdateState::DOWNLOADED: return TCLocalize("Update downloaded, ready to install");
+	case EUpdateState::FAILED: return TCLocalize("Update failed");
+	}
+	return "";
+}
+
+int CTClient::UpdateDownloadPercent() const
+{
+	if(!m_pUpdateDownloadTask)
+		return 0;
+	return std::clamp(m_pUpdateDownloadTask->Progress(), 0, 100);
+}
+
+void CTClient::PollUpdateTasks()
+{
+	if(m_pUpdateReleasesTask && m_pUpdateReleasesTask->Done())
+	{
+		if(m_pUpdateReleasesTask->State() == EHttpState::DONE)
+			FinishUpdateReleases();
+		else
+			UpdateFail(TCLocalize("Update check failed: the release list could not be downloaded"));
+		m_pUpdateReleasesTask = nullptr;
+		return;
+	}
+	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done())
+	{
+		if(m_pUpdateManifestTask->State() == EHttpState::DONE)
+			FinishUpdateManifest();
+		else
+			UpdateFail(TCLocalize("Update check failed: the manifest could not be downloaded"));
+		m_pUpdateManifestTask = nullptr;
+		return;
+	}
+	if(m_pUpdateDownloadTask && m_pUpdateDownloadTask->Done())
+	{
+		FinishUpdateDownload();
+		m_pUpdateDownloadTask = nullptr;
+	}
+}
+
+void CTClient::ConUpdateCheck(IConsole::IResult *pResult, void *pUserData)
+{
+	((CTClient *)pUserData)->UpdateCheck(true);
+}
+
+void CTClient::OnShutdown()
+{
+	ResetUpdateTasks();
 }
 
 void CTClient::SetForcedAspect()

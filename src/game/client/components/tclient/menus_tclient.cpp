@@ -30,6 +30,7 @@
 #include <game/client/ui_listbox.h>
 #include <game/client/ui_scrollregion.h>
 #include <game/localization.h>
+#include <game/version.h>
 
 #include <algorithm>
 #include <string>
@@ -1205,6 +1206,65 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		// 投影强度：胶囊/衬底与游戏画面之间的柔和过渡，0 = 完全硬边
 		Column.HSplitTop(LineSize, &Button, &Column);
 		Ui()->DoScrollbarOption(&g_Config.m_TcIslandShadow, &g_Config.m_TcIslandShadow, &Button, TCLocalize("Edge softness (drop shadow)"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+		// 胶囊配色：两个端点色 + 渐变方向。预设按钮把常用配色一次填好，
+		// 免得每次都要在取色器里手调两个色标。
+		static CButtonContainer s_IslandColorTopId, s_IslandColorBottomId, s_IslandColorAccentId;
+		static CButtonContainer s_aIslandPresetIds[4];
+		DoLine_ColorPicker(&s_IslandColorTopId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Capsule top color"), &g_Config.m_TcIslandColorTop, ColorRGBA(0.051f, 0.067f, 0.098f), false);
+		DoLine_ColorPicker(&s_IslandColorBottomId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Capsule bottom color"), &g_Config.m_TcIslandColorBottom, ColorRGBA(0.016f, 0.024f, 0.039f), false);
+		DoLine_ColorPicker(&s_IslandColorAccentId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Accent color (karaoke, progress, equalizer)"), &g_Config.m_TcIslandColorAccent, ColorRGBA(0.122f, 0.839f, 0.380f), false);
+		{
+			static std::vector<const char *> s_vIslandGradientNames;
+			if(s_vIslandGradientNames.empty())
+			{
+				s_vIslandGradientNames.push_back(TCLocalize("Flat (single color)"));
+				s_vIslandGradientNames.push_back(TCLocalize("Vertical gradient"));
+				s_vIslandGradientNames.push_back(TCLocalize("Diagonal gradient"));
+				s_vIslandGradientNames.push_back(TCLocalize("Horizontal gradient"));
+			}
+			static CUi::SDropDownState s_IslandGradientDropDownState;
+			static CScrollRegion s_IslandGradientDropDownScrollRegion;
+			s_IslandGradientDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_IslandGradientDropDownScrollRegion;
+			CUIRect GradRect;
+			Column.HSplitTop(LineSize, &GradRect, &Column);
+			GradRect.VSplitLeft(100.0f, &Label, &GradRect);
+			Ui()->DoLabel(&Label, TCLocalize("Gradient: "), FontSize, TEXTALIGN_ML);
+			const int GradNew = Ui()->DoDropDown(&GradRect, std::clamp(g_Config.m_TcIslandGradient, 0, 3), s_vIslandGradientNames.data(), s_vIslandGradientNames.size(), s_IslandGradientDropDownState);
+			if(GradNew != g_Config.m_TcIslandGradient)
+				g_Config.m_TcIslandGradient = GradNew;
+		}
+		{
+			// 预设：一行四个按钮，点了直接覆盖上面三个颜色
+			CUIRect PresetRow;
+			Column.HSplitTop(LineSize, &PresetRow, &Column);
+			struct SPreset
+			{
+				const char *m_pName;
+				unsigned m_Top, m_Bottom, m_Accent;
+				int m_Mode;
+			};
+			static const SPreset s_aPresets[] = {
+				{"Graphite", 0x9C5113, 0x9C6D07, 0x64BE7A, 1},
+				{"Abyss", 0x987D16, 0x9C790A, 0x85DB88, 1},
+				{"Twilight", 0xC0691A, 0xBD860A, 0xE9DAB3, 1},
+				{"Aurora", 0x889F10, 0x8E9908, 0x70A484, 2},
+			};
+			const float BtnW = (PresetRow.w - MarginSmall * 3.0f) / 4.0f;
+			for(int i = 0; i < 4; i++)
+			{
+				CUIRect Btn;
+				PresetRow.VSplitLeft(BtnW, &Btn, &PresetRow);
+				if(i < 3)
+					PresetRow.VSplitLeft(MarginSmall, nullptr, &PresetRow);
+				if(DoButton_Menu(&s_aIslandPresetIds[i], s_aPresets[i].m_pName, 0, &Btn))
+				{
+					g_Config.m_TcIslandColorTop = s_aPresets[i].m_Top;
+					g_Config.m_TcIslandColorBottom = s_aPresets[i].m_Bottom;
+					g_Config.m_TcIslandColorAccent = s_aPresets[i].m_Accent;
+					g_Config.m_TcIslandGradient = s_aPresets[i].m_Mode;
+				}
+			}
+		}
 		// 透明模式：单独开关 + 自己的调节项，跟在灵动岛基础选项下面
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandTransparent, TCLocalize("Transparent mode (drop the black capsule)"), &g_Config.m_TcIslandTransparent, &Column, LineSize);
 		if(g_Config.m_TcIslandTransparent)
@@ -1577,6 +1637,60 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		}
 	}
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
+	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
+
+	// ***** Updates (v1.4 起，GitHub Releases) ***** //
+	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
+	s_SectionBoxes.push_back(Column);
+	Column.HSplitTop(HeadlineHeight, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Updates"), HeadlineFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
+
+	{
+		CTClient &TC = GameClient()->m_TClient;
+		char aLine[256];
+		str_format(aLine, sizeof(aLine), TCLocalize("Current version: %s"), TCLIENT_APP_VERSION);
+		Column.HSplitTop(LineSize, &Label, &Column);
+		Ui()->DoLabel(&Label, aLine, FontSize, TEXTALIGN_ML);
+
+		Column.HSplitTop(LineSize, &Label, &Column);
+		Ui()->DoLabel(&Label, TC.UpdateStateText(), FontSize, TEXTALIGN_ML);
+
+		const CTClient::EUpdateState State = TC.GetUpdateState();
+		if(State == CTClient::EUpdateState::FAILED || State == CTClient::EUpdateState::CHECKING || State == CTClient::EUpdateState::DOWNLOADING || State == CTClient::EUpdateState::AVAILABLE || State == CTClient::EUpdateState::DOWNLOADED)
+		{
+			Column.HSplitTop(LineSize, &Label, &Column);
+			Ui()->DoLabel(&Label, TC.UpdateStatusText(), EditBoxFontSize, TEXTALIGN_ML);
+		}
+		if(State == CTClient::EUpdateState::DOWNLOADING)
+		{
+			Column.HSplitTop(LineSize, &Button, &Column);
+			Ui()->RenderProgressBar(Button, std::clamp(TC.UpdateDownloadPercent() / 100.0f, 0.0f, 1.0f));
+		}
+
+		// 三个动作：检查 / 下载 / 安装并重启。每一步都要用户点，客户端从不自己
+		// 下载或退出，避免在对局里被打断。
+		static CButtonContainer s_CheckButton, s_DownloadButton, s_InstallButton;
+		CUIRect Row;
+		Column.HSplitTop(LineSize + MarginExtraSmall, &Row, &Column);
+		CUIRect CheckRect, DownloadRect, InstallRect;
+		Row.VSplitLeft(120.0f, &CheckRect, &Row);
+		Row.VSplitLeft(MarginSmall, nullptr, &Row);
+		Row.VSplitLeft(120.0f, &DownloadRect, &Row);
+		Row.VSplitLeft(MarginSmall, nullptr, &Row);
+		Row.VSplitLeft(160.0f, &InstallRect, &Row);
+
+		if(DoButton_Menu(&s_CheckButton, TCLocalize("Check now"), 0, &CheckRect) && State != CTClient::EUpdateState::CHECKING && State != CTClient::EUpdateState::DOWNLOADING)
+			TC.UpdateCheck(true);
+		if(DoButton_Menu(&s_DownloadButton, TCLocalize("Download"), 0, &DownloadRect) && State == CTClient::EUpdateState::AVAILABLE)
+			TC.UpdateStartDownload();
+		if(DoButton_Menu(&s_InstallButton, TCLocalize("Install and restart"), 0, &InstallRect) && State == CTClient::EUpdateState::DOWNLOADED)
+			TC.UpdateInstallAndRestart();
+
+		Column.HSplitTop(MarginSmall, nullptr, &Column);
+		Column.HSplitTop(LineSize, &Label, &Column);
+		Ui()->DoLabel(&Label, TCLocalize("Updates are downloaded from the public GitHub releases of this client. Your config, demos and custom fonts are not touched."), EditBoxFontSize, TEXTALIGN_TL);
+	}
 	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
 
 	// ***** END OF PAGE 1 SETTINGS ***** //
@@ -2627,7 +2741,7 @@ void CMenus::RenderSettingsTClientProfiles(CUIRect MainView)
 			Flag = {Flag.x, Flag.y + (Flag.h - 25.0f) / 2.0f, Flag.w, 25.0f};
 			if(Profile.m_CountryFlag == -2)
 				RenderCross(Flag, 20.0f);
-			else
+			else if(!GameClient()->StreamerDefaultFlags())
 				GameClient()->m_CountryFlags.Render(Profile.m_CountryFlag, ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), Flag.x, Flag.y, Flag.w, Flag.h);
 		}
 		Rect.VSplitRight(5.0f, &Rect, nullptr);
@@ -3385,7 +3499,10 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerFilterWords, TCLocalize("Filter sensitive words (chat, names, clans)"), &g_Config.m_MeStreamerFilterWords, &LeftView, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerHideNames, TCLocalize("Hide non-friend names (show client ID) and clans"), &g_Config.m_MeStreamerHideNames, &LeftView, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerHideSkins, TCLocalize("Non-friends use default skin"), &g_Config.m_MeStreamerHideSkins, &LeftView, LineSize);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerDefaultFlags, TCLocalize("Hide country flags everywhere"), &g_Config.m_MeStreamerDefaultFlags, &LeftView, LineSize);
+	// 国旗不再是子开关：主播模式开启时始终不画（含记分板、名牌、服务器浏览器、
+	// 皮肤资料卡），避免"开了主播模式国旗还露"。
+	LeftView.HSplitTop(LineSize, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Country flags are always hidden while streamer mode is on"), FontSize, TEXTALIGN_ML);
 
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
 	LeftView.HSplitTop(LineSize + MarginExtraSmall, &Button, &LeftView);

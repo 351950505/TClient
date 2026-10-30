@@ -376,7 +376,7 @@ MACRO_CONFIG_INT(MeStreamerMode, me_streamer_mode, 0, 0, 1, CFGFLAG_CLIENT | CFG
 MACRO_CONFIG_INT(MeStreamerFilterWords, me_streamer_filter_words, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Streamer mode: filter sensitive words")
 MACRO_CONFIG_INT(MeStreamerHideNames, me_streamer_hide_names, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Streamer mode: replace non-friend names with client ID and hide clans")
 MACRO_CONFIG_INT(MeStreamerHideSkins, me_streamer_hide_skins, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Streamer mode: non-friends use default skin")
-MACRO_CONFIG_INT(MeStreamerDefaultFlags, me_streamer_default_flags, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Streamer mode: show default flag in scoreboard")
+MACRO_CONFIG_INT(MeStreamerDefaultFlags, me_streamer_default_flags, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Streamer mode: hide country flags everywhere (no flag is drawn)")
 MACRO_CONFIG_STR(MeStreamerWordsFile, me_streamer_words_file, 1024, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Streamer mode: extra word list file (one word per line)")
 
 // ME page: per-category message muting
@@ -390,6 +390,13 @@ MACRO_CONFIG_INT(TcIslandOffsetY, tc_island_offset_y, 0, -2000, 2000, CFGFLAG_CL
 MACRO_CONFIG_INT(TcIslandTransparent, tc_island_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode (no black capsule, outlined text)")
 MACRO_CONFIG_INT(TcIslandTransparentTextShadow, tc_island_transparent_text_shadow, 85, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode text outline strength (%)")
 MACRO_CONFIG_INT(TcIslandShadow, tc_island_shadow, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island drop shadow strength under the capsule (softens the hard edge against the game)")
+// 胶囊配色：两个端点色构成线性渐变，方向由 tc_island_gradient 决定（0=纯色）。
+// 默认上浅下深，是一条极轻的竖向渐变——观感与旧的近黑平色几乎一致，但多了层次。
+MACRO_CONFIG_COL(TcIslandColorTop, tc_island_color_top, 10244371, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island capsule gradient start color (#0D1119)")
+MACRO_CONFIG_COL(TcIslandColorBottom, tc_island_color_bottom, 10251527, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island capsule gradient end color (#04060A)")
+MACRO_CONFIG_INT(TcIslandGradient, tc_island_gradient, 1, 0, 3, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island capsule gradient direction (0=flat, 1=vertical, 2=diagonal, 3=horizontal)")
+// 强调色：卡拉OK已唱部分、底部进度轨、右侧等化器共用这一个颜色。
+MACRO_CONFIG_COL(TcIslandColorAccent, tc_island_color_accent, 6602362, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island accent color for karaoke fill, progress rail and equalizer (#1FD661)")
 MACRO_CONFIG_INT(TcPingwheelVolume, tc_pingwheel_volume, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal sound volume (%)")
 MACRO_CONFIG_INT(TcPingwheelSoundRange, tc_pingwheel_sound_range, 600, 0, 10000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel sound audible range in world units (0 = global, no falloff)")
 MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel fallback channel (no relay): 1 = emoticons (visible to all, only TClient decodes), 0 = local only")

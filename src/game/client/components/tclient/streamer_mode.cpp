@@ -46,7 +46,10 @@ bool CGameClient::ShouldHideStreamerSkin(int ClientId) const
 
 bool CGameClient::StreamerDefaultFlags() const
 {
-	return StreamerModeActive() && g_Config.m_MeStreamerDefaultFlags != 0;
+	// 国旗是身份信息的一部分：主播模式一开就必须整块不画。
+	// 旧实现挂在 me_streamer_default_flags 子开关上且默认关闭，于是"开了主播模式
+	// 国旗还露"；即使勾上也只画一张灰色默认旗，反而更显眼。现在直接跟随主开关。
+	return StreamerModeActive();
 }
 
 bool CGameClient::StreamerFilterText(char *pText) const

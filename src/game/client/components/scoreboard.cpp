@@ -885,9 +885,10 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 				Player.m_Clan.Render(TextRender(), vec2(ClanOffset + (ClanLength - std::min(Player.m_Clan.Width(), ClanLength)) / 2.0f, TextY), ClanColor);
 			}
 
-			// country flag
-			GameClient()->m_CountryFlags.Render(GameClient()->StreamerDefaultFlags() ? -1 : ClientData.m_Country, ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f),
-				CountryOffset, Row.y + (Spacing + TeeSizeMod * 5.0f) / 2.0f, CountryLength, Row.h - Spacing - TeeSizeMod * 5.0f);
+			// country flag（主播模式下整格不画：传 -1 只会画一张灰旗，仍然暴露"这里原本有国旗"）
+			if(!GameClient()->StreamerDefaultFlags())
+				GameClient()->m_CountryFlags.Render(ClientData.m_Country, ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f),
+					CountryOffset, Row.y + (Spacing + TeeSizeMod * 5.0f) / 2.0f, CountryLength, Row.h - Spacing - TeeSizeMod * 5.0f);
 
 			// ping
 			ColorRGBA PingColor = TextRender()->DefaultTextColor();

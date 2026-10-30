@@ -44,9 +44,9 @@ private:
 	{
 		char m_aUid[48] = "";
 		NETADDR m_Addr = {};
-		float m_LastSeen = -1e9f;   // 最近一次收到 PEER 推送
+		float m_LastSeen = -1e9f;   // 最近一次收到 PEER 推送或探针
 		float m_LastDirect = -1e9f; // 最近一次收到该地址的直连包
-		float m_LastProbe = -1e9f;  // 最近一次向该地址打洞
+		float m_LastProbe = -1e9f;  // 最近一次向该地址打洞（主动和回复共用）
 	};
 	struct SQueued
 	{
@@ -62,6 +62,19 @@ private:
 	float m_LastServerReply = -1e9f;
 	float m_LastRegTime = -1e9f;
 	float m_LastSendTime = -1e9f;
+	float m_LastSocketAttempt = -1e9f;
+	float m_LastRenderTime = -1e9f;
+	char m_aGameAddr[64] = "";
+	char m_aFailure[64] = "等待注册";
+	// 诊断日志去重表：按"原因"分别记住上次的细节，只有该原因的细节变化时才写
+	// F1。心跳成功路径不再每 10s 刷屏，但首次注册/切服/掉线恢复仍各留一条。
+	struct SLogMemo
+	{
+		char m_aReason[32] = "";
+		char m_aDetail[96] = "";
+	};
+	SLogMemo m_aLogMemo[8] = {};
+	int m_NumLogMemo = 0;
 	std::vector<SQueued> m_vSendQueue; // 待发载荷
 	std::vector<SPeer> m_vPeers;       // 同服成员（P2P 候选）
 	char m_aLastRecvPayload[64] = "";  // 收到的上一条载荷（P2P+中转去重）
@@ -72,7 +85,9 @@ private:
 	void HandlePeer(const char *pUid, const char *pAddrStr);
 	bool PeerDirect(const SPeer &Peer) const;
 	bool AllPeersDirect() const;
-	void SendReg();
+	bool SendReg();
+	// 只在诊断原因变化时输出日志；同一原因重复发生不再写 F1（避免心跳刷屏）。
+	void LogOnce(const char *pReason, const char *pDetail);
 	void PumpRecv();
 	void PumpSend();
 };

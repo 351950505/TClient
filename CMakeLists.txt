@@ -3518,6 +3518,7 @@ if(TOOLS)
     map_test.cpp
     packetgen.cpp
     stun.cpp
+    tclient_updater.cpp
     twping.cpp
     unicode_confusables.cpp
     uuid.cpp
@@ -3528,6 +3529,10 @@ if(TOOLS)
     if(T MATCHES "\\.cpp$")
       string(REGEX REPLACE "\\.cpp$" "" TOOL "${T}")
       if(TOOL MATCHES "^map_render$" AND NOT EGL_FOUND)
+        continue()
+      endif()
+      # TClientUpdater is added as its own target further down, it must not link the engine.
+      if(TOOL MATCHES "^tclient_updater$")
         continue()
       endif()
       set(TOOL_DEPS ${DEPS})
@@ -3595,6 +3600,23 @@ if(TOOLS)
   list(APPEND TARGETS_LINK ${TARGETS_TOOLS})
 
   add_custom_target(tools DEPENDS ${TARGETS_TOOLS})
+endif()
+
+# TClientUpdater: install helper for the TClient autoupdater. It is a plain Win32 program that
+# only needs zlib, so it is built separately from the tools above (which link the whole engine).
+if(TARGET_OS STREQUAL "windows")
+  add_executable(TClientUpdater
+    src/tools/tclient_updater.cpp
+    ${ZLIB_DEP}
+  )
+  target_include_directories(TClientUpdater SYSTEM PRIVATE ${ZLIB_INCLUDE_DIRS})
+  target_link_libraries(TClientUpdater ${ZLIB_LIBRARIES})
+  if(MINGW)
+    # wmain needs the unicode entry point with MinGW.
+    target_link_options(TClientUpdater PRIVATE -municode)
+  endif()
+  list(APPEND TARGETS_OWN TClientUpdater)
+  list(APPEND TARGETS_LINK TClientUpdater)
 endif()
 add_custom_target(everything DEPENDS ${TARGETS_OWN})
 
@@ -3962,6 +3984,10 @@ if(TARGET game-server)
   list(APPEND CPACK_TARGETS game-server)
 endif()
 list(APPEND CPACK_TARGETS ${TARGET_TOOLS})
+# TClientUpdater must ship next to the client so the autoupdater can spawn it.
+if(TARGET TClientUpdater)
+  list(APPEND CPACK_TARGETS TClientUpdater)
+endif()
 
 if(STEAMAPI_KIND STREQUAL SHARED)
   list(APPEND CPACK_TARGETS ${TARGET_STEAMAPI})

@@ -25,6 +25,13 @@ extern const char *GIT_SHORTREV_HASH;
 #define TCLIENT_VERSION "10.9.0"
 #endif
 
+// TClient independent release version, used by the client-side auto-update.
+// The matching git tag is "v" TCLIENT_APP_VERSION (e.g. v1.4.0).
+// This is unrelated to TCLIENT_VERSION / the game protocol version above.
+#ifndef TCLIENT_APP_VERSION
+#define TCLIENT_APP_VERSION "1.4.0"
+#endif
+
 // custom
 #define CLIENT_NAME "TClient"
 #define CLIENT_RELEASE_VERSION TCLIENT_VERSION

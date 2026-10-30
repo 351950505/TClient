@@ -687,6 +687,51 @@ public:
 		m_pGraphics->TextureClear();
 	}
 
+	// Same silhouette blit with four independent corner colors, which is how the
+	// capsule gets a gradient body. The baked texture is white RGB + coverage
+	// alpha, so vertex color modulates it exactly like SetColor does.
+	void DrawShape4(float X, float Y, float W, float H, float Rounding, int Corners,
+		const ColorRGBA &TL, const ColorRGBA &TR, const ColorRGBA &BL, const ColorRGBA &BR)
+	{
+		const int IW = std::max(1, (int)std::lround(W));
+		const int IH = std::max(1, (int)std::lround(H));
+		const IGraphics::CTextureHandle Tex = EnsureShapeTexture(IW * 2, IH * 2, Rounding * 2.0f, Corners, 0.0f);
+		if(!Tex.IsValid())
+			return;
+		m_pGraphics->TextureSet(Tex);
+		m_pGraphics->QuadsBegin();
+		m_pGraphics->SetColor4(TL, TR, BL, BR);
+		m_pGraphics->QuadsSetSubset(0.0f, 0.0f, 1.0f, 1.0f);
+		const IGraphics::CQuadItem Quad(std::lround(X), std::lround(Y), (float)IW, (float)IH);
+		m_pGraphics->QuadsDrawTL(&Quad, 1);
+		m_pGraphics->QuadsEnd();
+		m_pGraphics->TextureClear();
+	}
+
+	// 胶囊底色渐变。归一化基准是胶囊外框（而不是正在画的那一块），这样端帽和
+	// 中间矩形各自取四角颜色时都落在同一个线性函数上，拼接处严格连续。
+	struct SGradient
+	{
+		int m_Mode = 0; // 0=纯色 1=纵向 2=对角 3=横向
+		ColorRGBA m_Start = ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f);
+		ColorRGBA m_End = ColorRGBA(0.0f, 0.0f, 0.0f, 1.0f);
+		float m_X = 0.0f, m_Y = 0.0f, m_W = 1.0f, m_H = 1.0f;
+
+		ColorRGBA At(float Px, float Py) const
+		{
+			if(m_Mode == 0)
+				return m_Start;
+			const float U = std::clamp(m_W > 0.0f ? (Px - m_X) / m_W : 0.0f, 0.0f, 1.0f);
+			const float V = std::clamp(m_H > 0.0f ? (Py - m_Y) / m_H : 0.0f, 0.0f, 1.0f);
+			const float T = m_Mode == 1 ? V : m_Mode == 2 ? (U + V) * 0.5f : U;
+			return ColorRGBA(
+				m_Start.r + (m_End.r - m_Start.r) * T,
+				m_Start.g + (m_End.g - m_Start.g) * T,
+				m_Start.b + (m_End.b - m_Start.b) * T,
+				m_Start.a + (m_End.a - m_Start.a) * T);
+		}
+	};
+
 	// 投影纹理：把胶囊剪影光栅化成一层覆盖率遮罩，再做三遍盒式模糊（≈ 高斯），
 	// 得到向外渐隐的柔和边。模糊本身提供了过渡的灰度，所以这里按 1x 烘焙——
 	// 纹理尺寸直接等于显示尺寸，比实体形状的 2x 烘焙省四倍显存。
@@ -820,12 +865,67 @@ public:
 			m_pGraphics->DrawRect(FillX, (float)std::lround(Y), FillW, (float)std::lround(H), Color, IGraphics::CORNER_NONE, 0.0f);
 	}
 
+	// 渐变版胶囊：端帽和中间矩形各自取四角颜色，四角都来自同一个线性函数，
+	// 因此三块拼起来看不出接缝（分段线性在共享边上取值一致）。
+	void DrawPillGrad(float X, float Y, float W, float H, int Corners, const SGradient &Grad)
+	{
+		const float CapW = H * 0.5f;
+		if(W <= CapW * 2.0f + 0.5f)
+		{
+			DrawShape4(X, Y, W, H, H * 0.5f, Corners,
+				Grad.At(X, Y), Grad.At(X + W, Y), Grad.At(X, Y + H), Grad.At(X + W, Y + H));
+			return;
+		}
+		const int LeftCorners = Corners & (IGraphics::CORNER_TL | IGraphics::CORNER_BL);
+		const int RightCorners = Corners & (IGraphics::CORNER_TR | IGraphics::CORNER_BR);
+		const int LeftX = (int)std::lround(X);
+		const int CapWi = (int)std::lround(CapW);
+		const int RightX = (int)std::lround(X + W - CapW);
+		DrawShape4(X, Y, CapW, H, H * 0.5f, LeftCorners,
+			Grad.At(X, Y), Grad.At(X + CapW, Y), Grad.At(X, Y + H), Grad.At(X + CapW, Y + H));
+		DrawShape4(X + W - CapW, Y, CapW, H, H * 0.5f, RightCorners,
+			Grad.At(X + W - CapW, Y), Grad.At(X + W, Y), Grad.At(X + W - CapW, Y + H), Grad.At(X + W, Y + H));
+		const float FillX = (float)(LeftX + CapWi);
+		const float FillW = (float)(RightX - (LeftX + CapWi));
+		if(FillW > 0.0f)
+		{
+			const float FillY = (float)std::lround(Y);
+			const float FillH = (float)std::lround(H);
+			m_pGraphics->DrawRect4(FillX, FillY, FillW, FillH,
+				Grad.At(FillX, FillY), Grad.At(FillX + FillW, FillY),
+				Grad.At(FillX, FillY + FillH), Grad.At(FillX + FillW, FillY + FillH),
+				IGraphics::CORNER_NONE, 0.0f);
+		}
+	}
+
+	// 从配置构造胶囊渐变。Grad 的归一化基准是整条胶囊，端帽和中间矩形共用，
+	// 因此三块拼接处取值一致、不会出现色阶。
+	static SGradient MakeGradient(float X, float Y, float W, float H)
+	{
+		SGradient Grad;
+		Grad.m_Mode = std::clamp(g_Config.m_TcIslandGradient, 0, 3);
+		Grad.m_Start = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcIslandColorTop));
+		Grad.m_End = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcIslandColorBottom));
+		Grad.m_X = X;
+		Grad.m_Y = Y;
+		Grad.m_W = W;
+		Grad.m_H = H;
+		return Grad;
+	}
+
+	// 强调色：卡拉 OK 已唱部分、进度轨、等化器。alpha 由调用点决定。
+	static ColorRGBA AccentColor(float Alpha)
+	{
+		ColorRGBA Col = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcIslandColorAccent));
+		Col.a = Alpha;
+		return Col;
+	}
+
 	// Rounded panel with a 1 px light rim. The rim is a full-size tinted blit and
 	// the body is drawn 1 px smaller on top, so the outermost pixel stays visible
 	// as a hairline that follows the antialiased silhouette.
-	void DrawPanel(float X, float Y, float W, float H, float Rounding, int Corners, bool Rim)
+	void DrawPanel(float X, float Y, float W, float H, float Rounding, int Corners, bool Rim, const SGradient &Grad)
 	{
-		const ColorRGBA Body(0.027f, 0.031f, 0.039f, 1.0f);
 		// 投影先在胶囊和游戏画面之间铺一段渐变。纯黑不透明体直接压在高饱和的
 		// 游戏画面上时，交界只有一条硬边，看起来像贴上去的贴纸；投影给了它
 		// 悬浮的层次，边缘就不再"突兀"。偏移 +Y 假定光从上方来。
@@ -839,11 +939,11 @@ public:
 		if(Rim)
 		{
 			DrawPill(X, Y, W, H, Corners, ColorRGBA(1.0f, 1.0f, 1.0f, 0.07f));
-			DrawPill(X + 1.0f, Y + 1.0f, W - 2.0f, H - 2.0f, Corners, Body);
+			DrawPillGrad(X + 1.0f, Y + 1.0f, W - 2.0f, H - 2.0f, Corners, Grad);
 		}
 		else
 		{
-			DrawPill(X, Y, W, H, Corners, Body);
+			DrawPillGrad(X, Y, W, H, Corners, Grad);
 		}
 	}
 
@@ -2396,15 +2496,13 @@ public:
 		// 已核验：现有内容边距（时钟 19px / 封面 15px）在半圆端内仍然安全，布局无需收缩。
 		const float PillRounding = Height * 0.5f;
 
-		// ---- iOS Dynamic Island black capsule style -------------------------
-		// A pure-black pill glued to the very top edge of the screen, horizontally
-		// centred, with only the two bottom corners rounded (top edge sits flush
-		// against the screen top). Content is either the song title or a single
-		// karaoke lyric line, whichever the user has enabled.
-
-		const ColorRGBA Black(0.0f, 0.0f, 0.0f, 1.0f);
-		const ColorRGBA White(1.0f, 1.0f, 1.0f, 1.0f);
-		const ColorRGBA Green(0.12f, 0.84f, 0.38f, 1.0f);
+		// ---- Dynamic Island capsule ------------------------------------------
+		// A rounded pill at the top edge of the screen, horizontally centred; in
+		// notch style only the two bottom corners are rounded and the top edge sits
+		// flush against the screen top. The body colour comes from the user's two
+		// gradient stops (tc_island_color_top / _bottom) and the accent colour drives
+		// the karaoke fill, the progress rail and the equaliser. Content is either
+		// the song title or a single karaoke lyric line, whichever is enabled.
 
 		// idle: no track playing. Collapse to a compact capsule that shows only the
 		// game round timer; with no timer either (menus, demo playback, a server
@@ -2433,7 +2531,8 @@ public:
 
 			const float IdleX = std::clamp((ScreenW - IdleW) * 0.5f + OffsetX, 8.0f, std::max(8.0f, ScreenW - IdleW - 8.0f));
 			if(g_Config.m_TcIslandTransparent == 0)
-				DrawPanel(IdleX, PillY, IdleW, IdleH, PillRounding, PillCorners, false);
+				DrawPanel(IdleX, PillY, IdleW, IdleH, PillRounding, PillCorners, false,
+					MakeGradient(IdleX, PillY, IdleW, IdleH));
 			else
 			{
 				// 透明模式的空闲态：同样的渐隐衬底，否则计时文字孤零零地浮在画面上
@@ -2572,7 +2671,8 @@ public:
 		}
 		else
 		{
-			DrawPanel(X, PillY, Width, Height, PillRounding, PillCorners, !NotchStyle);
+			DrawPanel(X, PillY, Width, Height, PillRounding, PillCorners, !NotchStyle,
+				MakeGradient(X, PillY, Width, Height));
 		}
 
 		// ---- bottom progress rail -------------------------------------------
@@ -2619,7 +2719,7 @@ public:
 				m_pGraphics->DrawRect(RailX, RailY, RailW, RailH,
 					ColorRGBA(1.0f, 1.0f, 1.0f, 0.08f), IGraphics::CORNER_NONE, 0.0f);
 				m_pGraphics->DrawRect(RailX, RailY, RailW * Frac, RailH,
-					ColorRGBA(0.118f, 0.843f, 0.376f, 0.9f), IGraphics::CORNER_NONE, 0.0f);
+					AccentColor(0.9f), IGraphics::CORNER_NONE, 0.0f);
 				m_pGraphics->ClipDisable();
 			}
 		}
@@ -2745,7 +2845,7 @@ public:
 				const float SnappedH = std::max(2.0f, std::round(BarH * 0.5f) * 2.0f);
 				DrawShape(EqCellX + EqPadL + i * (EqBarW + EqBarGap), EqY + (EqH - SnappedH), EqBarW, SnappedH,
 					EqBarW * 0.5f, IGraphics::CORNER_ALL,
-					ColorRGBA(0.12f, 0.84f, 0.38f, m_ClockPlaying ? 0.85f : 0.35f));
+					AccentColor(m_ClockPlaying ? 0.85f : 0.35f));
 			}
 		}
 
@@ -2772,7 +2872,7 @@ public:
 			}
 
 			const ColorRGBA ColorUnsung(1.0f, 1.0f, 1.0f, 0.95f);       // not yet sung -> white
-			const ColorRGBA ColorSung(0.12f, 0.84f, 0.38f, 1.0f);        // sung / singing -> green
+			const ColorRGBA ColorSung = AccentColor(1.0f);                // sung / singing -> accent
 
 			const SLyricLine &Line = m_vLines[LyricIndex];
 			const bool HasWords = !Line.m_vWords.empty();

@@ -336,12 +336,6 @@ Reset position of mouse when opening bindwheel
 Warlist
 == 敌对列表
 
-Name
-== 名称
-
-Clan
-== 战队
-
 War Entries
 == 敌对条目
 
@@ -869,9 +863,6 @@ No changes since last save
 == 自上次保存以来没有更改
 
 [Outlines]
-Width
-== 宽度
-
 Kill
 == 即死轮廓
 
@@ -976,9 +967,6 @@ Automatically translate incoming messages
 Backend: 
 == 后端：
 
-Custom Font: 
-== 自定义字体：
-
 Enable Deleting
 == 启用删除
 
@@ -996,9 +984,6 @@ Fast Input Amount
 
 Fast input mode
 == 快速输入模式
-
-Hammer Mode: 
-== 锤子模式：
 
 Hook Amount
 == 钩锁数量
@@ -1044,12 +1029,6 @@ Translate outgoing to:
 
 Translate your outgoing messages
 == 翻译你发出的消息
-
- seconds
-==  秒
-
- seconds (never)
-==  秒（永不）
 
 Ancient input others
 == Ancient 输入（他人）
@@ -1200,3 +1179,135 @@ Pinging too fast, %.0f s until you can ping again
 
 Max %d signals per 10 s, sending blocked for %.0f s
 == 10 秒内最多发送 %d 个信号，已限制发送 %.0f 秒
+
+Capsule top color
+== 胶囊渐变起点色
+
+Capsule bottom color
+== 胶囊渐变终点色
+
+Accent color (karaoke, progress, equalizer)
+== 强调色（歌词填充 / 进度轨 / 等化器）
+
+Gradient: 
+== 渐变方向：
+
+Flat (single color)
+== 纯色
+
+Vertical gradient
+== 纵向渐变
+
+Diagonal gradient
+== 对角渐变
+
+Horizontal gradient
+== 横向渐变
+
+Updates
+== 客户端更新
+
+Current version: %s
+== 当前版本：%s
+
+Check now
+== 立即检查
+
+Download
+== 下载
+
+Install and restart
+== 安装并重启
+
+Not checked yet
+== 尚未检查
+
+Checking for updates...
+== 正在检查更新……
+
+You are on the latest version
+== 已是最新版本
+
+An update is available
+== 有可用更新
+
+Version %s is available
+== 发现新版本 %s
+
+Validating update manifest...
+== 正在校验更新清单……
+
+Downloading update...
+== 正在下载更新……
+
+Update downloaded, ready to install
+== 更新已下载，可以安装
+
+Update failed
+== 更新失败
+
+Closing the client to install the update...
+== 正在关闭客户端以安装更新……
+
+Updates are downloaded from the public GitHub releases of this client. Your config, demos and custom fonts are not touched.
+== 更新来自本客户端的公开 GitHub Releases。配置、录像和自定义字体不会被改动。
+
+Update check failed: could not read the release list
+== 检查更新失败：无法读取版本列表
+
+Update check failed: the release list could not be downloaded
+== 检查更新失败：版本列表下载失败
+
+Update check failed: the manifest is not valid JSON
+== 检查更新失败：更新清单格式错误
+
+Update check failed: the manifest could not be downloaded
+== 检查更新失败：更新清单下载失败
+
+Update rejected: wrong product
+== 已拒绝更新：产品标识不匹配
+
+Update rejected: wrong channel
+== 已拒绝更新：渠道不匹配
+
+Update rejected: wrong platform
+== 已拒绝更新：平台不匹配
+
+Update rejected: version does not match the release
+== 已拒绝更新：版本与发行不一致
+
+Update rejected: unexpected asset name
+== 已拒绝更新：资产名称异常
+
+Update rejected: missing or malformed SHA-256
+== 已拒绝更新：缺少或非法的 SHA-256
+
+Update rejected: missing file size
+== 已拒绝更新：缺少文件大小
+
+Update rejected: not newer than the current version
+== 已拒绝更新：版本不比当前版本新
+
+No verified update available
+== 没有已通过校验的更新
+
+Download failed or the file is corrupted
+== 下载失败或文件已损坏
+
+Download failed: the file could not be saved
+== 下载失败：文件无法保存
+
+Download failed: the file size does not match the manifest
+== 下载失败：文件大小与清单不一致
+
+Could not start the update helper
+== 无法启动更新助手
+
+Update helper %s is missing
+== 更新助手 %s 缺失
+
+Installing updates is only supported on Windows
+== 仅 Windows 支持自动安装更新
+
+Country flags are always hidden while streamer mode is on
+== 开启主播模式时始终隐藏国旗

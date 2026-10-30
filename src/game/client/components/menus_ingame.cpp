@@ -585,8 +585,9 @@ void CMenus::RenderPlayers(CUIRect MainView)
 		GameClient()->StreamerClan(Index, aClanBuf, sizeof(aClanBuf));
 		Ui()->DoLabel(&Button, aClanBuf, 14.0f, TEXTALIGN_ML);
 
-		GameClient()->m_CountryFlags.Render(GameClient()->StreamerDefaultFlags() ? -1 : CurrentClient.m_Country, ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f),
-			Button2.x, Button2.y + Button2.h / 2.0f - 0.75f * Button2.h / 2.0f, 1.5f * Button2.h, 0.75f * Button2.h);
+		if(!GameClient()->StreamerDefaultFlags())
+			GameClient()->m_CountryFlags.Render(CurrentClient.m_Country, ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f),
+				Button2.x, Button2.y + Button2.h / 2.0f - 0.75f * Button2.h / 2.0f, 1.5f * Button2.h, 0.75f * Button2.h);
 
 		// ignore chat button
 		Row.HMargin(2.0f, &Row);

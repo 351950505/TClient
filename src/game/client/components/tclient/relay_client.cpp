@@ -101,8 +101,10 @@ void CRelayClient::PumpRecv()
 void CRelayClient::PumpSend()
 {
 	const float Now = Client()->LocalTime();
-	// 心跳：每 10s 重注册（信令按 120s 过期）
-	if(Now - m_LastRegTime > 10.0f)
+	// 心跳：在线时每 10s 重注册（信令按 120s 过期）；离线（REG_OK 丢失/网络
+	// 抖动）时 2s 快速重试，单次回执丢失不再造成长达 10s 的"未连接"窗口
+	const float RegInterval = Online() ? 10.0f : 2.0f;
+	if(Now - m_LastRegTime > RegInterval)
 		SendReg();
 	if(m_vSendQueue.empty())
 		return;

@@ -390,7 +390,7 @@ void CPingWheel::Ping(int Signal, vec2 WorldPos)
 		{
 			// 表情在服务器侧有活体硬检查（旁观者无 character 直接丢弃），
 			// 部分服务器对旁观者聊天/私聊限制极严（实测：私聊 4 条即封）
-			GameClient()->m_Chat.Echo("旁观/死亡状态：信令未连接，信号仅本地显示");
+			GameClient()->m_Chat.Echo("旁观/死亡状态：信令暂未连接（自动重试中），信号仅本地显示");
 			AddMarker(Signal, WorldPos);
 			PlaySignalSound(Signal, WorldPos);
 			return;

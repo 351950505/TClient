@@ -29,7 +29,7 @@ extern const char *GIT_SHORTREV_HASH;
 // The matching git tag is "v" TCLIENT_APP_VERSION (e.g. v1.4.0).
 // This is unrelated to TCLIENT_VERSION / the game protocol version above.
 #ifndef TCLIENT_APP_VERSION
-#define TCLIENT_APP_VERSION "1.7.7"
+#define TCLIENT_APP_VERSION "1.7.8"
 #endif
 
 // custom

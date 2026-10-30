@@ -67,45 +67,55 @@ static constexpr float TCLIENT_UPDATE_FIRST_CHECK_DELAY = 12.0f;
 static constexpr int64_t TCLIENT_UPDATE_CHECK_INTERVAL = 6 * 60 * 60;
 
 // 严格三段版本号：任何一段不是纯数字就视为无效（不用 atoi 的宽松解析）。
-static bool ParseAppVersion(const char *pVersion, int aOut[3])
+// 版本号：任意段数（1.7.8 / 1.7.8.1 / 1.7.8.1.2 都合法），
+// 逐段整数比较，缺失段按 0 处理。每段最多 6 位，超出视为非法。
+static constexpr int APP_VERSION_MAX_SEGMENTS = 8;
+
+static int ParseAppVersion(const char *pVersion, int *pOut, int MaxSegments)
 {
-	aOut[0] = aOut[1] = aOut[2] = 0;
+	for(int i = 0; i < MaxSegments; i++)
+		pOut[i] = 0;
 	if(!pVersion || !pVersion[0])
-		return false;
+		return -1;
 	const char *p = pVersion;
-	for(int i = 0; i < 3; i++)
+	int Segment = 0;
+	for(;;)
 	{
+		if(Segment >= MaxSegments)
+			return -1;
 		const char *pStart = p;
 		while(*p >= '0' && *p <= '9')
 			p++;
-		if(p == pStart)
-			return false;
-		if(p - pStart > 6)
-			return false;
+		if(p == pStart || p - pStart > 6)
+			return -1;
 		int Value = 0;
 		for(const char *q = pStart; q < p; q++)
 			Value = Value * 10 + (*q - '0');
-		aOut[i] = Value;
-		if(i < 2)
-		{
-			if(*p != '.')
-				return false;
-			p++;
-		}
+		pOut[Segment++] = Value;
+		if(*p == '\0')
+			break;
+		if(*p != '.')
+			return -1;
+		p++;
 	}
-	return *p == '\0';
+	return Segment;
 }
 
-// >0 表示 A 比 B 新
+// >0 表示 A 比 B 新（段数不同时，多出的段与 0 比较）
 static int CompareAppVersion(const char *pA, const char *pB)
 {
-	int a[3], b[3];
-	if(!ParseAppVersion(pA, a) || !ParseAppVersion(pB, b))
+	int a[APP_VERSION_MAX_SEGMENTS], b[APP_VERSION_MAX_SEGMENTS];
+	const int CountA = ParseAppVersion(pA, a, APP_VERSION_MAX_SEGMENTS);
+	const int CountB = ParseAppVersion(pB, b, APP_VERSION_MAX_SEGMENTS);
+	if(CountA < 0 || CountB < 0)
 		return 0;
-	for(int i = 0; i < 3; i++)
+	const int Count = CountA > CountB ? CountA : CountB;
+	for(int i = 0; i < Count; i++)
 	{
-		if(a[i] != b[i])
-			return a[i] > b[i] ? 1 : -1;
+		const int Left = i < CountA ? a[i] : 0;
+		const int Right = i < CountB ? b[i] : 0;
+		if(Left != Right)
+			return Left > Right ? 1 : -1;
 	}
 	return 0;
 }

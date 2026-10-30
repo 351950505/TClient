@@ -379,36 +379,30 @@ void CPingWheel::Ping(int Signal, vec2 WorldPos)
 	const bool Alive = GameClient()->m_Snap.m_pLocalCharacter != nullptr;
 	char aBuf[24];
 	EncodeBinary(Signal, (int)std::round(WorldPos.x), (int)std::round(WorldPos.y), aBuf);
-	if(g_Config.m_TcRelay && GameClient()->m_RelayClient.Online())
+
+	// 通道优先级：
+	//   活着  → 表情通道（若开）：对在场玩家可见但有活体要求；表情关闭才用信令
+	//   旁观  → 信令通道：P2P 直连优先（ServerRelay 内部自动做），打不通走中转
+	const bool UseEmote = Alive && g_Config.m_TcPingwheelEmote;
+	const bool UseRelay = g_Config.m_TcRelay && GameClient()->m_RelayClient.Available();
+	if(UseEmote)
 	{
-		// 信令广播：旁观/死亡也能发，不占用游戏服的聊天与表情，原版玩家无感知
+		// 帧头+9 个表情全服广播，间隔 tc_pingwheel_emote_ms（默认 60ms，
+		// 必须 ≥ 服务器表情冷却）。对所有人可见但只有 TClient 知道语义。
+		EmotePing(Signal, (int)std::round(WorldPos.x), (int)std::round(WorldPos.y));
+	}
+	else if(UseRelay)
+	{
+		// 信令：旁观/死亡也能发，不占用游戏服的聊天与表情，原版玩家无感知。
+		// 内部 P2P 直连优先，未打通的成员走信令中转。
 		GameClient()->m_RelayClient.Broadcast(aBuf);
 	}
 	else
 	{
-		if(!Alive)
-		{
-			// 表情在服务器侧有活体硬检查（旁观者无 character 直接丢弃），
-			// 部分服务器对旁观者聊天/私聊限制极严（实测：私聊 4 条即封）
-			GameClient()->m_Chat.Echo("旁观/死亡状态：信令暂未连接（自动重试中），信号仅本地显示");
-			AddMarker(Signal, WorldPos);
-			PlaySignalSound(Signal, WorldPos);
-			return;
-		}
-		if(g_Config.m_TcPingwheelEmote)
-		{
-			// 表情通道 fallback：帧头+9 个表情全服广播，间隔 tc_pingwheel_emote_ms
-			// （默认 60ms，必须 ≥ 服务器表情冷却）。对所有人可见但只有 TClient
-			// 知道语义。
-			EmotePing(Signal, (int)std::round(WorldPos.x), (int)std::round(WorldPos.y));
-		}
-		else
-		{
-			GameClient()->m_Chat.Echo("信令未连接且表情/聊天通道均已关闭，信号仅本地显示");
-			AddMarker(Signal, WorldPos);
-			PlaySignalSound(Signal, WorldPos);
-			return;
-		}
+		GameClient()->m_Chat.Echo(Alive ? "信令未连接且表情通道已关闭，信号仅本地显示" : "旁观/死亡状态：信令暂未连接（自动重试中），信号仅本地显示");
+		AddMarker(Signal, WorldPos);
+		PlaySignalSound(Signal, WorldPos);
+		return;
 	}
 
 	AddMarker(Signal, WorldPos);

@@ -31,10 +31,29 @@ public:
 
 	// 信令最近 30s 内有回应时视为在线
 	bool Online() const;
-	// 把 ping 载荷广播给同游戏服的其他 TClient 玩家
+	// 有可用通道：信令在线，或已知同服成员（可尝试 P2P 直连）
+	bool Available() const;
+	// 把 ping 载荷发出去：P2P 直连优先，未打通/无成员时走服务器中转
 	void Broadcast(const char *pPayload);
+	// 结构化状态（tc_relay_status 用）
+	void FormatStatus(char *pBuf, int Size) const;
 
 private:
+	// 同服成员的直连地址（由信令 PEER 推送，是对方在信令侧的 NAT 映射地址）
+	struct SPeer
+	{
+		char m_aUid[48] = "";
+		NETADDR m_Addr = {};
+		float m_LastSeen = -1e9f;   // 最近一次收到 PEER 推送
+		float m_LastDirect = -1e9f; // 最近一次收到该地址的直连包
+		float m_LastProbe = -1e9f;  // 最近一次向该地址打洞
+	};
+	struct SQueued
+	{
+		std::string m_Payload;
+		bool m_UseRelay = false;
+	};
+
 	NETSOCKET m_Socket = {};
 	char m_aUid[48] = ""; // 会话唯一键（名字-随机），同服同名客户端不互顶
 	bool m_SocketValid = false;
@@ -43,10 +62,16 @@ private:
 	float m_LastServerReply = -1e9f;
 	float m_LastRegTime = -1e9f;
 	float m_LastSendTime = -1e9f;
-	std::vector<std::string> m_vSendQueue; // 待广播载荷
+	std::vector<SQueued> m_vSendQueue; // 待发载荷
+	std::vector<SPeer> m_vPeers;       // 同服成员（P2P 候选）
+	char m_aLastRecvPayload[64] = "";  // 收到的上一条载荷（P2P+中转去重）
+	float m_LastRecvPayloadTime = -1e9f;
 
 	void GameServerAddr(char *pBuf, int Size) const;
 	static void ConRelayStatus(IConsole::IResult *pResult, void *pUserData);
+	void HandlePeer(const char *pUid, const char *pAddrStr);
+	bool PeerDirect(const SPeer &Peer) const;
+	bool AllPeersDirect() const;
 	void SendReg();
 	void PumpRecv();
 	void PumpSend();

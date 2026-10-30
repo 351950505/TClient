@@ -67,7 +67,7 @@ private:
 	char m_aLastRecvPayload[64] = "";  // 收到的上一条载荷（P2P+中转去重）
 	float m_LastRecvPayloadTime = -1e9f;
 
-	void GameServerAddr(char *pBuf, int Size) const;
+	bool GameServerAddr(char *pBuf, int Size) const;
 	static void ConRelayStatus(IConsole::IResult *pResult, void *pUserData);
 	void HandlePeer(const char *pUid, const char *pAddrStr);
 	bool PeerDirect(const SPeer &Peer) const;

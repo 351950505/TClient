@@ -24,7 +24,8 @@ void CRelayClient::ConRelayStatus(IConsole::IResult *pResult, void *pUserData)
 void CRelayClient::FormatStatus(char *pBuf, int Size) const
 {
 	char aGame[64];
-	GameServerAddr(aGame, sizeof(aGame));
+	if(!GameServerAddr(aGame, sizeof(aGame)))
+		str_copy(aGame, "(未连接游戏服)");
 	const float Age = Client()->LocalTime() - m_LastServerReply;
 	int Direct = 0;
 	for(const SPeer &Peer : m_vPeers)
@@ -111,21 +112,21 @@ bool CRelayClient::AllPeersDirect() const
 	return true;
 }
 
-void CRelayClient::GameServerAddr(char *pBuf, int Size) const
+bool CRelayClient::GameServerAddr(char *pBuf, int Size) const
 {
-	// 未连接时用占位，保证信令分组键稳定（重连后 ServerAddress 变化会自然重新分组）
+	// 未连服务器时不注册：否则所有"未进服"的客户端会被分到同一个 offline
+	// 分组，互相推送无意义的 PEER，还会让外人在列表里看到你。
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
-	{
-		str_copy(pBuf, "offline", Size);
-		return;
-	}
+		return false;
 	net_addr_str(&Client()->ServerAddress(), pBuf, Size, true);
+	return true;
 }
 
 void CRelayClient::SendReg()
 {
 	char aGameAddr[64];
-	GameServerAddr(aGameAddr, sizeof(aGameAddr));
+	if(!GameServerAddr(aGameAddr, sizeof(aGameAddr)))
+		return;
 	char aBuf[160];
 	str_format(aBuf, sizeof(aBuf), "REG %s %s %s", aGameAddr, m_aUid, g_Config.m_PlayerName);
 	net_udp_send(m_Socket, &m_RelayAddr, aBuf, str_length(aBuf) + 1);
@@ -308,7 +309,8 @@ void CRelayClient::PumpSend()
 	if(!Item.m_UseRelay)
 		return;
 	char aGameAddr[64];
-	GameServerAddr(aGameAddr, sizeof(aGameAddr));
+	if(!GameServerAddr(aGameAddr, sizeof(aGameAddr)))
+		return;
 	char aBuf[256];
 	str_format(aBuf, sizeof(aBuf), "BC %s %s %s", aGameAddr, m_aUid, Item.m_Payload.c_str());
 	net_udp_send(m_Socket, &m_RelayAddr, aBuf, str_length(aBuf) + 1);

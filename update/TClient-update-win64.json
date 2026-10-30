@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.3",
+  "version": "1.7.8.4",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64430327,
-  "sha256": "b17899a28863ef7d52ba3309845df41856410cb868bcdc9dfaff3fe5d7c58017",
-  "notes": "清单多源兜底（raw.githubusercontent 优先，github 直链备用）",
+  "size": 64430399,
+  "sha256": "e81a20c9809224aeb2289f8a609dcddc1cd1cbe136cc276be09af8687793f254",
+  "notes": "修复检查更新卡在签名阶段",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 299008,

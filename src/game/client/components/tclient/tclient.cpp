@@ -987,8 +987,18 @@ void CTClient::FinishUpdateManifest()
 	m_UpdateRelease.m_HelperSize = JsonGetInt(HelperSize, -1);
 	str_format(m_UpdateRelease.m_aTag, sizeof(m_UpdateRelease.m_aTag), "v%s", pVersion);
 	str_copy(m_UpdateRelease.m_aVersion, pVersion);
-	str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_ZIP_ASSET);
-	str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_HELPER_ASSET);
+	// 下载源优先用清单所在源（raw 源则走 raw 托管的 update/ 目录，
+	// 避开 latest→release-assets 的 302），其次 github releases 直链。
+	if(m_UpdateManifestSource == 0)
+	{
+		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_ZIP_ASSET);
+		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_HELPER_ASSET);
+	}
+	else
+	{
+		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_ZIP_ASSET);
+		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_HELPER_ASSET);
+	}
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
 
@@ -1250,7 +1260,9 @@ int CTClient::UpdateDownloadPercent() const
 
 void CTClient::PollUpdateTasks()
 {
-	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done())
+	// 清单任务处理过一次后就不再进入本分支（否则签名完成后清单仍 Done，
+	// 会一直卡在"已在拉签名"的静态状态，永远走不到下面的签名完成分支）。
+	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done() && !m_pUpdateManifestSigTask)
 	{
 		// 清单下载完成后先拉签名，验签通过才解析
 		if(m_pUpdateManifestTask->State() != EHttpState::DONE)

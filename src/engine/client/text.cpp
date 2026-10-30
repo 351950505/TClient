@@ -9,6 +9,7 @@
 
 #include <engine/console.h>
 #include <engine/graphics.h>
+#include <engine/shared/config.h>
 #include <engine/shared/json.h>
 #include <engine/storage.h>
 #include <engine/textrender.h>
@@ -1637,9 +1638,13 @@ public:
 		const vec2 FakeToScreen = Graphics()->ScreenSize() / ScreenRect.Size();
 		const float CursorX = round_to_int(pCursor->m_X * FakeToScreen.x) / FakeToScreen.x;
 		const float CursorY = round_to_int(pCursor->m_Y * FakeToScreen.y) / FakeToScreen.y;
-		const int ActualSize = round_truncate(pCursor->m_FontSize * FakeToScreen.y);
+		// TClient: 全局字体字号（tc_font_size 百分比）。在 m_AlignedFontSize 这个
+		// 唯一度量源上缩放，字形步进/字距/描边/行高全部跟随；不改写
+		// pCursor->m_FontSize 本身，因此同一光标多次 Append 不会叠加缩放。
+		const float SizeScale = g_Config.m_TcFontSize / 100.0f;
+		const int ActualSize = round_truncate(pCursor->m_FontSize * SizeScale * FakeToScreen.y);
 		pCursor->m_AlignedFontSize = ActualSize / FakeToScreen.y;
-		pCursor->m_AlignedLineSpacing = round_truncate(pCursor->m_LineSpacing * FakeToScreen.y) / FakeToScreen.y;
+		pCursor->m_AlignedLineSpacing = round_truncate(pCursor->m_LineSpacing * SizeScale * FakeToScreen.y) / FakeToScreen.y;
 
 		// string length
 		if(Length < 0)

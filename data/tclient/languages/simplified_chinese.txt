@@ -1329,3 +1329,6 @@ Others
 
 Download failed, retrying (%d/%d)...
 == 下载失败，正在重试（%d/%d）……
+
+Font size
+== 字体大小

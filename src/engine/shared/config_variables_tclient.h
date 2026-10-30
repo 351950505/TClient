@@ -399,6 +399,8 @@ MACRO_CONFIG_INT(TcIslandGradient, tc_island_gradient, 1, 0, 3, CFGFLAG_CLIENT |
 MACRO_CONFIG_COL(TcIslandColorAccent, tc_island_color_accent, 6602362, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island accent color for karaoke fill, progress rail and equalizer (#1FD661)")
 // 观战选择器好友分列：好友稳定分区排最前并带分组标题（学习 QmClient）。
 MACRO_CONFIG_INT(TcSpectatorFriendsFirst, tc_spectator_friends_first, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Spectator selector: show friends as a separate group at the front")
+// 全局字体字号：对所有游戏内文本（菜单/聊天/记分板/名牌等）按百分比缩放。
+MACRO_CONFIG_INT(TcFontSize, tc_font_size, 100, 50, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Global text size for all game text in percent (menus, chat, scoreboard, nameplates)")
 MACRO_CONFIG_INT(TcPingwheelVolume, tc_pingwheel_volume, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal sound volume (%)")
 MACRO_CONFIG_INT(TcPingwheelSoundRange, tc_pingwheel_sound_range, 600, 0, 10000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel sound audible range in world units (0 = global, no falloff)")
 MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel fallback channel (no relay): 1 = emoticons (visible to all, only TClient decodes), 0 = local only")

@@ -552,6 +552,19 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		GameClient()->m_MapImages.SetTextureScale(g_Config.m_ClTextEntitiesSize);
 	}
 
+	// 全局字体字号：所有游戏内文本按百分比缩放；改动后重建文本容器立即生效
+	Column.HSplitTop(LineSize, &Button, &Column);
+	static int s_LastFontSize = g_Config.m_TcFontSize;
+	Ui()->DoScrollbarOption(&g_Config.m_TcFontSize, &g_Config.m_TcFontSize, &Button, TCLocalize("Font size"), 50, 200, &CUi::ms_LinearScrollbarScale, 0, "%");
+	if(s_LastFontSize != g_Config.m_TcFontSize)
+	{
+		s_LastFontSize = g_Config.m_TcFontSize;
+		TextRender()->OnPreWindowResize();
+		GameClient()->OnWindowResize();
+		GameClient()->Editor()->OnWindowResize();
+		TextRender()->OnWindowResize();
+	}
+
 	static CButtonContainer s_FontDirectoryId;
 	if(Ui()->DoButton_FontIcon(&s_FontDirectoryId, FontIcon::FOLDER, 0, &FontDirectory, IGraphics::CORNER_ALL))
 	{

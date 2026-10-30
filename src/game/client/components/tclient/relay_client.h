@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <engine/client.h>
+#include <engine/console.h>
 
 #include <game/client/component.h>
 
@@ -26,6 +27,7 @@ public:
 	void OnInit() override;
 	void OnReset() override;
 	void OnRender() override;
+	void OnConsoleInit() override;
 
 	// 信令最近 30s 内有回应时视为在线
 	bool Online() const;
@@ -44,6 +46,7 @@ private:
 	std::vector<std::string> m_vSendQueue; // 待广播载荷
 
 	void GameServerAddr(char *pBuf, int Size) const;
+	static void ConRelayStatus(IConsole::IResult *pResult, void *pUserData);
 	void SendReg();
 	void PumpRecv();
 	void PumpSend();

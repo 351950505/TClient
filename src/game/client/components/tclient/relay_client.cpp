@@ -10,6 +10,28 @@
 #include <base/str.h>
 #include <base/time.h>
 
+void CRelayClient::ConRelayStatus(IConsole::IResult *pResult, void *pUserData)
+{
+	CRelayClient *pSelf = (CRelayClient *)pUserData;
+	char aGame[64];
+	pSelf->GameServerAddr(aGame, sizeof(aGame));
+	const float Age = pSelf->Client()->LocalTime() - pSelf->m_LastServerReply;
+	char aBuf[192];
+	str_format(aBuf, sizeof(aBuf),
+		"信令: %s | 服务器 %s | 上次回执 %.1fs 前%s | 待发 %d",
+		pSelf->Online() ? "已连接" : "未连接",
+		pSelf->m_RelayAddrValid ? g_Config.m_TcRelayAddr : "(地址无效)",
+		Age < 1e8f ? Age : -1.0f,
+		aGame,
+		(int)pSelf->m_vSendQueue.size());
+	pSelf->GameClient()->m_Chat.Echo(aBuf);
+}
+
+void CRelayClient::OnConsoleInit()
+{
+	Console()->Register("tc_relay_status", "", CFGFLAG_CLIENT, ConRelayStatus, this, "Show signal relay connection status");
+}
+
 void CRelayClient::OnInit()
 {
 	if(!g_Config.m_TcRelay)

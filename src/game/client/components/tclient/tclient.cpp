@@ -987,18 +987,11 @@ void CTClient::FinishUpdateManifest()
 	m_UpdateRelease.m_HelperSize = JsonGetInt(HelperSize, -1);
 	str_format(m_UpdateRelease.m_aTag, sizeof(m_UpdateRelease.m_aTag), "v%s", pVersion);
 	str_copy(m_UpdateRelease.m_aVersion, pVersion);
-	// 下载源优先用清单所在源（raw 源则走 raw 托管的 update/ 目录，
-	// 避开 latest→release-assets 的 302），其次 github releases 直链。
-	if(m_UpdateManifestSource == 0)
-	{
-		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_ZIP_ASSET);
-		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_HELPER_ASSET);
-	}
-	else
-	{
-		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_ZIP_ASSET);
-		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_HELPER_ASSET);
-	}
+	// 大文件（zip/helper）只能从 release 直链下载（raw 仓库放不下 61MB 包）。
+	// 清单/签名走 raw 是为了国内可达性；zip 直链虽经 release-assets 302，
+	// 但大文件下载这条路实测是可用的。
+	str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_ZIP_ASSET);
+	str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_HELPER_ASSET);
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
 

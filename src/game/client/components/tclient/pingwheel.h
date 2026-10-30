@@ -90,7 +90,6 @@ private:
 	int m_EmoteEchoSeen = 0;            // 帧发送前的自回显计数基准
 	int m_EmoteEchoTotal = 0;           // 自回显累计计数
 	float m_EmoteFrameDoneTime = -1e9f; // 帧发完时刻（丢失检测用）
-	bool m_EmoteTestFired = false;
 	void EmotePing(int Signal, int X, int Y);
 	void PumpEmoteQueue();
 

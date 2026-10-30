@@ -214,7 +214,6 @@ void CPingWheel::OnReset()
 	m_vEmoteQueue.clear();
 	m_EmoteRecvCount = -1;
 	m_EmoteFrameDoneTime = -1e9f;
-	m_EmoteTestFired = false;
 	for(CMarker &Marker : m_aMarkers)
 		Marker.m_StartTime = -1.0f;
 }
@@ -634,15 +633,6 @@ void CPingWheel::OnRender()
 	RenderSpecCursor();
 	PumpEmoteQueue();
 
-	// [TEMP-DIAG] tc_emote_diag=1：进服活着 5 秒后自动发一次测试 ping
-	if(g_Config.m_TcEmoteDiag == 1 && Client()->State() == IClient::STATE_ONLINE &&
-		GameClient()->m_Snap.m_pLocalCharacter && !m_EmoteTestFired &&
-		GameClient()->m_RelayClient.Online()) // 等信令注册完成再发
-	{
-		m_EmoteTestFired = true;
-		log_info("relaydiag", "auto test ping sent (relay online)");
-		Ping(0, GameClient()->m_Controls.m_aTargetPos[g_Config.m_ClDummy]);
-	}
 
 	static const auto QuadEaseInOut = [](float t) -> float {
 		if(t == 0.0f)

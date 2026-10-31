@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.22",
+  "version": "1.7.8.23",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64297225,
-  "sha256": "d5545e7089c05c57244b50eb5354c185e405ea3bf3b081541a925607f4a32955",
-  "notes": "1.7.8.22:监控把watcher播放位置外推到当下(修画面周期性顿挫)+卡拉OK提前量默认60ms、范围-500~500",
+  "size": 64297276,
+  "sha256": "22c5019eda4f6416a1118785cd90360ea339e4b98244a61a08ea4718a087dcf7",
+  "notes": "1.7.8.23:客户端启动即把Windows定时器分辨率提到1ms(修高刷限帧下select限帧器的周期性过冲=规律性顿挫),退出还原",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

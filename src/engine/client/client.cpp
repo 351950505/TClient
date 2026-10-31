@@ -19,6 +19,14 @@
 #include <base/math.h>
 #include <base/mem.h>
 #include <base/os.h>
+
+#if defined(CONF_FAMILY_WINDOWS)
+// TClient: 提高定时器分辨率用(见 CClient::Run 开头注释)。timeapi.h 依赖
+// windows.h 先行,而 DDNet 的 windows.h 必须在 include 尾部(base/windows.h
+// 约束)—— 这里直接做 DLL 导入声明,签名与 winmm 一致(MMRESULT=UINT)。
+extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned int);
+extern "C" __declspec(dllimport) unsigned int __stdcall timeEndPeriod(unsigned int);
+#endif
 #include <base/process.h>
 #include <base/secure.h>
 #include <base/str.h>
@@ -3506,6 +3514,16 @@ void CClient::Run()
 	bool LastE = false;
 	bool LastG = false;
 
+#if defined(CONF_FAMILY_WINDOWS)
+	// TClient(2026-11-01):把本进程的 Windows 定时器分辨率提到 1ms。主循环的
+	// 帧率限制器用 select 等待(client.cpp 主循环 "approach in halving steps"),
+	// 默认 15.6ms 粒度下小等待会周期性过冲 —— 高刷限帧(gfx_refresh_rate)时
+	// 表现为规律性顿挫。通行做法(Chromium/SDL 社区,见 randomascii "Windows
+	// Timer Resolution: The Great Rule Change"):timeBeginPeriod(1),退出还原。
+	// winmm 已在链接列表(PLATFORM_CLIENT_LIBS)。
+	timeBeginPeriod(1);
+#endif
+
 	int64_t NextUpdateTime = time_get();
 	int64_t NextRenderTime = time_get();
 
@@ -3712,6 +3730,11 @@ void CClient::Run()
 		m_LocalTime = (time_get() - m_LocalStartTime) / (float)time_freq();
 		m_GlobalTime = (time_get() - m_GlobalStartTime) / (float)time_freq();
 	}
+
+#if defined(CONF_FAMILY_WINDOWS)
+	// 还原定时器分辨率(与 Run 开头的 timeBeginPeriod(1) 配对)
+	timeEndPeriod(1);
+#endif
 
 	GameClient()->RenderShutdownMessage();
 	Disconnect();

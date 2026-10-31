@@ -93,7 +93,7 @@ private:
 	void UpdateFail(const char *pFormat, ...) [[gnu::format(printf, 2, 3)]];
 	void PollUpdateTasks();
 	void FetchUpdateManifest();
-	void FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask);
+	void FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std::shared_ptr<IHttpRequest> pManifestTask);
 	void FinishUpdateDownload();
 	void StartDownloadTask();
 	void FinishUpdateBootstrap();

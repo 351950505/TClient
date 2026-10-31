@@ -904,11 +904,9 @@ void CTClient::FetchUpdateManifest()
 	Http()->Run(m_pUpdateManifestTask);
 }
 
-void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask)
+void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std::shared_ptr<IHttpRequest> pManifestTask)
 {
-	// 清单任务在此刻仍在成员上（UpdateFail 会清它），先取局部快照；
-	// 签名任务由调用方传入（调用点已把成员置空，避免重复处理）。
-	std::shared_ptr<IHttpRequest> pManifestTask = m_pUpdateManifestTask;
+	// 两个任务都由调用方传入快照（调用点已把成员置空，避免重复处理同一份结果）。
 	if(!pManifestTask || !pSigTask)
 	{
 		UpdateFail(TCLocalize("Update check failed: the manifest could not be downloaded"));
@@ -964,8 +962,17 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask)
 		pError = TCLocalize("Update rejected: missing or malformed SHA-256");
 	else if(Size <= 0)
 		pError = TCLocalize("Update rejected: missing file size");
-	else if(CompareAppVersion(pVersion, TCLIENT_APP_VERSION) <= 0)
-		pError = TCLocalize("Update rejected: not newer than the current version");
+
+	if(!pError && CompareAppVersion(pVersion, TCLIENT_APP_VERSION) <= 0)
+	{
+		// 「版本不比当前新」不是错误：发布页的 latest 可能正好就是本机版本
+		// （刚更新完再检查一次）。这里显示"已是最新版本"，不要报成红色失败。
+		json_value_free(pJson);
+		m_UpdateState = EUpdateState::UP_TO_DATE;
+		SetUpdateStatus(TCLocalize("You are on the latest version"));
+		log_info("tclient-update", "latest release is %s, current is %s: up to date", pVersion, TCLIENT_APP_VERSION);
+		return;
+	}
 
 	if(pError)
 	{
@@ -1355,9 +1362,14 @@ void CTClient::PollUpdateTasks()
 		std::shared_ptr<IHttpRequest> pSigTask = m_pUpdateManifestSigTask;
 		m_pUpdateManifestSigTask = nullptr;
 		const bool SigOk = pSigTask->State() == EHttpState::DONE;
+		// 无论验签成败，清单任务都已用掉：不置空的话下一帧清单仍 Done 且
+		// sig 为空，又会重新拉签名 → 每帧重复验签（日志里连续多条
+		// "manifest signature verified" 就是这个循环）。
+		std::shared_ptr<IHttpRequest> pManifestDone = m_pUpdateManifestTask;
+		m_pUpdateManifestTask = nullptr;
 		if(SigOk)
 		{
-			FinishUpdateManifest(pSigTask);
+			FinishUpdateManifest(pSigTask, pManifestDone);
 			return;
 		}
 		if(m_UpdateDownloadAttempt < 3)

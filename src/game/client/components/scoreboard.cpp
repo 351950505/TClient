@@ -470,7 +470,7 @@ void CScoreboard::RenderSpectators(CUIRect Spectators)
 				m_ScoreboardPopupContext.m_IsSpectating = true;
 
 				Ui()->DoPopupMenu(&m_ScoreboardPopupContext, Ui()->MouseX(), Ui()->MouseY(), 110.0f,
-					m_ScoreboardPopupContext.m_IsLocal ? 30.0f : 60.0f, &m_ScoreboardPopupContext, CScoreboardPopupContext::Render);
+					m_ScoreboardPopupContext.m_IsLocal ? 30.0f : 89.0f, &m_ScoreboardPopupContext, CScoreboardPopupContext::Render);
 			}
 
 			if(Ui()->HotItem() == &m_aPlayers[pInfo->m_ClientId].m_PlayerButtonId ||
@@ -735,7 +735,7 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 					m_ScoreboardPopupContext.m_IsSpectating = false;
 
 					Ui()->DoPopupMenu(&m_ScoreboardPopupContext, Ui()->MouseX(), Ui()->MouseY(), 110.0f,
-						m_ScoreboardPopupContext.m_IsLocal ? 58.5f : 87.5f, &m_ScoreboardPopupContext, CScoreboardPopupContext::Render);
+						m_ScoreboardPopupContext.m_IsLocal ? 58.5f : 116.5f, &m_ScoreboardPopupContext, CScoreboardPopupContext::Render);
 				}
 
 				if(Ui()->HotItem() == &Player.m_PlayerButtonId ||
@@ -1332,6 +1332,35 @@ CUi::EPopupMenuFunctionResult CScoreboard::CScoreboardPopupContext::Render(void 
 			Client.m_EmoticonIgnore ^= 1;
 		}
 		pScoreboard->GameClient()->m_Tooltips.DoToolTip(&pPopupContext->m_EmoticonAction, &Action, Client.m_EmoticonIgnore ? Localize("Unmute emoticons") : Localize("Mute emoticons"));
+
+		// TClient(2026-11-01):第二行动作 —— 偷取皮肤 / 加入队伍
+		View.HSplitTop(ItemSpacing * 2, nullptr, &View);
+		View.HSplitTop(ActionSize, &Container, &View);
+		Container.VSplitLeft(ActionSize, &Action, &Container);
+		if(pUi->DoButton_FontIcon(&pPopupContext->m_StealSkinAction, FontIcon::BRUSH, false, &Action, BUTTONFLAG_LEFT, ActionCorners))
+		{
+			// 皮肤名走控制台(触发皮肤链刷新),自定义颜色直接写配置
+			char aSkinCmd[MAX_SKIN_LENGTH + 32];
+			str_format(aSkinCmd, sizeof(aSkinCmd), "player_skin \"%s\"", Client.m_aSkinName);
+			pScoreboard->Console()->ExecuteLine(aSkinCmd, IConsole::CLIENT_ID_UNSPECIFIED);
+			g_Config.m_ClPlayerUseCustomColor = Client.m_UseCustomColor;
+			g_Config.m_ClPlayerColorBody = Client.m_ColorBody;
+			g_Config.m_ClPlayerColorFeet = Client.m_ColorFeet;
+			return CUi::POPUP_CLOSE_CURRENT;
+		}
+		pScoreboard->GameClient()->m_Tooltips.DoToolTip(&pPopupContext->m_StealSkinAction, &Action, TCLocalize("Steal skin"));
+
+		Container.VSplitLeft(ActionSpacing, nullptr, &Container);
+		Container.VSplitLeft(ActionSize, &Action, &Container);
+		if(pUi->DoButton_FontIcon(&pPopupContext->m_JoinTeamAction, FontIcon::ICON_USERS, false, &Action, BUTTONFLAG_LEFT, ActionCorners))
+		{
+			// DDNet 服务端命令:/team <id> 请求加入该玩家所在队伍
+			char aTeamCmd[32];
+			str_format(aTeamCmd, sizeof(aTeamCmd), "say \"/team %d\"", pPopupContext->m_ClientId);
+			pScoreboard->Console()->ExecuteLine(aTeamCmd, IConsole::CLIENT_ID_UNSPECIFIED);
+			return CUi::POPUP_CLOSE_CURRENT;
+		}
+		pScoreboard->GameClient()->m_Tooltips.DoToolTip(&pPopupContext->m_JoinTeamAction, &Action, TCLocalize("Join team"));
 	}
 
 	const float ButtonSize = 17.5f;

@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.19",
+  "version": "1.7.8.20",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64297109,
-  "sha256": "6330590f22249fa508c5fe83b0a60a474cef42ca149203421296c60d8601fab6",
-  "notes": "1.7.8.19:游戏中键点玩家菜单(偷取皮肤/加入队伍)+素材编辑器独立页(TC设置-素材)+歌词同步修复(LS真实进度优先于音频钟,延迟根因)",
+  "size": 64296969,
+  "sha256": "4ef5402cf20840f84670c15dd60106e5b2a36aa31fc0c3914d35f12dd7324519",
+  "notes": "1.7.8.20:记分板玩家菜单新增偷取皮肤/加入队伍(TAB→中键点玩家)+监控进程LS锚定校正(歌词跟嘴,LS断供时音频钟自由跑不落后)",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

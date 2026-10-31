@@ -571,8 +571,11 @@ bool CControls::CheckNewInput()
 			bool SetMousePos = false;
 			if(Dummy == g_Config.m_ClDummy)
 			{
-				// F 始终锁存首个动作方向；Tater/Ancient/Snow 的 subtick 可持续刷新方向。
-				SetMousePos = (Mode != 7 && g_Config.m_ClSubTickAiming) || RefreshHookAim;
+				// Tater（Mode 0）与上游 TaterClient 逐字对齐：只有 RefreshHookAim 会刷新
+				// 目标点，subtick aiming 打开时也不逐帧刷新（上游就是 SetMousePos = RefreshHookAim）。
+				// 其余移植模式保留各自语义：F 锁存首个动作方向，Snow/Ancient/Best/Delta 的
+				// subtick 可持续刷新方向。
+				SetMousePos = (Mode != 0 && Mode != 7 && g_Config.m_ClSubTickAiming) || RefreshHookAim;
 				if(Previous.m_Hook == 0 && TestInput.m_Hook == 1)
 				{
 					HookAction = true;

@@ -1684,6 +1684,16 @@ public:
 		m_QQInLyric = false;
 	}
 
+	// 网易云封面 URL → CDN 缩略图(300×300):原图常到 3000px,渲染线程解码
+	// + 纹理上传要顶一整帧甚至更多(用户:"歌曲加载的一瞬间会卡")。CDN 自带
+	// 服务端缩图参数,下载/解码/上传都小一个数量级。
+	static std::string NeteaseThumbUrl(const std::string &Url)
+	{
+		if(Url.rfind("http", 0) != 0 || Url.find('?') != std::string::npos)
+			return Url;
+		return Url + "?param=300y300";
+	}
+
 	static std::string NeteaseCacheKey(const STrack &Track)
 	{
 		std::string Key;
@@ -1868,7 +1878,7 @@ public:
 					const json_value *pAlbum = pSong ? json_object_get(pSong, "album") : nullptr;
 					const json_value *pPic = pAlbum ? json_object_get(pAlbum, "picUrl") : nullptr;
 					if(pPic != nullptr && pPic->type == json_string && pPic->u.string.length > 0)
-						Meta.m_PicUrl = pPic->u.string.ptr;
+						Meta.m_PicUrl = NeteaseThumbUrl(pPic->u.string.ptr);
 				}
 				if(pRoot != nullptr && pRoot != &json_value_none)
 					json_value_free(pRoot);
@@ -2074,7 +2084,7 @@ public:
 						const json_value *pAlbum = json_object_get(pBestSong, "album");
 						const json_value *pPic = pAlbum ? json_object_get(pAlbum, "picUrl") : nullptr;
 						if(pPic != nullptr && pPic->type == json_string && pPic->u.string.length > 0)
-							Meta.m_PicUrl = pPic->u.string.ptr;
+							Meta.m_PicUrl = NeteaseThumbUrl(pPic->u.string.ptr);
 					}
 				}
 				else

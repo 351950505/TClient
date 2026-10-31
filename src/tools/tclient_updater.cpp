@@ -1576,6 +1576,41 @@ namespace
 		FindClose(hFind);
 	}
 
+	// Every update backs up the ~1000 files it is about to replace, which is ~95 MB per run.
+	// Only the newest backup is worth keeping (it is the manual rollback point), so delete the
+	// rest instead of letting the install directory grow by ~95 MB per update forever.
+	void PruneOldBackups(const std::wstring &Directory, int KeepCount)
+	{
+		const std::wstring Pattern = JoinPath(Directory, L"update_backup_*");
+		std::vector<std::wstring> vNames;
+		WIN32_FIND_DATAW Data;
+		HANDLE hFind = FindFirstFileW(LongPath(Pattern).c_str(), &Data);
+		if(hFind == INVALID_HANDLE_VALUE)
+			return;
+		do
+		{
+			if((Data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+				continue;
+			vNames.push_back(Data.cFileName);
+		} while(FindNextFileW(hFind, &Data));
+		FindClose(hFind);
+
+		// 目录名是 update_backup_YYYYMMDD_HHMMSS，字典序即时间序。
+		std::sort(vNames.begin(), vNames.end());
+		if((int)vNames.size() <= KeepCount)
+			return;
+		const size_t RemoveCount = vNames.size() - (size_t)KeepCount;
+		for(size_t i = 0; i < RemoveCount; i++)
+		{
+			const std::wstring Path = JoinPath(Directory, vNames[i]);
+			std::string Error;
+			if(RemoveTree(Path, Error))
+				g_Logger.Info("removed old backup '%s'", Utf8FromWide(vNames[i]).c_str());
+			else
+				g_Logger.Warn("could not remove old backup '%s': %s", Utf8FromWide(vNames[i]).c_str(), Error.c_str());
+		}
+	}
+
 	int RunUpdate(const SOptions &Options)
 	{
 		// 1. Validate the input paths.
@@ -1840,6 +1875,14 @@ namespace
 		if(!RemoveTree(StagingDir, FileError))
 			g_Logger.Warn("could not remove the staging directory: %s", FileError.c_str());
 		RemoveStaleSelfBackups(TargetDir);
+		PruneOldBackups(TargetDir, 1);
+
+		// 更新包（约 61 MB）已经用完了：留在 update/ 里只会白占空间，
+		// 下次更新还会重新下载覆盖它。失败时这里不会执行，包仍可用于重试。
+		if(DeleteFileW(LongPath(ZipPath).c_str()))
+			g_Logger.Info("removed the consumed update package '%s'", Utf8FromWide(ZipPath).c_str());
+		else if(GetLastError() != ERROR_FILE_NOT_FOUND)
+			g_Logger.Warn("could not remove the update package '%s': %s", Utf8FromWide(ZipPath).c_str(), FormatLastError(GetLastError()).c_str());
 
 		if(!FileExists(RestartPath))
 		{

@@ -1,15 +1,15 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.15",
+  "version": "1.7.8.16",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64430598,
-  "sha256": "dc541a2d32437cdb047e4ef8638e6d36482d898eca71c62961ef1853d4201352",
-  "notes": "1.7.8.15：修复已是最新版时误报更新失败、修复清单验签重复执行",
+  "size": 64434302,
+  "sha256": "df01fc4ba72234b6987e07f47bc72c82fedcf10defa089ff2fe719d79882fb67",
+  "notes": "1.7.8.16：更新后自动清理旧备份目录与已用更新包，不再每次膨胀约 95MB",
   "helper": {
     "name": "TClientUpdater.exe",
-    "size": 299008,
-    "sha256": "d8269d143c460b8214c1d8d5b738d472c1307619f3d9b4d29a84e13a93bc6be3"
+    "size": 306688,
+    "sha256": "b993343fee69aaa1a127273883e717b998e6efa03119747841c21acecbaaa39e"
   }
 }

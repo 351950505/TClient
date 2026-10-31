@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.8",
+  "version": "1.7.8.9",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64429955,
-  "sha256": "83c69420f4810f24c6c7084d4b7d9a7cfa2893a2e0d0c531dd95ad92ec204069",
-  "notes": "1.7.8.8 测试版（验证自动更新链路）",
+  "size": 64429954,
+  "sha256": "df6bc3977970985e3b2e150719be86afb1b7dc4003f49847b84af751097557f3",
+  "notes": "更新下载改走自建 gh-proxy 加速域名",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 299008,

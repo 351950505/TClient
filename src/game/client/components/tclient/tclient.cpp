@@ -56,10 +56,15 @@ static constexpr const char *TCLIENT_UPDATE_LATEST_URL = "https://github.com/351
 // release-assets 域名，国内可达性明显更好。发布时把清单+签名同时提交到
 // 仓库 update/ 目录即可。按顺序尝试，第一个成功的为准。
 static constexpr const char *TCLIENT_UPDATE_RAW_BASE = "https://raw.githubusercontent.com/351950505/TClient/master/update/";
-// 三个候选清单源（含 raw 直连与 release 直链），逐个尝试
+// 自建 gh-proxy 加速（用户部署）：把 github.com 的原始地址拼在代理域名后即可，
+// 对国内网络友好；下载 zip / helper 也走它。
+static constexpr const char *TCLIENT_UPDATE_PROXY_BASE = "https://github.me2.dpdns.org/";
+static constexpr const char *TCLIENT_UPDATE_GH_BASE = "https://github.com/351950505/TClient/releases/latest/download/";
+// 候选清单源，按顺序尝试：加速代理 → github 直链 → raw 仓库
 static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {
-	"https://raw.githubusercontent.com/351950505/TClient/master/update/TClient-update-win64.json",
+	"https://github.me2.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
+	"https://raw.githubusercontent.com/351950505/TClient/master/update/TClient-update-win64.json",
 };
 static constexpr const char *TCLIENT_UPDATE_PRODUCT = "TClient";
 static constexpr const char *TCLIENT_UPDATE_CHANNEL = "stable";
@@ -986,11 +991,18 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask)
 	m_UpdateRelease.m_HelperSize = JsonGetInt(HelperSize, -1);
 	str_format(m_UpdateRelease.m_aTag, sizeof(m_UpdateRelease.m_aTag), "v%s", pVersion);
 	str_copy(m_UpdateRelease.m_aVersion, pVersion);
-	// 大文件（zip/helper）只能从 release 直链下载（raw 仓库放不下 61MB 包）。
-	// 清单/签名走 raw 是为了国内可达性；zip 直链虽经 release-assets 302，
-	// 但大文件下载这条路实测是可用的。
-	str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_ZIP_ASSET);
-	str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_HELPER_ASSET);
+	// 大文件（zip/helper）：清单走代理源时同样走代理（用户自建 gh-proxy 加速），
+	// 否则回退 github releases 直链。raw 仓库放不下 61MB 包，不能用。
+	if(m_UpdateManifestSource == 0)
+	{
+		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_ZIP_ASSET);
+		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_HELPER_ASSET);
+	}
+	else
+	{
+		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_ZIP_ASSET);
+		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_HELPER_ASSET);
+	}
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
 
@@ -1275,10 +1287,12 @@ void CTClient::PollUpdateTasks()
 		if(!m_pUpdateManifestSigTask)
 		{
 			char aSigUrl[512];
-			if(m_UpdateManifestSource == 0)
+			if(m_UpdateManifestSource == 2)
 				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			else if(m_UpdateManifestSource == 0)
+				str_format(aSigUrl, (int)sizeof(aSigUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
 			else
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
 			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
 			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
 			m_pUpdateManifestSigTask->MaxResponseSize(1024);
@@ -1321,10 +1335,12 @@ void CTClient::PollUpdateTasks()
 		if(m_UpdateState == EUpdateState::CHECKING && m_pUpdateManifestTask && !m_pUpdateManifestSigTask)
 		{
 			char aSigUrl[512];
-			if(m_UpdateManifestSource == 0)
+			if(m_UpdateManifestSource == 2)
 				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			else if(m_UpdateManifestSource == 0)
+				str_format(aSigUrl, (int)sizeof(aSigUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
 			else
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_LATEST_URL, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
 			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
 			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
 			m_pUpdateManifestSigTask->MaxResponseSize(1024);

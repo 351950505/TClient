@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.17",
+  "version": "1.7.8.18",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64448507,
-  "sha256": "ce4de48c1c5c9e62d78f1fac43af4a4d7a67106e02e32621a588d4801c41232d",
-  "notes": "1.7.8.17：素材编辑器（10 类素材、16 种混合模式、导出为自定义资产并自动启用）+ 灵动岛右侧等化器可见性修复 + 表情通道间隔默认 100ms（下限 100ms）",
+  "size": 64296255,
+  "sha256": "617555a4d3c549c3d2c3f38506a46a6965d05055523df2e94a318c2950f4ec42",
+  "notes": "1.7.8.18:灵动岛右端帽圆头修复+音乐模块常显+进度轨融入+歌词多渠道回落lrclib+封面兜底恢复+监控进程死锁修复(重启后音乐显示不再消失)+素材编辑器挪入ME页+标签隐藏列表修正",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

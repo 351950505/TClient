@@ -1464,3 +1464,9 @@ Strong/Weak
 
 Extras
 == 额外
+
+No music playing
+== 未在播放音乐
+
+Material Editor
+== 素材编辑器

@@ -28,6 +28,7 @@
 #include <engine/textrender.h>
 
 #include <game/client/gameclient.h>
+#include <game/localization.h>
 
 // stb_image: single-header decoder for PNG/JPEG/etc. Used for album covers
 // returned by the Windows SMTC thumbnail API, which are typically JPEG and
@@ -534,37 +535,46 @@ public:
 	// 投影专用缓存：键里带扩边量，和实体形状缓存分开，避免键空间互相污染。
 	std::map<SShapeKey, IGraphics::CTextureHandle> m_ShadowCache;
 
-	static float ShapeRadiusAt(float Px, float Py, float W, float H, float R, int Corners)
-	{
-		if(R <= 0.0f)
-			return 0.0f;
-		const bool Left = Px < R;
-		const bool Right = Px > W - R;
-		const bool Top = Py < R;
-		const bool Bottom = Py > H - R;
-		if(Left && Top)
-			return (Corners & IGraphics::CORNER_TL) ? R : 0.0f;
-		if(Right && Top)
-			return (Corners & IGraphics::CORNER_TR) ? R : 0.0f;
-		if(Left && Bottom)
-			return (Corners & IGraphics::CORNER_BL) ? R : 0.0f;
-		if(Right && Bottom)
-			return (Corners & IGraphics::CORNER_BR) ? R : 0.0f;
-		return 0.0f;
-	}
-
 	static bool ShapeCovers(float Px, float Py, float W, float H, float R, int Corners)
 	{
 		if(Px < 0.0f || Py < 0.0f || Px > W || Py > H)
 			return false;
-		const float RR = ShapeRadiusAt(Px, Py, W, H, R, Corners);
-		if(RR <= 0.0f)
+		if(R <= 0.0f)
 			return true;
-		const float CX = Px < R ? RR : W - RR;
-		const float CY = Py < R ? RR : H - RR;
+		const bool Left = Px < R;
+		const bool Right = Px > W - R;
+		const bool Top = Py < R;
+		const bool Bottom = Py > H - R;
+		// 端帽纹理的宽恰好等于半径(胶囊端帽 = 宽 H/2 的半圆,半径即 H/2,W == R),
+		// 左右圆角区整块重叠:必须按掩码逐角匹配、圆心跟着匹配的角走。
+		// 旧的"Left&&Top 抢先"写法在 W==R 时把右端帽(TR/BR)整块判成直角,
+		// 烤出来是方块——2026-11-01 用户截图"灵动岛右边圆头没了,左边正常"即此。
+		float CX, CY;
+		if(Left && Top && (Corners & IGraphics::CORNER_TL))
+		{
+			CX = R;
+			CY = R;
+		}
+		else if(Right && Top && (Corners & IGraphics::CORNER_TR))
+		{
+			CX = W - R;
+			CY = R;
+		}
+		else if(Left && Bottom && (Corners & IGraphics::CORNER_BL))
+		{
+			CX = R;
+			CY = H - R;
+		}
+		else if(Right && Bottom && (Corners & IGraphics::CORNER_BR))
+		{
+			CX = W - R;
+			CY = H - R;
+		}
+		else
+			return true; // 直角区/直边区:矩形范围内即覆盖
 		const float DX = Px - CX;
 		const float DY = Py - CY;
-		return DX * DX + DY * DY <= RR * RR;
+		return DX * DX + DY * DY <= R * R;
 	}
 
 	IGraphics::CTextureHandle EnsureShapeTexture(int W, int H, float Rounding, int Corners, float Inset)
@@ -1073,7 +1083,17 @@ public:
 		{
 			OpenIslandMap();
 			if(!m_pIslandView)
+			{
+				// 映射不存在 = 监控进程自上次开机/更新器清理后从未起来。之前只在
+				// "映射存在但停更"时才补拉,而映射恰恰由监控进程自己创建——游戏重启
+				// 或重启机器后两边互相等,音乐显示从此消失(2026-11-01 用户实测)。
+				// 这里补上首次拉起,与下面的死进程补拉共用 5 秒节流。
+				if(m_NextMonitorTry != 0 && NowTick < m_NextMonitorTry)
+					return;
+				m_NextMonitorTry = NowTick + time_freq() * 5;
+				StartMonitorProcess();
 				return;
+			}
 		}
 
 		SIslandShm Snap;
@@ -1682,6 +1702,41 @@ public:
 		// DurationMs==0 时自动退回旧的自计时分支（含暂停冻结），行为不变。
 		SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing);
 
+		// 网易云+QQ 都判了没词 ≠ 真没词:回落 lrclib 再找一轮(多渠道歌词,
+		// 2026-11-01 用户要求)。lrclib 管线直接在这里逐帧驱动——原来的交接块在
+		// ProcessNetease 里(只有网易请求完成帧可达,QQ 收口后没人再进),而且它
+		// 把 m_ActiveKey 换成 lrclib key 后,下一帧这里的 key 检查会当切歌把请求
+		// 中止,基本是死码。现在保持 m_ActiveKey 不变,StartRequest 的
+		// m_RequestKey 会等于它,ProcessRequest 完成帧直接落到 m_vLines。
+		if(Meta.m_LyricState == ELyricsState::NOTFOUND && Meta.m_TriedLyric && Meta.m_TriedQQ && Meta.m_vLines.empty())
+		{
+			if(m_LrclibState == ELyricsState::IDLE || m_LrclibOwnedKey != Key)
+			{
+				STrack Fallback;
+				Fallback.m_Valid = true;
+				Fallback.m_Title = Meta.m_Title;
+				Fallback.m_Artist = Meta.m_Artist;
+				Fallback.m_DurationMs = Meta.m_DurationMs;
+				m_LrclibState = ELyricsState::LOADING;
+				m_LrclibOwnedKey = Key;
+				m_LyricsState = ELyricsState::LOADING;
+				m_vLines.clear();
+				StartRequest(Fallback);
+			}
+			else
+			{
+				ProcessRequest();
+				if(m_LyricsState == ELyricsState::READY && !m_vLines.empty())
+				{
+					// lrclib 找到了:回填网易缓存,后续帧走正常应用路径
+					Meta.m_vLines = m_vLines;
+					Meta.m_LyricState = ELyricsState::READY;
+				}
+			}
+			ProcessQQ();
+			return;
+		}
+
 		// apply cached/finished data
 		if(Meta.m_LyricState == ELyricsState::READY || Meta.m_LyricState == ELyricsState::NOTFOUND)
 		{
@@ -1700,7 +1755,7 @@ public:
 			// the cover download here too. ProcessNetease only chains phases on the
 			// frame a request completes; a lyrics-READY track served from the cache
 			// would otherwise never get its cover requested.
-			if(false && !m_pNeteaseRequest && m_pHttp != nullptr && Meta.m_Resolved && Meta.m_SongId != 0 && Meta.m_TriedLyric && Meta.m_PicUrl.empty() && !Meta.m_DetailQueued && !m_NeteaseInDetailPhase && !m_NeteaseInCoverPhase)
+			if(!m_pNeteaseRequest && m_pHttp != nullptr && Meta.m_Resolved && Meta.m_SongId != 0 && Meta.m_TriedLyric && Meta.m_PicUrl.empty() && !Meta.m_DetailQueued && !m_NeteaseInDetailPhase && !m_NeteaseInCoverPhase)
 			{
 				// lyrics came from cache: resolve album.picUrl via song/detail first.
 				char aUrl[512];
@@ -2073,9 +2128,10 @@ public:
 			m_NeteaseInLyricPhase = true;
 			m_pHttp->Run(m_pNeteaseRequest);
 		}
-		else if(false)
+		else if(!m_NeteaseInCoverPhase && Meta.m_Resolved && Meta.m_TriedLyric && Meta.m_PicUrl.empty() && !Meta.m_DetailQueued && m_pHttp != nullptr)
 		{
-			// DISABLED-FOR-CRASHTEST: detail phase off
+			// detail 兜底:搜索响应没带 album.picUrl 时用 song/detail 补齐
+			//(之前查崩溃时整体禁用,封面就再也没了——2026-11-01 恢复)
 			char aUrl[512];
 			str_format(aUrl, sizeof(aUrl), "https://music.163.com/api/song/detail?ids=[%lld]", (long long)Meta.m_SongId);
 			m_pNeteaseRequest = HttpGet(aUrl);
@@ -2122,22 +2178,9 @@ public:
 		if(ApplyToActive && !m_NeteaseInFlight.empty() && Key == m_ActiveKey)
 			m_LyricsState = Meta.m_LyricState;
 
-		// NetEase-first fallback: if NetEase definitively has no lyrics for this
-		// track, hand it to lrclib so we still show something.
-		if(ApplyToActive && Meta.m_TriedLyric && Meta.m_TriedQQ && Meta.m_LyricState == ELyricsState::NOTFOUND && !m_NeteaseInLyricPhase && !m_NeteaseInCoverPhase && !m_pNeteaseRequest && !m_pQQRequest && !m_QQInSearch && !m_QQInLyric && m_pRequest == nullptr && m_LrclibState == ELyricsState::IDLE)
-		{
-			// hand the track over to lrclib. Switch the active key to the lrclib
-			// cache key so the next UpdateLyrics frame drives the lrclib pipeline.
-			STrack Fallback;
-			Fallback.m_Valid = true;
-			Fallback.m_Title = Meta.m_Title;
-			Fallback.m_Artist = Meta.m_Artist;
-			Fallback.m_DurationMs = Meta.m_DurationMs;
-			m_LrclibState = ELyricsState::LOADING;
-			m_LrclibOwnedKey = BuildCacheKey(Fallback);
-			m_ActiveKey = m_LrclibOwnedKey;
-			StartRequest(Fallback);
-		}
+		// (网易云→QQ→lrclib 的多渠道回落已上移到 UpdateNetease:原交接块只在
+		// ProcessNetease 可达——QQ 收口后没有网易请求完成帧,且换 m_ActiveKey
+		// 会被下一帧的 key 检查中止,是死码。)
 	}
 #endif
 
@@ -2504,91 +2547,17 @@ public:
 		// the karaoke fill, the progress rail and the equaliser. Content is either
 		// the song title or a single karaoke lyric line, whichever is enabled.
 
-		// idle: no track playing. Collapse to a compact capsule that shows only the
-		// game round timer; with no timer either (menus, demo playback, a server
-		// without a limit) fall back to a small black dot.
-		if(!Track.m_Valid)
-		{
-			const float IdleTimerSize = 16.0f * Scale;
-			const float IdlePad = 20.0f * Scale;
-			char aIdleTime[32];
-			GetGameTimeString(aIdleTime, sizeof(aIdleTime));
-			const bool ShowIdleTime = g_Config.m_TcIslandShowProgress && aIdleTime[0] != '\0';
-			const bool ShowLocalClock = g_Config.m_TcIslandLocalClock != 0;
-
-			float IdleW, IdleH;
-			if(ShowIdleTime || ShowLocalClock)
-			{
-				// 固定宽度：计时器/时间数字宽度会变，按 8px 网格取不会变的上限宽度。
-				float Content = IdlePad * 2.0f;
-				if(ShowIdleTime)
-					Content += m_pTextRender->TextWidth(IdleTimerSize, "00:00:00");
-				if(ShowLocalClock)
-				{
-					if(ShowIdleTime)
-						Content += 18.0f * Scale;
-					Content += m_pTextRender->TextWidth(IdleTimerSize, "00:00");
-				}
-				IdleW = std::ceil(Content / 8.0f) * 8.0f;
-				IdleH = Height;
-			}
-			else
-			{
-				IdleW = 40.0f * Scale;
-				IdleH = Height * 0.42f;
-			}
-
-			const float IdleX = std::clamp((ScreenW - IdleW) * 0.5f + OffsetX, 8.0f, std::max(8.0f, ScreenW - IdleW - 8.0f));
-			if(g_Config.m_TcIslandTransparent == 0)
-				DrawPanel(IdleX, PillY, IdleW, IdleH, PillRounding, PillCorners, false,
-					MakeGradient(IdleX, PillY, IdleW, IdleH));
-			else
-			{
-				// 透明模式的空闲态：同样的渐隐衬底，否则计时文字孤零零地浮在画面上
-				const float ScrimBlur = std::max(6.0f, IdleH * 0.55f);
-				DrawShadow(IdleX - IdleH * 0.25f, PillY + IdleH * 0.12f, IdleW + IdleH * 0.5f, IdleH * 0.9f,
-					IdleH * 0.45f, IGraphics::CORNER_ALL, ScrimBlur, ColorRGBA(0.0f, 0.0f, 0.0f, 0.42f));
-			}
-			if(ShowIdleTime || ShowLocalClock)
-			{
-				// 有对局计时则计时在左、时间在右；否则仅显示时间
-				char aClock[8] = "";
-				const std::time_t NowSec = std::time(nullptr);
-				struct tm LocalTm;
-#if defined(CONF_FAMILY_WINDOWS)
-				localtime_s(&LocalTm, &NowSec);
-#else
-				localtime_r(&NowSec, &LocalTm);
-#endif
-				str_format(aClock, sizeof(aClock), "%02d:%02d", LocalTm.tm_hour, LocalTm.tm_min);
-				const float ClockW = ShowLocalClock ? m_pTextRender->TextWidth(IdleTimerSize, "00:00") : 0.0f;
-				const float Gap = (ShowIdleTime && ShowLocalClock) ? 18.0f * Scale : 0.0f;
-				float Content = 0.0f;
-				if(ShowIdleTime)
-					Content += m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
-				if(ShowLocalClock)
-					Content += ClockW;
-				float CursorX = IdleX + (IdleW - Content - Gap) * 0.5f;
-				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
-				if(ShowIdleTime)
-				{
-					const float W = m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
-					m_pTextRender->Text((int)CursorX, (int)(PillY + (IdleH - IdleTimerSize) * 0.5f), IdleTimerSize, aIdleTime);
-					CursorX += W + Gap;
-				}
-				if(ShowLocalClock)
-					m_pTextRender->Text((int)CursorX, (int)(PillY + (IdleH - IdleTimerSize) * 0.5f), IdleTimerSize, aClock);
-			}
-			RestoreFace();
-			return;
-		}
+		// 无曲状态不再折叠成计时小胶囊：音乐模块常显(2026-11-01 用户要求),
+		// 空态时标题位显示占位文案,封面位是占位圆环、等化器静止。
 
 		// content strings (artist intentionally not shown)
 		char aSong[512];
 		if(!Track.m_Title.empty())
 			str_copy(aSong, Track.m_Title.c_str());
-		else
+		else if(!Track.m_Artist.empty())
 			str_copy(aSong, Track.m_Artist.c_str());
+		else
+			str_copy(aSong, TCLocalize("No music playing"));
 
 		// sizes: real pixel values at the 72 px reference height, so on a 1080p
 		// screen the text renderer gets exactly integer font sizes and the glyphs
@@ -2754,26 +2723,25 @@ public:
 			}
 
 			const int64_t PosMs = CurrentPositionMs();
-			const float RailH = 2.0f * Scale;
-			const float RailY = PillY + Height - RailH;
-			// The rail must not run into the bottom corner curves: clipping it to
-			// the rounded body ate its first and last few pixels, which read as an
-			// empty gap at the left end. Start and end it where the corner arcs
-			// finish instead, so the line is flush against the panel edge.
+			// 旧版把 2px 硬线贴在胶囊底边,看起来像贴上去的划痕(用户:"很突兀,
+			// 没有融合到灵动岛里面")。改成离底边 6px 的 3px 圆角小轨:空态也画
+			// 轨道底,播放时高亮段从轨道左端长出来,读作岛自己的进度而不是贴条。
+			const float RailH = 3.0f * Scale;
+			const float RailY = PillY + Height - RailH - 6.0f * Scale;
 			const float RailInset = NotchStyle ? Height * 0.30f : PillRounding;
 			const float RailX = X + RailInset;
 			const float RailW = std::max(0.0f, Width - RailInset * 2.0f);
 			float Frac = 0.0f;
 			if(TotalMs > 0)
 				Frac = std::clamp((float)PosMs / (float)TotalMs, 0.0f, 1.0f);
-			if(Frac > 0.0f && RailW > 0.0f)
+			if(RailW > RailH)
 			{
-				m_pGraphics->ClipEnable((int)X, (int)RailY, (int)Width, (int)std::ceil(RailH) + 1);
+				const float Rounding = RailH * 0.5f;
 				m_pGraphics->DrawRect(RailX, RailY, RailW, RailH,
-					ColorRGBA(1.0f, 1.0f, 1.0f, 0.08f), IGraphics::CORNER_NONE, 0.0f);
-				m_pGraphics->DrawRect(RailX, RailY, RailW * Frac, RailH,
-					AccentColor(0.9f), IGraphics::CORNER_NONE, 0.0f);
-				m_pGraphics->ClipDisable();
+					ColorRGBA(1.0f, 1.0f, 1.0f, 0.10f), IGraphics::CORNER_ALL, Rounding);
+				if(Frac > 0.0f)
+					m_pGraphics->DrawRect(RailX, RailY, std::max(RailH, RailW * Frac), RailH,
+						AccentColor(0.9f), IGraphics::CORNER_ALL, Rounding);
 			}
 		}
 

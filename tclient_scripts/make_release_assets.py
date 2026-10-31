@@ -58,9 +58,10 @@ EXCLUDED_ROOT_FILES = ("storage.cfg",)
 EXCLUDED_SUFFIXES = (".log", ".dmp")
 
 # Substrings that mark a file as deployment debris, e.g. the
-# "DDNet.exe.bak-relay-20261030-203958" backups a manual deploy leaves behind.
-# Shipping those would bloat the update by hundreds of megabytes.
-EXCLUDED_NAME_PARTS = (".bak",)
+# "DDNet.exe.bak-relay-20261030-203958" backups a manual deploy leaves behind,
+# or the "TClientUpdater.exe.old_20261031_040654" renames the updater itself
+# makes while self-replacing. Shipping those bloats the update.
+EXCLUDED_NAME_PARTS = (".bak", ".old_")
 
 # Prefixes of directories the updater creates itself.
 EXCLUDED_DIR_PREFIXES = ("update_backup_", "update_staging_")

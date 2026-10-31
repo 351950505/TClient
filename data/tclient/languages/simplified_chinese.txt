@@ -1350,3 +1350,6 @@ Update rejected: manifest signature is invalid
 
 Update rejected: missing bootstrap helper
 == 已拒绝更新：缺少自举 helper
+
+Show local computer time (HH:MM)
+== 显示本地电脑时间（时:分）

@@ -2514,13 +2514,22 @@ public:
 			char aIdleTime[32];
 			GetGameTimeString(aIdleTime, sizeof(aIdleTime));
 			const bool ShowIdleTime = g_Config.m_TcIslandShowProgress && aIdleTime[0] != '\0';
+			const bool ShowLocalClock = g_Config.m_TcIslandLocalClock != 0;
 
 			float IdleW, IdleH;
-			if(ShowIdleTime)
+			if(ShowIdleTime || ShowLocalClock)
 			{
-				// 固定宽度：计时器数字宽度会随时间变化（1:09 -> 1:10），跟着它伸缩
-				// 每次都要换一张端帽纹理。这里按 8px 网格取一个不会变的上限宽度。
-				IdleW = std::ceil((m_pTextRender->TextWidth(IdleTimerSize, "00:00:00") + IdlePad * 2.0f) / 8.0f) * 8.0f;
+				// 固定宽度：计时器/时间数字宽度会变，按 8px 网格取不会变的上限宽度。
+				float Content = IdlePad * 2.0f;
+				if(ShowIdleTime)
+					Content += m_pTextRender->TextWidth(IdleTimerSize, "00:00:00");
+				if(ShowLocalClock)
+				{
+					if(ShowIdleTime)
+						Content += 18.0f * Scale;
+					Content += m_pTextRender->TextWidth(IdleTimerSize, "00:00");
+				}
+				IdleW = std::ceil(Content / 8.0f) * 8.0f;
 				IdleH = Height;
 			}
 			else
@@ -2540,13 +2549,35 @@ public:
 				DrawShadow(IdleX - IdleH * 0.25f, PillY + IdleH * 0.12f, IdleW + IdleH * 0.5f, IdleH * 0.9f,
 					IdleH * 0.45f, IGraphics::CORNER_ALL, ScrimBlur, ColorRGBA(0.0f, 0.0f, 0.0f, 0.42f));
 			}
-			if(ShowIdleTime)
+			if(ShowIdleTime || ShowLocalClock)
 			{
-				const float IdleTextW = m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
+				// 有对局计时则计时在左、时间在右；否则仅显示时间
+				char aClock[8] = "";
+				const std::time_t NowSec = std::time(nullptr);
+				struct tm LocalTm;
+#if defined(CONF_FAMILY_WINDOWS)
+				localtime_s(&LocalTm, &NowSec);
+#else
+				localtime_r(&NowSec, &LocalTm);
+#endif
+				str_format(aClock, sizeof(aClock), "%02d:%02d", LocalTm.tm_hour, LocalTm.tm_min);
+				const float ClockW = ShowLocalClock ? m_pTextRender->TextWidth(IdleTimerSize, "00:00") : 0.0f;
+				const float Gap = (ShowIdleTime && ShowLocalClock) ? 18.0f * Scale : 0.0f;
+				float Content = 0.0f;
+				if(ShowIdleTime)
+					Content += m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
+				if(ShowLocalClock)
+					Content += ClockW;
+				float CursorX = IdleX + (IdleW - Content - Gap) * 0.5f;
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
-				m_pTextRender->Text((int)(IdleX + (IdleW - IdleTextW) * 0.5f),
-					(int)(PillY + (IdleH - IdleTimerSize) * 0.5f),
-					IdleTimerSize, aIdleTime);
+				if(ShowIdleTime)
+				{
+					const float W = m_pTextRender->TextWidth(IdleTimerSize, aIdleTime);
+					m_pTextRender->Text((int)CursorX, (int)(PillY + (IdleH - IdleTimerSize) * 0.5f), IdleTimerSize, aIdleTime);
+					CursorX += W + Gap;
+				}
+				if(ShowLocalClock)
+					m_pTextRender->Text((int)CursorX, (int)(PillY + (IdleH - IdleTimerSize) * 0.5f), IdleTimerSize, aClock);
 			}
 			RestoreFace();
 			return;
@@ -2626,10 +2657,26 @@ public:
 		const float ClockCellW = ClockPad + GameW + ClockPad;
 		const float DiscCellW = DiscPad + CoverSize + DiscPad;
 		const float EqCellW = EqPadL + EqW + EqPadR;
+		// TClient: 本地时间单元（歌词右侧、等化器左侧）。打开才占宽度。
+		const bool ShowLocalClock = g_Config.m_TcIslandLocalClock != 0;
+		char aLocalClock[8] = "";
+		if(ShowLocalClock)
+		{
+			const std::time_t NowSec = std::time(nullptr);
+			struct tm LocalTm;
+#if defined(CONF_FAMILY_WINDOWS)
+			localtime_s(&LocalTm, &NowSec);
+#else
+			localtime_r(&NowSec, &LocalTm);
+#endif
+			str_format(aLocalClock, sizeof(aLocalClock), "%02d:%02d", LocalTm.tm_hour, LocalTm.tm_min);
+		}
+		const float LocalClockTextW = ShowLocalClock ? m_pTextRender->TextWidth(TimerSize, "00:00") : 0.0f;
+		const float LocalClockCellW = ShowLocalClock ? (ClockPad + LocalClockTextW + ClockPad) : 0.0f;
 		const float TextGapL = 14.0f * Scale;          // disc cell -> lyric text
 		const float TextGapR = 14.0f * Scale;          // lyric text -> divider
 		const float LeftChrome = (ShowGameTime ? ClockCellW : 0.0f) + DiscCellW + TextGapL;
-		const float RightChrome = TextGapR + EqCellW;
+		const float RightChrome = TextGapR + EqCellW + (ShowLocalClock ? ClockPad + LocalClockTextW + ClockPad : 0.0f);
 		const float ChromeW = LeftChrome + RightChrome;
 		// the widest the capsule may get on this screen: keep it on-screen with a
 		// comfortable margin, but never below the compact minimum.
@@ -2818,8 +2865,16 @@ public:
 		// ---- lyric / title column -------------------------------------------
 		const float TextX = DiscCellX + DiscCellW + TextGapL;
 		const float EqCellX = X + Width - EqCellW;
-		const float TextRight = EqCellX - TextGapR;
+		const float LocalClockCellX = EqCellX - LocalClockCellW;
+		const float TextRight = (ShowLocalClock ? LocalClockCellX : EqCellX) - TextGapR;
 		DrawDivider(EqCellX);
+		if(ShowLocalClock)
+		{
+			DrawDivider(LocalClockCellX);
+			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
+			m_pTextRender->Text(LocalClockCellX + ClockPad, PillY + (Height - TimerSize) * 0.5f, TimerSize, aLocalClock);
+			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
+		}
 
 		// ---- right cell: equaliser ------------------------------------------
 		// Four bars, animated from the playback clock. No label, no numbers: the

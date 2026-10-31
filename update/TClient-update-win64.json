@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.10",
+  "version": "1.7.8.11",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64430097,
-  "sha256": "6fdaa2e95f3caf3b7db91466fdef47b6b6a3af05337e6c5bd2dc3814e291ae23",
-  "notes": "1.7.8.10 测试版（验证 gh-proxy 加速自动更新）",
+  "size": 64430699,
+  "sha256": "7f7d7992e9e7eb05dacc70074b3a6ecad4aaa55f4d1e073dee9e885783df927d",
+  "notes": "灵动岛新增本地电脑时间模块（歌词右侧）",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 299008,

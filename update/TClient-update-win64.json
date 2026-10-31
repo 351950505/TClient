@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.20",
+  "version": "1.7.8.21",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64296969,
-  "sha256": "4ef5402cf20840f84670c15dd60106e5b2a36aa31fc0c3914d35f12dd7324519",
-  "notes": "1.7.8.20:记分板玩家菜单新增偷取皮肤/加入队伍(TAB→中键点玩家)+监控进程LS锚定校正(歌词跟嘴,LS断供时音频钟自由跑不落后)",
+  "size": 64297124,
+  "sha256": "b49b0e67e9aaedd237d434999e7d6dac681fe5c40ed9bbf519438d9e8e1b5816",
+  "notes": "1.7.8.21:加入队伍改用/team<队伍数字>(无队不发)+歌词卡拉OK防闪(重锚仅大偏差时)+卡拉OK提前量默认0可负+逐字宽度缓存(修灵动岛掉帧,DDNet曾冲到167%CPU)",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

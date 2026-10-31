@@ -1354,11 +1354,16 @@ CUi::EPopupMenuFunctionResult CScoreboard::CScoreboardPopupContext::Render(void 
 		Container.VSplitLeft(ActionSize, &Action, &Container);
 		if(pUi->DoButton_FontIcon(&pPopupContext->m_JoinTeamAction, FontIcon::ICON_USERS, false, &Action, BUTTONFLAG_LEFT, ActionCorners))
 		{
-			// DDNet 服务端命令:/team <id> 请求加入该玩家所在队伍
-			char aTeamCmd[32];
-			str_format(aTeamCmd, sizeof(aTeamCmd), "say \"/team %d\"", pPopupContext->m_ClientId);
-			pScoreboard->Console()->ExecuteLine(aTeamCmd, IConsole::CLIENT_ID_UNSPECIFIED);
-			return CUi::POPUP_CLOSE_CURRENT;
+			// DDNet 服务端命令:/team <队伍数字>(用户纠正:不是玩家 id,是他队伍数字)
+			const int DDTeam = pScoreboard->GameClient()->m_Teams.Team(pPopupContext->m_ClientId);
+			if(DDTeam > 0)
+			{
+				char aTeamCmd[32];
+				str_format(aTeamCmd, sizeof(aTeamCmd), "say \"/team %d\"", DDTeam);
+				pScoreboard->Console()->ExecuteLine(aTeamCmd, IConsole::CLIENT_ID_UNSPECIFIED);
+				return CUi::POPUP_CLOSE_CURRENT;
+			}
+			// 对方没进队(0):发不出去,菜单留着让用户知道没生效
 		}
 		pScoreboard->GameClient()->m_Tooltips.DoToolTip(&pPopupContext->m_JoinTeamAction, &Action, TCLocalize("Join team"));
 	}

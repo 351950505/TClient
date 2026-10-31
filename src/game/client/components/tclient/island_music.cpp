@@ -89,6 +89,21 @@ public:
 	std::string m_LastScrollText;
 	std::string m_CurScrollText;
 	int64_t m_ScrollStartTick = 0;
+
+	// 卡拉OK/标题逐帧文本缓存(2026-11-01):yrc 逐字歌词挂上后,GreenEndX 每帧对
+	// 每个字做 substr 堆分配 + TextWidth 测量(实测 DDNet 冲到 167% CPU,灵动岛
+	// 掉帧)。同一行文字不变 —— 按文本+字号缓存字宽/整行宽/适配结果,换行、
+	// 换曲、字号变化才重算,稳态下每帧 0 次 TextWidth。
+	std::string m_KaraokeKey;          // 当前字宽缓存对应的行文本
+	float m_KaraokeSize = -1.0f;       // 字号
+	float m_KaraokeFullW = -1.0f;      // 整行宽度
+	std::vector<float> m_KaraokeWordW; // 与 m_vWords 对齐(非法词记 -1)
+	std::string m_TitleFitKey;         // 标题 FitText 缓存键(文本)
+	float m_TitleFitMaxW = -1.0f;
+	std::string m_TitleFitText;
+	std::string m_SongFitKey;          // 无词态歌名 FitText 缓存键
+	float m_SongFitMaxW = -1.0f;
+	std::string m_SongFitText;
 	// vinyl record spin angle (radians)
 	float m_VinylAngle = 0.0f;
 
@@ -1319,7 +1334,7 @@ public:
 		// Detect a frozen position provider: some SMTC sources report a constant
 		// value and never advance. When the snapshot is genuinely frozen we let the
 		// wall clock drive the position; otherwise the snapshot itself is the truth.
-		const bool SameSnapshot = (Snapshot == m_LastSnapshotMs);
+		const bool SnapshotChanged = Snapshot != m_LastSnapshotMs;
 		m_LastSnapshotMs = Snapshot;
 
 		const bool FirstSync = m_ClockTick == 0;
@@ -1327,9 +1342,15 @@ public:
 
 		if(TrustPosition)
 		{
-			// Real progress available: adopt it and restart the interpolation window
-			// on every fresh snapshot so wall clock can't drift more than one poll.
-			if(FirstSync || StateChanged || !SameSnapshot)
+			// Real progress available: adopt it and restart the interpolation window.
+			// 重锚条件(2026-11-01 用户反馈"歌词渐变变闪了"):原先"值一变就重锚"——
+			// 监控约每秒轮一次 watcher,轮询间隔一抖,新锚点就落在插值位置后面,
+			// 位置每秒往回跳一截,卡拉OK一秒一闪。改为:快照变化**且**与当前插值
+			// 偏差 >300ms 才重锚 —— 小抖动由插值自然吸收,真 seek/切源立即跟上;
+			// 快照值没变(源冻结)则维持旧锚点让墙钟自由跑,与原行为一致。
+			const int64_t Interp = CurrentPositionMs();
+			const int64_t Drift = Snapshot > Interp ? Snapshot - Interp : Interp - Snapshot;
+			if(FirstSync || StateChanged || (SnapshotChanged && Drift > 300))
 			{
 				m_ClockPositionMs = Snapshot;
 				m_ClockTick = Now;
@@ -2889,7 +2910,28 @@ public:
 			// two rows: song title above, the karaoke line below
 			const float MaxTextW = TextRight - TextX;
 			str_copy(aLyricBuf, m_vLines[LyricIndex].m_Text.c_str());
-			const float FullW = m_pTextRender->TextWidth(LyricSize, aLyricBuf);
+			const SLyricLine &Line = m_vLines[LyricIndex];
+			const bool HasWords = !Line.m_vWords.empty();
+
+			// 逐帧文本缓存(2026-11-01):yrc 逐字歌词挂上后 GreenEndX 每帧对每个字
+			// 做 substr 堆分配 + TextWidth 测量,是灵动岛掉帧主因(实测 DDNet 167%
+			// CPU)。同一行文字不变 —— 按文本+字号缓存整行宽与逐字宽,换行/换曲/
+			// 字号变化才重算,稳态每帧 0 次 TextWidth。
+			if(m_KaraokeKey != Line.m_Text || m_KaraokeSize != LyricSize || (int)m_KaraokeWordW.size() != (int)Line.m_vWords.size() || m_KaraokeFullW < 0.0f)
+			{
+				m_KaraokeKey = Line.m_Text;
+				m_KaraokeSize = LyricSize;
+				m_KaraokeFullW = m_pTextRender->TextWidth(LyricSize, aLyricBuf);
+				m_KaraokeWordW.assign(Line.m_vWords.size(), -1.0f);
+				for(size_t wi = 0; wi < Line.m_vWords.size(); ++wi)
+				{
+					const SWord &W = Line.m_vWords[wi];
+					if(W.m_CharBegin < 0 || W.m_CharBegin + W.m_CharLen > (int)Line.m_Text.size())
+						continue;
+					m_KaraokeWordW[wi] = m_pTextRender->TextWidth(LyricSize, Line.m_Text.substr(W.m_CharBegin, W.m_CharLen).c_str());
+				}
+			}
+			const float FullW = m_KaraokeFullW;
 			const float TitleGap = 2.0f * Scale;
 			// centre the two-row block vertically instead of pinning it to a
 			// fraction of the height, which left a big gap under the lyric.
@@ -2899,18 +2941,21 @@ public:
 
 			// small, dim title keeps the lyric as the loud element
 			{
-				char aTitleFit[512];
-				str_copy(aTitleFit, aSong);
-				FitText(m_pTextRender, TitleSize, aTitleFit, MaxTextW);
+				if(m_TitleFitKey != aSong || m_TitleFitMaxW != MaxTextW || m_TitleFitText.empty())
+				{
+					char aTitleFit[512];
+					str_copy(aTitleFit, aSong);
+					FitText(m_pTextRender, TitleSize, aTitleFit, MaxTextW);
+					m_TitleFitKey = aSong;
+					m_TitleFitMaxW = MaxTextW;
+					m_TitleFitText = aTitleFit;
+				}
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.55f);
-				m_pTextRender->Text(TextX, TitleY, TitleSize, aTitleFit);
+				m_pTextRender->Text(TextX, TitleY, TitleSize, m_TitleFitText.c_str());
 			}
 
 			const ColorRGBA ColorUnsung(1.0f, 1.0f, 1.0f, 0.95f);       // not yet sung -> white
 			const ColorRGBA ColorSung = AccentColor(1.0f);                // sung / singing -> accent
-
-			const SLyricLine &Line = m_vLines[LyricIndex];
-			const bool HasWords = !Line.m_vWords.empty();
 
 			// Paint the current line at baseline X (already includes any marquee
 			// offset). If the line carries per-character timings, do a smooth
@@ -2918,19 +2963,17 @@ public:
 			// Compute the exact x position where green fill currently ends so the
 			// wipe is continuous (sub-character progress), not a hard per-char jump.
 			auto GreenEndX = [&](float DrawX) -> float {
-				// Karaoke fill runs a touch ahead of the lyric line so the green
-				// wipe leads the current syllable slightly (feels snappier).
+				// Karaoke fill lead: tc_island_karaoke_lead(默认 0,可负 = 落后)。
 				const int64_t KaraokePosMs = LyricPosMs + g_Config.m_TcIslandKaraokeLead;
 				if(!HasWords)
-					return DrawX + (Line.m_StartMs > KaraokePosMs ? 0.0f : m_pTextRender->TextWidth(LyricSize, aLyricBuf));
-				const std::string &Text = Line.m_Text;
+					return DrawX + (Line.m_StartMs > KaraokePosMs ? 0.0f : m_KaraokeFullW);
 				float CurX = DrawX;
-				for(const SWord &W : Line.m_vWords)
+				for(size_t wi = 0; wi < Line.m_vWords.size(); ++wi)
 				{
-					if(W.m_CharBegin < 0 || W.m_CharBegin + W.m_CharLen > (int)Text.size())
+					const SWord &W = Line.m_vWords[wi];
+					if(W.m_CharBegin < 0 || W.m_CharBegin + W.m_CharLen > (int)Line.m_Text.size())
 						continue;
-					const std::string Sub = Text.substr(W.m_CharBegin, W.m_CharLen);
-					const float CharW = m_pTextRender->TextWidth(LyricSize, Sub.c_str());
+					const float CharW = m_KaraokeWordW[wi];
 					if(KaraokePosMs < W.m_StartMs)
 						return CurX; // not reached this char yet -> fill ends here
 					if(KaraokePosMs >= W.m_EndMs)
@@ -3040,11 +3083,17 @@ public:
 		{
 			// no lyric: song title alone, vertically centred on the right
 			const float MaxTextW = TextRight - TextX;
-			char aFitSong[512];
-			str_copy(aFitSong, aSong);
-			FitText(m_pTextRender, LyricSize, aFitSong, MaxTextW);
+			if(m_SongFitKey != aSong || m_SongFitMaxW != MaxTextW || m_SongFitText.empty())
+			{
+				char aFitSong[512];
+				str_copy(aFitSong, aSong);
+				FitText(m_pTextRender, LyricSize, aFitSong, MaxTextW);
+				m_SongFitKey = aSong;
+				m_SongFitMaxW = MaxTextW;
+				m_SongFitText = aFitSong;
+			}
 			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.96f);
-			m_pTextRender->Text(TextX, PillY + (Height - LyricSize) * 0.5f, LyricSize, aFitSong);
+			m_pTextRender->Text(TextX, PillY + (Height - LyricSize) * 0.5f, LyricSize, m_SongFitText.c_str());
 		}
 		m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 		if(TransparentMode)

@@ -827,11 +827,15 @@ void CTClient::RenderPlayerMiddleMenu()
 	Panel.HSplitTop(22.0f, &Row, &Panel);
 	if(Ui()->DoButton_PopupMenu(&s_TeamButton, TCLocalize("Join team"), &Row, 10.0f, TEXTALIGN_ML))
 	{
-		// 加入队伍:DDNet 服务端命令 /team <id>(请求加入该玩家所在队伍)
-		char aCmd[32];
-		str_format(aCmd, sizeof(aCmd), "say \"/team %d\"", m_PlayerMenuCid);
-		Console()->ExecuteLine(aCmd, IConsole::CLIENT_ID_UNSPECIFIED);
-		m_PlayerMenuCid = -1;
+		// 加入队伍:/team <队伍数字>(不是玩家 id);对方没进队时不发
+		const int DDTeam = GameClient()->m_Teams.Team(m_PlayerMenuCid);
+		if(DDTeam > 0)
+		{
+			char aCmd[32];
+			str_format(aCmd, sizeof(aCmd), "say \"/team %d\"", DDTeam);
+			Console()->ExecuteLine(aCmd, IConsole::CLIENT_ID_UNSPECIFIED);
+			m_PlayerMenuCid = -1;
+		}
 	}
 
 	// 点面板外左键 / 按右键关闭(中键的开关在上方分支处理)

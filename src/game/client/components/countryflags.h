@@ -33,8 +33,9 @@ public:
 	size_t Num() const;
 	const CCountryFlag &GetByCountryCode(int CountryCode) const;
 	const CCountryFlag &GetByIndex(size_t Index) const;
-	// allow_in_streamer_mode 只给"国旗/语言选择器"用：那是用户自己挑国旗的界面，
-	// 隐藏了就没法操作。其余所有渲染点在主播模式下由 Render 内部直接吞掉。
+	// 主播模式兜底：国旗属于身份信息，主开关开着时所有渲染点一律不画。
+	// allow_in_streamer_mode 保留为显式逃生口，但当前没有任何调用点使用——
+	// 连国旗/语言选择器也只显示国家代码文字，不显示旗面。
 	void Render(const CCountryFlag &Flag, ColorRGBA Color, float x, float y, float w, float h, bool AllowInStreamerMode = false);
 	void Render(int CountryCode, ColorRGBA Color, float x, float y, float w, float h, bool AllowInStreamerMode = false);
 

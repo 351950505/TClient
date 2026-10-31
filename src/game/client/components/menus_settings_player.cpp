@@ -144,7 +144,7 @@ void CMenus::RenderSettingsPlayer(CUIRect MainView)
 		const float OldWidth = FlagRect.w;
 		FlagRect.w = FlagRect.h * 2;
 		FlagRect.x += (OldWidth - FlagRect.w) / 2.0f;
-		GameClient()->m_CountryFlags.Render(Entry.m_pFlag->m_CountryCode, ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), FlagRect.x, FlagRect.y, FlagRect.w, FlagRect.h, true);
+		GameClient()->m_CountryFlags.Render(Entry.m_pFlag->m_CountryCode, ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), FlagRect.x, FlagRect.y, FlagRect.w, FlagRect.h);
 
 		if(Entry.m_pFlag->m_Texture.IsValid() || Entry.m_pFlag->m_CountryCode == CountryCode::DEFAULT)
 		{

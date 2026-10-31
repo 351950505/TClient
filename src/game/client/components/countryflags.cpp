@@ -180,6 +180,7 @@ void CCountryFlags::Render(const CCountryFlag &Flag, ColorRGBA Color, float x, f
 {
 	// 主播模式兜底：国旗属于身份信息，只要主开关开着就一律不画。
 	// 各调用点虽然已经自己判过，但入口再挡一次，新增调用点不会漏。
+	// 选择器也走这里——旗面不画，国家代码文字仍然可见可选。
 	if(!AllowInStreamerMode && g_Config.m_MeStreamerMode)
 		return;
 	if(Flag.m_Texture.IsValid())

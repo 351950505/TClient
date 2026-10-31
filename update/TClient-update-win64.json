@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.13",
+  "version": "1.7.8.14",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64430705,
-  "sha256": "a66a804969a78826be0bca5ddf71b67fbdd9face33ad5bd625808c5f507938c2",
-  "notes": "1.7.8.13：快速输入 Tater 模式与上游 TaterClient 完全对齐（subtick 下不再逐帧刷新目标点）",
+  "size": 64430696,
+  "sha256": "e1f1c25af35d332121f976cbc5c2f3ea9d5074a3b1edf7d4eb9b12aa804afefd",
+  "notes": "1.7.8.14：主播模式下国旗选择器也不再显示旗面",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 299008,

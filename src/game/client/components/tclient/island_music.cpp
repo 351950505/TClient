@@ -2620,7 +2620,10 @@ public:
 		// bottom edge already says how far into the track we are, so the number
 		// was pure duplication. The column now carries just the bars.
 		const int NumBars = 4;
-		const float EqBarW = 3.0f * Scale;
+		// 透明模式下没有黑胶囊撑底，柱子直接压在游戏画面上：3px 宽 + 0.35
+		// alpha 在亮场景里几乎看不见（玩家反馈的"右边缺了"）。统一加宽，并靠
+		// 下面的最小 alpha 保证任何背景下都能看清轮廓。
+		const float EqBarW = 4.0f * Scale;
 		const float EqBarGap = 3.0f * Scale;
 		const float EqW = NumBars * EqBarW + (NumBars - 1) * EqBarGap;
 
@@ -2674,7 +2677,7 @@ public:
 		const float LocalClockTextW = ShowLocalClock ? m_pTextRender->TextWidth(TimerSize, "00:00") : 0.0f;
 		const float LocalClockCellW = ShowLocalClock ? (ClockPad + LocalClockTextW + ClockPad) : 0.0f;
 		const float TextGapL = 14.0f * Scale;          // disc cell -> lyric text
-		const float TextGapR = 14.0f * Scale;          // lyric text -> divider
+		const float TextGapR = 20.0f * Scale;          // lyric text -> divider（与绘制侧保持一致）
 		const float LeftChrome = (ShowGameTime ? ClockCellW : 0.0f) + DiscCellW + TextGapL;
 		const float RightChrome = TextGapR + EqCellW + (ShowLocalClock ? ClockPad + LocalClockTextW + ClockPad : 0.0f);
 		const float ChromeW = LeftChrome + RightChrome;
@@ -2869,6 +2872,8 @@ public:
 		const float TextX = DiscCellX + DiscCellW + TextGapL;
 		const float EqCellX = X + Width - EqCellW;
 		const float LocalClockCellX = EqCellX - LocalClockCellW;
+		// 歌词右侧留白用外层同一个 TextGapR（20px）：等化器左边还有 EqPadL，
+		// 文字贴着分隔线时视觉上会把整块右侧"吃掉"。
 		const float TextRight = (ShowLocalClock ? LocalClockCellX : EqCellX) - TextGapR;
 		// 先画时间单元，再画等化器 —— 等化器在最右端，必须在最后覆盖绘制，
 		// 否则会被后面绘制的内容盖住（之前"右边不见了"就是这个顺序问题）。
@@ -2903,9 +2908,11 @@ public:
 				// 2px 量化：高度每差 1px 就是一张新烘焙纹理，逐帧变化会把
 				// 形状缓存冲爆（缓存满 64 条会整体清空重烤），也让每一帧都在烘焙。
 				const float SnappedH = std::max(2.0f, std::round(BarH * 0.5f) * 2.0f);
+				// 暂停态 0.35 在透明模式（无黑底）下几乎不可见，抬到 0.62；
+				// 播放态保持 0.85，两者的差异仍能看出"在动/没在动"。
+				const float BarAlpha = m_ClockPlaying ? 0.85f : 0.62f;
 				DrawShape(EqCellX + EqPadL + i * (EqBarW + EqBarGap), EqY + (EqH - SnappedH), EqBarW, SnappedH,
-					EqBarW * 0.5f, IGraphics::CORNER_ALL,
-					AccentColor(m_ClockPlaying ? 0.85f : 0.35f));
+					EqBarW * 0.5f, IGraphics::CORNER_ALL, AccentColor(BarAlpha));
 			}
 		}
 

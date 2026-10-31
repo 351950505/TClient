@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.16",
+  "version": "1.7.8.17",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64434302,
-  "sha256": "df01fc4ba72234b6987e07f47bc72c82fedcf10defa089ff2fe719d79882fb67",
-  "notes": "1.7.8.16：更新后自动清理旧备份目录与已用更新包，不再每次膨胀约 95MB",
+  "size": 64448507,
+  "sha256": "ce4de48c1c5c9e62d78f1fac43af4a4d7a67106e02e32621a588d4801c41232d",
+  "notes": "1.7.8.17：素材编辑器（10 类素材、16 种混合模式、导出为自定义资产并自动启用）+ 灵动岛右侧等化器可见性修复 + 表情通道间隔默认 100ms（下限 100ms）",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

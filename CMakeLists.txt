@@ -2889,6 +2889,9 @@ if(CLIENT)
     components/tclient/custom_communities.cpp
     components/tclient/custom_communities.h
     components/tclient/data_version.h
+    components/tclient/assets_editor.cpp
+    components/tclient/assets_editor.h
+    components/tclient/menus_tclient_assets.cpp
     components/tclient/island_music.cpp
     components/tclient/island_music.h
     components/tclient/lyric_parser.cpp

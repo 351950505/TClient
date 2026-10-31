@@ -46,6 +46,7 @@ enum
 	TCLIENT_TAB_PING,
 	TCLIENT_TAB_INFO,
 	TCLIENT_TAB_STATUSBAR,
+	TCLIENT_TAB_ASSETS,
 	NUMBER_OF_TCLIENT_TABS
 };
 
@@ -443,7 +444,8 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 		TCLocalize("Chat Binds"),
 		"Ping",
 		TCLocalize("Info"),
-		TCLocalize("Statusbar")};
+		TCLocalize("Statusbar"),
+		TCLocalize("Assets")};
 
 	for(int Tab = 0; Tab < NUMBER_OF_TCLIENT_TABS; ++Tab)
 	{
@@ -473,6 +475,8 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 		RenderSettingsTClientInfo(MainView);
 	if(s_CurCustomTab == TCLIENT_TAB_STATUSBAR)
 		RenderSettingsTClientStatusBar(MainView);
+	if(s_CurCustomTab == TCLIENT_TAB_ASSETS)
+		RenderSettingsTClientAssets(MainView);
 }
 
 void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
@@ -2397,7 +2401,7 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelSoundRange, &g_Config.m_TcPingwheelSoundRange, &Button, TCLocalize("Sound audible range (0 = whole map)"), 0, 5000, &CUi::ms_LinearScrollbarScale, 0, "");
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPingwheelEmote, TCLocalize("Send signals via emoticons (server needs low emoticon delay)"), &g_Config.m_TcPingwheelEmote, &View, LineSize);
 	View.HSplitTop(LineSize, &Button, &View);
-	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelEmoteMs, &g_Config.m_TcPingwheelEmoteMs, &Button, TCLocalize("Emoticon interval (>= server emoticon delay)"), 20, 3000, &CUi::ms_LinearScrollbarScale, 0, "ms");
+	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelEmoteMs, &g_Config.m_TcPingwheelEmoteMs, &Button, TCLocalize("Emoticon interval (>= server emoticon delay)"), 100, 3000, &CUi::ms_LinearScrollbarScale, 0, "ms");
 	View.HSplitTop(MarginSmall * 4, nullptr, &View);
 
 	// 只调顺序：8 行 = 预览 + 名称 + 序号 + 上/下
@@ -2828,7 +2832,8 @@ void CMenus::RenderSettingsTClientInfo(CUIRect MainView)
 		TCLocalize("Chat Binds"),
 		"Ping",
 		TCLocalize("Info"),
-		TCLocalize("Statusbar")};
+		TCLocalize("Statusbar"),
+		TCLocalize("Assets")};
 	static int s_aShowTabs[NUMBER_OF_TCLIENT_TABS] = {};
 	for(int i = 0; i < NUMBER_OF_TCLIENT_TABS - 1; ++i)
 	{

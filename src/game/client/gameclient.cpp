@@ -473,6 +473,10 @@ void CGameClient::OnInit()
 		m_Menus.RenderLoading(pLoadingDDNetCaption, pLoadingMessageAssets, 1);
 	}
 
+	// 素材编辑器不是 CComponent（不需要每帧钩子），只把 GameClient 交过去，
+	// 让它在需要时能取 Storage()/Graphics()。
+	m_AssetsEditor.SetGameClient(this);
+
 	m_GameWorld.Init(Collision(), m_aTuningList, &m_MapBugs);
 	OnReset();
 

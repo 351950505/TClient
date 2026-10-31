@@ -84,6 +84,7 @@
 #include "components/tclient/skinprofiles.h"
 #include "components/tclient/statusbar.h"
 #include "components/tclient/island_music.h"
+#include "components/tclient/assets_editor.h"
 #include "components/tclient/tclient.h"
 #include "components/tclient/trails.h"
 #include "components/tclient/translate.h"
@@ -250,6 +251,7 @@ public:
 	CMovingTiles m_MovingTilesBackground = CMovingTiles{false};
 	CMovingTiles m_MovingTilesForeground = CMovingTiles{true};
 	CIslandMusic m_IslandMusic;
+	CAssetsEditor m_AssetsEditor; // TClient: 素材编辑器（不是 CComponent，不需要生命周期钩子）
 
 private:
 	std::vector<class CComponent *> m_vpAll;

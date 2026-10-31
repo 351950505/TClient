@@ -1353,3 +1353,114 @@ Update rejected: missing bootstrap helper
 
 Show local computer time (HH:MM)
 == 显示本地电脑时间（时:分）
+
+Assets
+== 素材
+
+Asset Type
+== 素材类别
+
+Slot Settings
+== 槽位设置
+
+Preview %dx%d
+== 预览 %dx%d
+
+Reset slots
+== 重置槽位
+
+Source: 
+== 来源：
+
+Blend: 
+== 混合模式：
+
+Strength
+== 强度
+
+Tint
+== 染色
+
+Clear tint
+== 清除染色
+
+Export
+== 导出
+
+Name: 
+== 名称：
+
+Export asset
+== 导出素材
+
+Exported to %s
+== 已导出到 %s
+
+Multiply
+== 正片叠底
+
+Screen
+== 滤色
+
+Overlay
+== 叠加
+
+Darken
+== 变暗
+
+Color Burn
+== 颜色加深
+
+Lighten
+== 变亮
+
+Color Dodge
+== 颜色减淡
+
+Soft Light
+== 柔光
+
+Hard Light
+== 强光
+
+Difference
+== 差值
+
+Exclusion
+== 排除
+
+Hue
+== 色相
+
+Saturation
+== 饱和度
+
+Luminosity
+== 明度
+
+Game
+== 游戏
+
+Emoticons
+== 表情
+
+Entities
+== 实体
+
+Skin
+== 皮肤
+
+Particles
+== 粒子
+
+Cursor
+== 光标
+
+Arrow
+== 箭头
+
+Strong/Weak
+== 强弱钩
+
+Extras
+== 额外

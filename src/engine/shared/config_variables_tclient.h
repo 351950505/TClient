@@ -412,3 +412,4 @@ MACRO_CONFIG_STR(TcRelayAddr, tc_relay_addr, 64, "8.163.48.23:8305", CFGFLAG_CLI
 MACRO_CONFIG_INT(TcPingwheelEmoteMs, tc_pingwheel_emote_ms, 100, 100, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Emoticon channel send interval in ms (must be >= server sv_emoticon_ms_delay, else frames get dropped)")
 MACRO_CONFIG_INT(TcTranslateRecentCount, tc_translate_recent_count, 5, 1, 16, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How many recent non-Chinese chat lines the translate-recent bind translates")
 MACRO_CONFIG_INT(TcScoreboardMedia, tc_scoreboard_media, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show music controls on the left of the scoreboard")
+MACRO_CONFIG_INT(TcProcessPriority, tc_process_priority, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Process priority class (0 = normal, 1 = above normal, 2 = high; keeps the game smooth when background apps spike the CPU; restart to apply)")

@@ -250,6 +250,14 @@ void CTClient::ConchainRandomColor(IConsole::IResult *pResult, void *pUserData, 
 
 void CTClient::OnInit()
 {
+#if defined(CONF_FAMILY_WINDOWS)
+	// TClient(2026-11-01):CPU 尖峰(网易云 webview GC、Defender 扫描、监控进程
+	// 的秒级轮询)抢占游戏线程会造成瞬时卡顿 —— 把进程提到高于普通一档,尖峰
+	// 来时调度器优先保游戏。tc_process_priority:F1 可改,重启生效。
+	const DWORD PriorityClass = g_Config.m_TcProcessPriority == 2 ? HIGH_PRIORITY_CLASS :
+		g_Config.m_TcProcessPriority == 1 ? ABOVE_NORMAL_PRIORITY_CLASS : NORMAL_PRIORITY_CLASS;
+	SetPriorityClass(GetCurrentProcess(), PriorityClass);
+#endif
 	TextRender()->SetCustomFace(g_Config.m_TcCustomFont);
 	m_pGraphics = Kernel()->RequestInterface<IEngineGraphics>();
 	FetchTClientInfo();

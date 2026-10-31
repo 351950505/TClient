@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.24",
+  "version": "1.7.8.25",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64297510,
-  "sha256": "d922a7ddb9decb6171df2d78d620d610ab55b6f9922a0f256c7f5267ee63961a",
-  "notes": "1.7.8.24:封面改用网易云CDN 300x300缩略图(修切歌瞬间卡顿:原图解码+纹理上传在渲染线程要顶一帧)",
+  "size": 64297730,
+  "sha256": "b07b4690a5358578b352bc6d69c639f7172a87da87de2a51014d4f9e4f5b61d6",
+  "notes": "1.7.8.25:新增tc_process_priority(默认=高于普通):CPU尖峰(后台应用GC/杀毒扫描/监控轮询)抢占游戏线程时的瞬时卡顿治理",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

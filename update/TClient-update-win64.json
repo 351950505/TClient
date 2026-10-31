@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.21",
+  "version": "1.7.8.22",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64297124,
-  "sha256": "b49b0e67e9aaedd237d434999e7d6dac681fe5c40ed9bbf519438d9e8e1b5816",
-  "notes": "1.7.8.21:加入队伍改用/team<队伍数字>(无队不发)+歌词卡拉OK防闪(重锚仅大偏差时)+卡拉OK提前量默认0可负+逐字宽度缓存(修灵动岛掉帧,DDNet曾冲到167%CPU)",
+  "size": 64297225,
+  "sha256": "d5545e7089c05c57244b50eb5354c185e405ea3bf3b081541a925607f4a32955",
+  "notes": "1.7.8.22:监控把watcher播放位置外推到当下(修画面周期性顿挫)+卡拉OK提前量默认60ms、范围-500~500",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

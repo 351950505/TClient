@@ -370,7 +370,7 @@ MACRO_CONFIG_STR(TcIslandFont, tc_island_font, 128, "", CFGFLAG_CLIENT | CFGFLAG
 MACRO_CONFIG_INT(TcIslandSize, tc_island_size, 100, 60, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island size (%)")
 MACRO_CONFIG_INT(TcIslandNetease, tc_island_netease, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island read NetEase CloudMusic desktop via window title monitor")
 MACRO_CONFIG_INT(TcIslandLyricOffset, tc_island_lyric_offset, 0, -30000, 30000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island lyric timing offset in ms (negative = earlier / ahead)")
-MACRO_CONFIG_INT(TcIslandKaraokeLead, tc_island_karaoke_lead, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island karaoke green fill lead in ms (how far the green wipe runs ahead of the lyric; negative = wipe lags behind)")
+MACRO_CONFIG_INT(TcIslandKaraokeLead, tc_island_karaoke_lead, 60, -500, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island karaoke green fill lead in ms (how far the green wipe runs ahead of the lyric; negative = wipe lags behind)")
 
 // ME page: streamer mode (ported from QmClient)
 MACRO_CONFIG_INT(MeStreamerMode, me_streamer_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME streamer mode master switch")

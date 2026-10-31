@@ -179,6 +179,14 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 	if(DoButton_CheckBox(&g_Config.m_TcScanlineSync, aBuf, g_Config.m_TcScanlineSync, &Button))
 		g_Config.m_TcScanlineSync ^= 1;
 
+	// TClient: NVIDIA Reflex 低延迟 —— 仅 NVIDIA 显卡 + Vulkan 后端生效,其它
+	// 显卡/后端自动忽略(不做任何事)。走 VK_NV_low_latency2 扩展。
+	MainView.HSplitTop(2.0f, nullptr, &MainView);
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	str_format(aBuf, sizeof(aBuf), "%s (%s)", TCLocalize("NVIDIA Reflex low latency"), TCLocalize("NVIDIA GPU + Vulkan only"));
+	if(DoButton_CheckBox(&g_Config.m_TcReflex, aBuf, g_Config.m_TcReflex, &Button))
+		g_Config.m_TcReflex ^= 1;
+
 	bool MultiSamplingChanged = false;
 	MainView.HSplitTop(20.0f, &Button, &MainView);
 	str_format(aBuf, sizeof(aBuf), "%s (%s)", Localize("FSAA samples"), Localize("may cause delay"));

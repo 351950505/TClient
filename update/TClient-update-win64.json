@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.27",
+  "version": "1.7.8.28",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64298519,
-  "sha256": "22eb8b75f020e06c7bc2f3a2ff3ebaaec9fd89946662b5a558b1b7aecfb47183",
-  "notes": "1.7.8.27:图像页新增垂直空白同步开关(内核级D3DKMT等待vblank再提交,撕裂归零无驱动队列,全后端通用;开启时帧节奏由vblank接管)——治撕裂的最后一块拼图",
+  "size": 64298860,
+  "sha256": "13a2303a3bc3180aa685a7f1623e5fe36093f3fea883f449760e16ee7aa748ec",
+  "notes": "1.7.8.28:图像页新增NVIDIA Reflex低延迟开关(VK_NV_low_latency2扩展,仅NVIDIA显卡+Vulkan后端生效,其它显卡/后端自动忽略)",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

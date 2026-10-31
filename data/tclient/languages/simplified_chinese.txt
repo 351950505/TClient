@@ -1485,3 +1485,12 @@ VBlank sync (TClient)
 
 no tearing, manual pacing
 == 无撕裂,手动节奏
+
+NVIDIA Reflex low latency
+== NVIDIA Reflex 低延迟
+
+NVIDIA GPU + Vulkan only
+== 仅 NVIDIA 显卡 + Vulkan 生效
+
+VBlank sync (TClient)
+== 垂直空白同步(TClient)

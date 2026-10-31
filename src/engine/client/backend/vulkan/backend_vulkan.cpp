@@ -1006,6 +1006,16 @@ private:
 	// fault information (faulting GPU addresses and vendor specific fault codes).
 	bool m_DeviceFaultAvailable = false;
 	PFN_vkGetDeviceFaultInfoEXT m_pfnGetDeviceFaultInfoEXT = nullptr;
+
+	// TClient: NVIDIA Reflex(VK_NV_low_latency2)——驱动侧低延迟节奏。非 N 卡
+	// 驱动不暴露该扩展,设备创建时自动滤除,零影响。tc_reflex 开启时在每帧
+	// acquire 前 vkLatencySleepNV(驱动按上帧 GPU 用时计算最佳 CPU 启动点)。
+	bool m_LatencyAvailable = false;
+	bool m_LatencyModeApplied = false; // 交换链重建后需重设
+	VkSemaphore m_LatencySemaphore = VK_NULL_HANDLE; // timeline 型,LatencySleep 完成信号
+	uint64_t m_LatencySignalValue = 0;
+	PFN_vkSetLatencySleepModeNV m_pfnSetLatencySleepModeNV = nullptr;
+	PFN_vkLatencySleepNV m_pfnLatencySleepNV = nullptr;
 #endif
 
 	VkDescriptorSetLayout m_StandardTexturedDescriptorSetLayout;
@@ -2412,6 +2422,31 @@ protected:
 			RecreateSwapChain();
 		}
 
+		// TClient: NVIDIA Reflex —— acquire 前让驱动按上帧 GPU 用时把 CPU 卡到
+		// 最佳启动点(降输入延迟)。用 timeline 信号量作为 sleep 完成信号。
+#if defined(VK_NV_low_latency2) && defined(VK_KHR_timeline_semaphore)
+		if(m_LatencyAvailable && g_Config.m_TcReflex && m_pfnLatencySleepNV != nullptr && m_LatencySemaphore != VK_NULL_HANDLE)
+		{
+			if(!m_LatencyModeApplied && m_pfnSetLatencySleepModeNV != nullptr)
+			{
+				VkLatencySleepModeInfoNV ModeInfo{};
+				ModeInfo.sType = VK_STRUCTURE_TYPE_LATENCY_SLEEP_MODE_INFO_NV;
+				ModeInfo.lowLatencyMode = VK_TRUE;
+				ModeInfo.lowLatencyBoost = VK_FALSE;
+				ModeInfo.minimumIntervalUs = 0;
+				if(m_pfnSetLatencySleepModeNV(m_VKDevice, m_VKSwapChain, &ModeInfo) == VK_SUCCESS)
+					m_LatencyModeApplied = true;
+			}
+			if(m_LatencyModeApplied)
+			{
+				VkLatencySleepInfoNV SleepInfo{};
+				SleepInfo.sType = VK_STRUCTURE_TYPE_LATENCY_SLEEP_INFO_NV;
+				SleepInfo.signalSemaphore = m_LatencySemaphore;
+				SleepInfo.value = ++m_LatencySignalValue;
+				m_pfnLatencySleepNV(m_VKDevice, m_VKSwapChain, &SleepInfo);
+			}
+		}
+#endif
 		auto AcqResult = vkAcquireNextImageKHR(m_VKDevice, m_VKSwapChain, std::numeric_limits<uint64_t>::max(), m_AcquireImageSemaphore, VK_NULL_HANDLE, &m_CurImageIndex);
 		if(AcqResult != VK_SUCCESS)
 		{
@@ -3593,6 +3628,12 @@ public:
 		// enables detailed diagnostics after a VK_ERROR_DEVICE_LOST.
 		OurExt.emplace(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 #endif
+#if defined(VK_NV_low_latency2) && defined(VK_KHR_timeline_semaphore)
+		// TClient: NVIDIA Reflex(VK_NV_low_latency2)。交集过滤:非 N 卡设备
+		// 不报告该扩展,自动不启用。timeline 信号量是 LatencySleep 的载体。
+		OurExt.emplace(VK_NV_LOW_LATENCY_2_EXTENSION_NAME);
+		OurExt.emplace(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+#endif
 		return OurExt;
 	}
 
@@ -4058,11 +4099,75 @@ public:
 		}
 #endif
 
+		// TClient: NVIDIA Reflex 需要 timeline 信号量作为 vkLatencySleepNV 的载体。
+		// 后端默认 apiVersion=1.1 且 pNext=nullptr,必须显式启用该特性,否则创建
+		// timeline 信号量会失败。仅当设备/驱动支持(交集过滤已加入扩展)时才启用。
+		VkPhysicalDeviceTimelineSemaphoreFeatures TimelineFeatures{};
+		TimelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+		TimelineFeatures.timelineSemaphore = VK_FALSE;
+#if defined(VK_NV_low_latency2) && defined(VK_KHR_timeline_semaphore)
+		bool LatencyExtEnabled = false;
+		for(const char *pDevExt : vDevPropCNames)
+		{
+			if(str_comp(pDevExt, VK_NV_LOW_LATENCY_2_EXTENSION_NAME) == 0)
+			{
+				LatencyExtEnabled = true;
+				break;
+			}
+		}
+		if(LatencyExtEnabled)
+		{
+			PFN_vkGetPhysicalDeviceFeatures2 pfnQueryFeatures =
+				(PFN_vkGetPhysicalDeviceFeatures2)vkGetInstanceProcAddr(m_VKInstance, "vkGetPhysicalDeviceFeatures2");
+			bool TimelineSupported = false;
+			if(pfnQueryFeatures != nullptr)
+			{
+				VkPhysicalDeviceTimelineSemaphoreFeatures QueryTimeline{};
+				QueryTimeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+				VkPhysicalDeviceFeatures2 QueryFeatures{};
+				QueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+				QueryFeatures.pNext = &QueryTimeline;
+				pfnQueryFeatures(m_VKGPU, &QueryFeatures);
+				TimelineSupported = QueryTimeline.timelineSemaphore == VK_TRUE;
+			}
+			if(TimelineSupported)
+			{
+				TimelineFeatures.timelineSemaphore = VK_TRUE;
+				TimelineFeatures.pNext = VKCreateInfo.pNext;
+				VKCreateInfo.pNext = &TimelineFeatures;
+			}
+		}
+#endif
+
 		if(vkCreateDevice(m_VKGPU, &VKCreateInfo, nullptr, &m_VKDevice) != VK_SUCCESS)
 		{
 			SetError(EGfxErrorType::GFX_ERROR_TYPE_INIT, "Logical device could not be created.");
 			return false;
 		}
+
+		// TClient: NVIDIA Reflex —— 设备建好后取入口点并创建 timeline 信号量。
+		// 任一步失败即静默关闭(非 N 卡/驱动不支持,保持原行为)。
+#if defined(VK_NV_low_latency2) && defined(VK_KHR_timeline_semaphore)
+		if(TimelineFeatures.timelineSemaphore == VK_TRUE)
+		{
+			m_pfnSetLatencySleepModeNV = (PFN_vkSetLatencySleepModeNV)vkGetDeviceProcAddr(m_VKDevice, "vkSetLatencySleepModeNV");
+			m_pfnLatencySleepNV = (PFN_vkLatencySleepNV)vkGetDeviceProcAddr(m_VKDevice, "vkLatencySleepNV");
+			if(m_pfnSetLatencySleepModeNV != nullptr && m_pfnLatencySleepNV != nullptr)
+			{
+				VkSemaphoreTypeCreateInfo SemType{};
+				SemType.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+				SemType.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+				SemType.initialValue = 0;
+				VkSemaphoreCreateInfo SemInfo{};
+				SemInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+				SemInfo.pNext = &SemType;
+				if(vkCreateSemaphore(m_VKDevice, &SemInfo, nullptr, &m_LatencySemaphore) == VK_SUCCESS)
+					m_LatencyAvailable = true;
+			}
+		}
+		if(m_LatencyAvailable)
+			log_info("gfx/vulkan", "NVIDIA Reflex (VK_NV_low_latency2) available. Enable with tc_reflex.");
+#endif
 
 #ifdef VK_EXT_device_fault
 		if(DeviceFaultRequested && FaultFeatures.deviceFault)
@@ -5657,6 +5762,13 @@ public:
 		if(m_VKInstance != VK_NULL_HANDLE)
 		{
 			DestroySurface();
+			// TClient: Reflex 的 timeline 信号量要在设备销毁前释放
+			if(m_LatencySemaphore != VK_NULL_HANDLE)
+			{
+				vkDestroySemaphore(m_VKDevice, m_LatencySemaphore, nullptr);
+				m_LatencySemaphore = VK_NULL_HANDLE;
+				m_LatencyAvailable = false;
+			}
 			vkDestroyDevice(m_VKDevice, nullptr);
 
 			if(g_Config.m_DbgGfx == DEBUG_GFX_MODE_MINIMUM || g_Config.m_DbgGfx == DEBUG_GFX_MODE_ALL)
@@ -5672,6 +5784,9 @@ public:
 	{
 		int Ret = 0;
 		vkDeviceWaitIdle(m_VKDevice);
+
+		// TClient: 新交换链需要重新应用 Reflex 睡眠模式
+		m_LatencyModeApplied = false;
 
 		if(IsVerbose())
 		{

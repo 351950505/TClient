@@ -1470,3 +1470,12 @@ No music playing
 
 Material Editor
 == 素材编辑器
+
+Steal skin
+== 偷取皮肤
+
+Join team
+== 加入队伍
+
+Player: %s
+== 玩家:%s

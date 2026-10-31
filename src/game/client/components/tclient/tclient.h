@@ -112,6 +112,11 @@ private:
 	int m_UpdateDownloadAttempt = 0;
 	float m_UpdateRetryAt = -1.0f;
 
+	// 游戏内中键玩家菜单(2026-11-01):中键点玩家弹出「偷取皮肤 / 加入队伍」
+	int m_PlayerMenuCid = -1;
+	vec2 m_PlayerMenuPos = vec2(0.0f, 0.0f);
+	void RenderPlayerMiddleMenu();
+
 public:
 	CTClient();
 	int Sizeof() const override { return sizeof(*this); }

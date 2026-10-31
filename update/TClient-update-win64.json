@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.18",
+  "version": "1.7.8.19",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64296255,
-  "sha256": "617555a4d3c549c3d2c3f38506a46a6965d05055523df2e94a318c2950f4ec42",
-  "notes": "1.7.8.18:灵动岛右端帽圆头修复+音乐模块常显+进度轨融入+歌词多渠道回落lrclib+封面兜底恢复+监控进程死锁修复(重启后音乐显示不再消失)+素材编辑器挪入ME页+标签隐藏列表修正",
+  "size": 64297109,
+  "sha256": "6330590f22249fa508c5fe83b0a60a474cef42ca149203421296c60d8601fab6",
+  "notes": "1.7.8.19:游戏中键点玩家菜单(偷取皮肤/加入队伍)+素材编辑器独立页(TC设置-素材)+歌词同步修复(LS真实进度优先于音频钟,延迟根因)",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

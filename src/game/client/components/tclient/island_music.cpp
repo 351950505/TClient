@@ -1167,13 +1167,18 @@ public:
 		// LS pauseStatus 明确暂停时强制暂停：双保险，monitor 旧版未重启或电表误判时兜底。
 		Out.m_Playing = Snap.Playing != 0 && Snap.Paused == 0;
 
-		// 位置来源（v7）：
+		// 位置来源（v7.1）：
 		//  1) watcher（WatcherMs，最权威）：netease-watcher hook 的网易云内部真实位置，
 		//     含静音段、seek 立即反映、暂停冻结 —— 歌词/进度条的位置本体。
-		//  2) 音频钟（AudioMs）：watcher 失效（hook 挂/未启动）时的兜底 —— 静音段会慢，
-		//     但至少与声音同步。
-		//  3) LS 锚点 / 标题计时（老版网易云兜底）。
+		//  2) LS 锚点（Fraction，v7.1 提前）：网易云 LocalServer 自己报的播放进度,
+		//     每秒刷新,seek/静音段都对。实测 watcher 失效时音频钟会差到分钟级
+		//     （2026-11-01:同一时刻 Fraction 算出 140s,AudioMs 只有 91s）,把
+		//     AudioMs 放在它前面等于给歌词同步喂错位置 —— 那就是用户报的
+		//     "歌词有延迟"的根源。LS 只在超 15 秒没刷新时才让位。
+		//  3) 音频钟（AudioMs）：LS 也没有时的最后兜底。
 		const double NowEpochPos = (double)std::time(nullptr);
+		const double AnchorAge = NowEpochPos - Snap.FractionAt;
+		const bool HaveLsAnchor = Snap.DurationMs > 0.0 && Snap.Fraction > 0.0 && AnchorAge >= -1.0 && AnchorAge < 15.0;
 		if(Snap.WatcherMs > 0.0)
 		{
 			Out.m_DurationMs = Snap.WatcherDurMs > 0.0 ? (int64_t)Snap.WatcherDurMs :
@@ -1181,6 +1186,14 @@ public:
 			int64_t Pos = (int64_t)Snap.WatcherMs;
 			if(Snap.DurationMs > 0.0 && Pos > (int64_t)Snap.DurationMs + 1500)
 				Pos = (int64_t)Snap.DurationMs;
+			Out.m_PositionMs = std::max<int64_t>(0, Pos);
+		}
+		else if(HaveLsAnchor)
+		{
+			Out.m_DurationMs = (int64_t)Snap.DurationMs;
+			int64_t Pos = (int64_t)(Snap.Fraction * Snap.DurationMs);
+			if(Out.m_Playing && AnchorAge > 0.0)
+				Pos += (int64_t)(AnchorAge * 1000.0);
 			Out.m_PositionMs = std::max<int64_t>(0, Pos);
 		}
 		else if(Snap.AudioMs > 0.0 || Snap.AudioActive)
@@ -1196,21 +1209,8 @@ public:
 		}
 		else
 		{
-			const double AnchorAge = NowEpochPos - Snap.FractionAt;
-			const bool HaveLsAnchor = Snap.DurationMs > 0.0 && Snap.Fraction > 0.0 && AnchorAge >= -1.0 && AnchorAge < 15.0;
-			if(HaveLsAnchor)
-			{
-				Out.m_DurationMs = (int64_t)Snap.DurationMs;
-				int64_t Pos = (int64_t)(Snap.Fraction * Snap.DurationMs);
-				if(Out.m_Playing && AnchorAge > 0.0)
-					Pos += (int64_t)(AnchorAge * 1000.0);
-				Out.m_PositionMs = std::max<int64_t>(0, Pos);
-			}
-			else
-			{
-				Out.m_DurationMs = Snap.DurationMs > 0.0 ? (int64_t)Snap.DurationMs : 0;
-				Out.m_PositionMs = std::max<int64_t>(0, Snap.ElapsedMs);
-			}
+			Out.m_DurationMs = Snap.DurationMs > 0.0 ? (int64_t)Snap.DurationMs : 0;
+			Out.m_PositionMs = std::max<int64_t>(0, Snap.ElapsedMs);
 		}
 		Out.m_Valid = !Out.m_Title.empty() || !Out.m_Artist.empty();
 

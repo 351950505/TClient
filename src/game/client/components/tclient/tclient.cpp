@@ -722,6 +722,121 @@ void CTClient::OnRender()
 		if(Client()->LocalTime() - s_FirstRenderTime >= TCLIENT_UPDATE_FIRST_CHECK_DELAY)
 			UpdateCheck(false);
 	}
+
+	RenderPlayerMiddleMenu();
+}
+
+// 游戏内中键玩家菜单(2026-11-01):中键点到玩家弹出「偷取皮肤 / 加入队伍」。
+// 光标世界坐标直接用准星 target(controls),不做相机换算 —— 本地角色不存在
+// (纯观战)时菜单不响应;已打开的面板照常显示/可执行。
+void CTClient::RenderPlayerMiddleMenu()
+{
+	if(Client()->State() != IClient::STATE_ONLINE)
+	{
+		m_PlayerMenuCid = -1;
+		return;
+	}
+
+	const bool HaveLocalChar = GameClient()->m_Snap.m_pLocalCharacter != nullptr;
+	if(HaveLocalChar)
+	{
+		const vec2 CursorWorld = GameClient()->m_Controls.m_aTargetPos[g_Config.m_ClDummy];
+		int Hover = -1;
+		float BestDistSq = 70.0f * 70.0f;
+		for(int i = 0; i < MAX_CLIENTS; ++i)
+		{
+			if(i == GameClient()->m_Snap.m_LocalClientId)
+				continue;
+			const CNetObj_PlayerInfo *pInfo = GameClient()->m_Snap.m_apPlayerInfos[i];
+			if(!pInfo)
+				continue;
+			const float DistSq = distance_squared(GameClient()->m_aClients[i].m_Predicted.m_Pos, CursorWorld);
+			if(DistSq < BestDistSq)
+			{
+				BestDistSq = DistSq;
+				Hover = i;
+			}
+		}
+
+		if(m_PlayerMenuCid < 0)
+		{
+			if(Hover >= 0 && Ui()->MouseButtonClicked(2))
+			{
+				m_PlayerMenuCid = Hover;
+				m_PlayerMenuPos = Ui()->MousePos();
+			}
+		}
+		else if(Ui()->MouseButtonClicked(2))
+		{
+			// 已开面板时再中键:悬停到别的玩家就切换目标,否则关闭
+			if(Hover >= 0 && Hover != m_PlayerMenuCid)
+			{
+				m_PlayerMenuCid = Hover;
+				m_PlayerMenuPos = Ui()->MousePos();
+			}
+			else
+				m_PlayerMenuCid = -1;
+		}
+	}
+
+	if(m_PlayerMenuCid < 0)
+		return;
+	if(!GameClient()->m_Snap.m_apPlayerInfos[m_PlayerMenuCid])
+	{
+		m_PlayerMenuCid = -1;
+		return;
+	}
+
+	CUIRect Panel;
+	Panel.x = m_PlayerMenuPos.x + 8.0f;
+	Panel.y = m_PlayerMenuPos.y + 8.0f;
+	Panel.w = 160.0f;
+	Panel.h = 68.0f;
+	const CUIRect *pScreen = Ui()->Screen();
+	if(Panel.x + Panel.w > pScreen->w)
+		Panel.x = m_PlayerMenuPos.x - Panel.w - 8.0f;
+	if(Panel.y + Panel.h > pScreen->h)
+		Panel.y = m_PlayerMenuPos.y - Panel.h - 8.0f;
+
+	Panel.Draw(ColorRGBA(0.06f, 0.06f, 0.08f, 0.96f), IGraphics::CORNER_ALL, 6.0f);
+	const CUIRect PanelOuter = Panel;
+	CUIRect Row, Use;
+	Panel.Margin(6.0f, &Panel);
+
+	char aTitle[96];
+	str_format(aTitle, sizeof(aTitle), TCLocalize("Player: %s"), GameClient()->m_aClients[m_PlayerMenuCid].m_aName);
+	Panel.HSplitTop(14.0f, &Use, &Panel);
+	Ui()->DoLabel(&Use, aTitle, 10.0f, TEXTALIGN_ML);
+	Panel.HSplitTop(2.0f, nullptr, &Panel);
+
+	static CButtonContainer s_StealButton, s_TeamButton;
+	Panel.HSplitTop(22.0f, &Row, &Panel);
+	if(Ui()->DoButton_PopupMenu(&s_StealButton, TCLocalize("Steal skin"), &Row, 10.0f, TEXTALIGN_ML))
+	{
+		// 偷皮肤:名字走控制台(触发皮肤链刷新),颜色直接写配置
+		const CGameClient::CClientData &Data = GameClient()->m_aClients[m_PlayerMenuCid];
+		char aCmd[MAX_SKIN_LENGTH + 32];
+		str_format(aCmd, sizeof(aCmd), "player_skin \"%s\"", Data.m_aSkinName);
+		Console()->ExecuteLine(aCmd, IConsole::CLIENT_ID_UNSPECIFIED);
+		g_Config.m_ClPlayerUseCustomColor = Data.m_UseCustomColor;
+		g_Config.m_ClPlayerColorBody = Data.m_ColorBody;
+		g_Config.m_ClPlayerColorFeet = Data.m_ColorFeet;
+		m_PlayerMenuCid = -1;
+	}
+	Panel.HSplitTop(4.0f, nullptr, &Panel);
+	Panel.HSplitTop(22.0f, &Row, &Panel);
+	if(Ui()->DoButton_PopupMenu(&s_TeamButton, TCLocalize("Join team"), &Row, 10.0f, TEXTALIGN_ML))
+	{
+		// 加入队伍:DDNet 服务端命令 /team <id>(请求加入该玩家所在队伍)
+		char aCmd[32];
+		str_format(aCmd, sizeof(aCmd), "say \"/team %d\"", m_PlayerMenuCid);
+		Console()->ExecuteLine(aCmd, IConsole::CLIENT_ID_UNSPECIFIED);
+		m_PlayerMenuCid = -1;
+	}
+
+	// 点面板外左键 / 按右键关闭(中键的开关在上方分支处理)
+	if(Ui()->MouseButtonClicked(1) || (Ui()->MouseButtonClicked(0) && !Ui()->MouseInside(&PanelOuter)))
+		m_PlayerMenuCid = -1;
 }
 
 bool CTClient::NeedUpdate()

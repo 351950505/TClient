@@ -46,6 +46,7 @@ enum
 	TCLIENT_TAB_PING,
 	TCLIENT_TAB_INFO,
 	TCLIENT_TAB_STATUSBAR,
+	TCLIENT_TAB_ASSETS,
 	NUMBER_OF_TCLIENT_TABS
 };
 
@@ -448,7 +449,8 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 		TCLocalize("Chat Binds"),
 		"Ping",
 		TCLocalize("Info"),
-		TCLocalize("Statusbar")};
+		TCLocalize("Statusbar"),
+		TCLocalize("Assets")};
 
 	for(int Tab = 0; Tab < NUMBER_OF_TCLIENT_TABS; ++Tab)
 	{
@@ -478,6 +480,8 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 		RenderSettingsTClientInfo(MainView);
 	if(s_CurCustomTab == TCLIENT_TAB_STATUSBAR)
 		RenderSettingsTClientStatusBar(MainView);
+	if(s_CurCustomTab == TCLIENT_TAB_ASSETS)
+		RenderSettingsTClientAssets(MainView);
 }
 
 void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
@@ -2833,7 +2837,8 @@ void CMenus::RenderSettingsTClientInfo(CUIRect MainView)
 		TCLocalize("Chat Binds"),
 		"Ping",
 		TCLocalize("Info"),
-		TCLocalize("Statusbar")};
+		TCLocalize("Statusbar"),
+		TCLocalize("Assets")};
 	static int s_aShowTabs[NUMBER_OF_TCLIENT_TABS] = {};
 	static bool s_ShowTabsInit = false;
 	if(!s_ShowTabsInit)
@@ -3692,21 +3697,6 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 {
 	CUIRect LeftView, RightView, Button, Label;
 	MainView.Margin(Margin, &MainView);
-
-	// ***** 素材编辑器(2026-11-01 从 TClient 设置的独立「素材」子标签挪进 ME):
-	// 用户按惯例到 ME 找新功能,独立子标签等于把它藏起来了。定高整宽一块,
-	// 放在 ME 原有两列(主播模式/消息屏蔽/更新)上方。 ***** //
-	{
-		CUIRect Headline;
-		MainView.HSplitTop(HeadlineHeight, &Headline, &MainView);
-		Ui()->DoLabel(&Headline, TCLocalize("Material Editor"), HeadlineFontSize, TEXTALIGN_ML);
-		MainView.HSplitTop(MarginSmall, nullptr, &MainView);
-		CUIRect EditorView;
-		MainView.HSplitTop(380.0f, &EditorView, &MainView);
-		MainView.HSplitTop(MarginBetweenSections, nullptr, &MainView);
-		RenderSettingsTClientAssets(EditorView);
-	}
-
 	MainView.VSplitMid(&LeftView, &RightView, MarginBetweenViews);
 
 	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);

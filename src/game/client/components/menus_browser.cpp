@@ -763,7 +763,7 @@ void CMenus::RenderServerbrowserFilters(CUIRect View)
 		const float OldWidth = Flag.w;
 		Flag.w = Flag.h * 2.0f;
 		Flag.x += (OldWidth - Flag.w) / 2.0f;
-		GameClient()->m_CountryFlags.Render(g_Config.m_BrFilterCountryIndex, ColorRGBA(1.0f, 1.0f, 1.0f, Ui()->HotItem() == &g_Config.m_BrFilterCountryIndex ? 1.0f : (g_Config.m_BrFilterCountry ? 0.9f : 0.5f)), Flag.x, Flag.y, Flag.w, Flag.h);
+		GameClient()->m_CountryFlags.Render(g_Config.m_BrFilterCountryIndex, ColorRGBA(1.0f, 1.0f, 1.0f, Ui()->HotItem() == &g_Config.m_BrFilterCountryIndex ? 1.0f : (g_Config.m_BrFilterCountry ? 0.9f : 0.5f)), Flag.x, Flag.y, Flag.w, Flag.h, true);
 
 		if(Ui()->DoButtonLogic(&g_Config.m_BrFilterCountryIndex, 0, &Flag, BUTTONFLAG_LEFT))
 		{
@@ -1105,7 +1105,7 @@ void CMenus::RenderServerbrowserCountriesFilter(CUIRect View)
 		const float OldWidth = Item.w;
 		Item.w = Item.h * 2.0f;
 		Item.x += (OldWidth - Item.w) / 2.0f;
-		GameClient()->m_CountryFlags.Render(ServerBrowser()->CommunityCache().SelectableCountries()[ItemIndex]->FlagId(), ColorRGBA(1.0f, 1.0f, 1.0f, (Active ? 0.9f : 0.2f) + (Ui()->HotItem() == pItemId ? 0.1f : 0.0f)), Item.x, Item.y, Item.w, Item.h);
+		GameClient()->m_CountryFlags.Render(ServerBrowser()->CommunityCache().SelectableCountries()[ItemIndex]->FlagId(), ColorRGBA(1.0f, 1.0f, 1.0f, (Active ? 0.9f : 0.2f) + (Ui()->HotItem() == pItemId ? 0.1f : 0.0f)), Item.x, Item.y, Item.w, Item.h, true);
 	};
 
 	RenderServerbrowserDDNetFilter(View, ServerBrowser()->CountriesFilter(), ItemHeight + 2.0f * Spacing, MaxEntries, EntriesPerRow, s_ScrollRegion, s_vItemIds, false, GetItemName, RenderItem);
@@ -1165,7 +1165,7 @@ CUi::EPopupMenuFunctionResult CMenus::PopupCountrySelection(void *pContext, CUIR
 		const float OldWidth = FlagRect.w;
 		FlagRect.w = FlagRect.h * 2.0f;
 		FlagRect.x += (OldWidth - FlagRect.w) / 2.0f;
-		pMenus->GameClient()->m_CountryFlags.Render(Entry.m_CountryCode, ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), FlagRect.x, FlagRect.y, FlagRect.w, FlagRect.h);
+		pMenus->GameClient()->m_CountryFlags.Render(Entry.m_CountryCode, ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), FlagRect.x, FlagRect.y, FlagRect.w, FlagRect.h, true);
 
 		pMenus->Ui()->DoLabel(&Label, Entry.m_aCountryCodeString, 10.0f, TEXTALIGN_MC);
 	}

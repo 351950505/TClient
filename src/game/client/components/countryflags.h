@@ -33,8 +33,10 @@ public:
 	size_t Num() const;
 	const CCountryFlag &GetByCountryCode(int CountryCode) const;
 	const CCountryFlag &GetByIndex(size_t Index) const;
-	void Render(const CCountryFlag &Flag, ColorRGBA Color, float x, float y, float w, float h);
-	void Render(int CountryCode, ColorRGBA Color, float x, float y, float w, float h);
+	// allow_in_streamer_mode 只给"国旗/语言选择器"用：那是用户自己挑国旗的界面，
+	// 隐藏了就没法操作。其余所有渲染点在主播模式下由 Render 内部直接吞掉。
+	void Render(const CCountryFlag &Flag, ColorRGBA Color, float x, float y, float w, float h, bool AllowInStreamerMode = false);
+	void Render(int CountryCode, ColorRGBA Color, float x, float y, float w, float h, bool AllowInStreamerMode = false);
 
 private:
 	std::vector<CCountryFlag> m_vCountryFlags;

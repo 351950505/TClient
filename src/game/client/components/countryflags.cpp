@@ -176,8 +176,12 @@ const CCountryFlags::CCountryFlag &CCountryFlags::GetByIndex(size_t Index) const
 	return m_vCountryFlags[Index];
 }
 
-void CCountryFlags::Render(const CCountryFlag &Flag, ColorRGBA Color, float x, float y, float w, float h)
+void CCountryFlags::Render(const CCountryFlag &Flag, ColorRGBA Color, float x, float y, float w, float h, bool AllowInStreamerMode)
 {
+	// 主播模式兜底：国旗属于身份信息，只要主开关开着就一律不画。
+	// 各调用点虽然已经自己判过，但入口再挡一次，新增调用点不会漏。
+	if(!AllowInStreamerMode && g_Config.m_MeStreamerMode)
+		return;
 	if(Flag.m_Texture.IsValid())
 	{
 		Graphics()->TextureSet(Flag.m_Texture);
@@ -187,7 +191,7 @@ void CCountryFlags::Render(const CCountryFlag &Flag, ColorRGBA Color, float x, f
 	}
 }
 
-void CCountryFlags::Render(int CountryCode, ColorRGBA Color, float x, float y, float w, float h)
+void CCountryFlags::Render(int CountryCode, ColorRGBA Color, float x, float y, float w, float h, bool AllowInStreamerMode)
 {
-	Render(GetByCountryCode(CountryCode), Color, x, y, w, h);
+	Render(GetByCountryCode(CountryCode), Color, x, y, w, h, AllowInStreamerMode);
 }

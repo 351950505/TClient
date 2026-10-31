@@ -2687,7 +2687,10 @@ public:
 		// 宽度固定：胶囊不再随歌词长短伸缩，换行时连宽度都不变，因此端帽纹理永远是
 		// 同一张、整帧不需要任何新的烘焙。长歌词由下面的 FitText/marquee 在框内处理。
 		(void)TextW;
-		const float Width = std::floor(std::clamp(MaxPillW, MinPillW, MaxPillW) / 8.0f) * 8.0f;
+		// 打开本地时间等额外单元后，chrome 可能超过 MaxPillW 的可用量：
+		// 宽度至少要容得下 chrome + 最小歌词区，否则右侧单元会被挤出胶囊。
+		const float NeededW = ChromeW + 120.0f * Scale;
+		const float Width = std::floor(std::clamp(std::max(MaxPillW, NeededW), MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f;
 
 		// 夹住水平位置：偏移量很大时（滑条 ±600 还要乘缩放）胶囊会被推出屏幕，
 		// 右端的圆头和等化器被裁掉，看起来就是"右边没了"。留 8px 边距。
@@ -2867,7 +2870,8 @@ public:
 		const float EqCellX = X + Width - EqCellW;
 		const float LocalClockCellX = EqCellX - LocalClockCellW;
 		const float TextRight = (ShowLocalClock ? LocalClockCellX : EqCellX) - TextGapR;
-		DrawDivider(EqCellX);
+		// 先画时间单元，再画等化器 —— 等化器在最右端，必须在最后覆盖绘制，
+		// 否则会被后面绘制的内容盖住（之前"右边不见了"就是这个顺序问题）。
 		if(ShowLocalClock)
 		{
 			DrawDivider(LocalClockCellX);
@@ -2875,6 +2879,7 @@ public:
 			m_pTextRender->Text(LocalClockCellX + ClockPad, PillY + (Height - TimerSize) * 0.5f, TimerSize, aLocalClock);
 			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 		}
+		DrawDivider(EqCellX);
 
 		// ---- right cell: equaliser ------------------------------------------
 		// Four bars, animated from the playback clock. No label, no numbers: the

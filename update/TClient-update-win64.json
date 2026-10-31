@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.11",
+  "version": "1.7.8.12",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64430699,
-  "sha256": "7f7d7992e9e7eb05dacc70074b3a6ecad4aaa55f4d1e073dee9e885783df927d",
-  "notes": "灵动岛新增本地电脑时间模块（歌词右侧）",
+  "size": 64430806,
+  "sha256": "a517b36618e2fc37caa7f482518255c27a980ad403d395783f1972f424cfacac",
+  "notes": "1.7.8.12：修复灵动岛右侧等化器被时间单元挤出/覆盖；主播模式国旗全局兜底隐藏",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 299008,

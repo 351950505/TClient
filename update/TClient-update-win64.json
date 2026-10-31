@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.25",
+  "version": "1.7.8.26",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64297730,
-  "sha256": "b07b4690a5358578b352bc6d69c639f7172a87da87de2a51014d4f9e4f5b61d6",
-  "notes": "1.7.8.25:新增tc_process_priority(默认=高于普通):CPU尖峰(后台应用GC/杀毒扫描/监控轮询)抢占游戏线程时的瞬时卡顿治理",
+  "size": 64297860,
+  "sha256": "d051b6e4a0af506cad2c40c096561f629f8e3bab4a0c36229febc166eb3b745c",
+  "notes": "1.7.8.26:内置RTSS式混合限帧(粗睡+末段1.2ms精旋,帧起始亚0.1ms对齐)——gfx_refresh_rate配180即得RTSS级帧间隔,无需外部工具;tc_precise_limiter可关",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

@@ -3719,7 +3719,13 @@ void CClient::Run()
 			else
 			{
 				// Packets end the wait early. The wait can overshoot by a fraction of its duration, so approach the deadline in halving steps.
-				while(WaitTime > 0ns && net_socket_read_wait(m_aNetClient[CONN_MAIN].m_Socket, WaitTime > 1000us ? WaitTime / 2 : 0ns) == 0)
+				// TClient(2026-11-01) RTSS 式混合限帧:select 分段始终留 1.2ms 余量,
+				// 最后 ≤1.2ms 由 0 超时轮询自旋覆盖 —— 分段 select 的粒度过冲不再
+				// 把帧起始推过 deadline(帧起始亚 0.1ms 对齐,等效把 RTSS 的
+				// "粗睡+精旋"限帧算法内置进引擎)。
+				const std::chrono::nanoseconds SpinMargin =
+					g_Config.m_TcPreciseLimiter ? std::chrono::nanoseconds(1200000) : std::chrono::nanoseconds(0);
+				while(WaitTime > SpinMargin && net_socket_read_wait(m_aNetClient[CONN_MAIN].m_Socket, WaitTime - SpinMargin > 1000us ? (WaitTime - SpinMargin) / 2 : 0ns) == 0)
 				{
 					WaitTime = Deadline - time_get_nanoseconds();
 				}

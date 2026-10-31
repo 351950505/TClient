@@ -169,6 +169,16 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 		Graphics()->SetVSync(!g_Config.m_GfxVsync);
 	}
 
+	// TClient: 垂直空白同步 —— 内核级 D3DKMT 等待垂直空白后提交,撕裂归零且无
+	// 驱动交换队列(延迟低于驱动 vsync);与图形后端无关。开启时节奏由 vblank
+	// 接管(client.cpp 会停用 gfx_refresh_rate 限帧防双重节流),建议同时把
+	// gfx_vsync 关掉。
+	MainView.HSplitTop(2.0f, nullptr, &MainView);
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	str_format(aBuf, sizeof(aBuf), "%s (%s)", TCLocalize("VBlank sync (TClient)"), TCLocalize("no tearing, manual pacing"));
+	if(DoButton_CheckBox(&g_Config.m_TcScanlineSync, aBuf, g_Config.m_TcScanlineSync, &Button))
+		g_Config.m_TcScanlineSync ^= 1;
+
 	bool MultiSamplingChanged = false;
 	MainView.HSplitTop(20.0f, &Button, &MainView);
 	str_format(aBuf, sizeof(aBuf), "%s (%s)", Localize("FSAA samples"), Localize("may cause delay"));

@@ -3366,117 +3366,6 @@ void CClient::InitInterfaces()
 	m_GhostLoader.Init();
 }
 
-#if defined(CONF_FAMILY_WINDOWS)
-// ---------------- TClient: 垂直空白同步(tc_scanline_sync) ----------------
-// 帧渲染完成后用内核级 D3DKMT 等待下一次垂直空白再提交:撕裂归零,且没有驱动
-// 交换队列(延迟低于驱动 vsync)。与图形后端无关(GL/GLES/Vulkan 通用),走的是
-// 显示内核接口而非图形 API。gdi32 动态加载零链接依赖;适配器取自主屏 DC(多屏
-// v1 取主输出);任何一步失败静默降级为不等待。
-// 注意:此块完全自包含 —— 不依赖 windows.h 的 GDI 声明(DDNet 的 base/windows.h
-// 不透出 HDC/LUID),结构体按 SDK d3dkmthk.h 的 ABI 手工声明。
-typedef void *TCHDC;
-typedef unsigned long TCD3DKMT_LUID_LOWPART;
-typedef long TCD3DKMT_LUID_HIGHPART;
-typedef unsigned int TCD3DKMT_HANDLE;
-typedef struct TCD3DKMT_LUID
-{
-	TCD3DKMT_LUID_LOWPART LowPart;
-	TCD3DKMT_LUID_HIGHPART HighPart;
-} TCD3DKMT_LUID;
-typedef struct TCD3DKMT_OPENADAPTERFROMHDC
-{
-	TCHDC hDc;
-	TCD3DKMT_HANDLE hAdapter;
-	TCD3DKMT_LUID AdapterLuid;
-	TCD3DKMT_LUID DeviceLuid;
-	unsigned int VidPnSourceId;
-} TCD3DKMT_OPENADAPTERFROMHDC;
-typedef struct TCD3DKMT_CLOSEADAPTER
-{
-	TCD3DKMT_HANDLE hAdapter;
-} TCD3DKMT_CLOSEADAPTER;
-typedef struct TCD3DKMT_WAITFORVERTICALBLANKEVENT
-{
-	TCD3DKMT_HANDLE hAdapter;
-	TCD3DKMT_HANDLE hDevice;
-	unsigned int VidPnSourceId;
-} TCD3DKMT_WAITFORVERTICALBLANKEVENT;
-typedef long(__stdcall *PFTCD3DKMTOpenAdapterFromHdc)(TCD3DKMT_OPENADAPTERFROMHDC *);
-typedef long(__stdcall *PFTCD3DKMTCloseAdapter)(TCD3DKMT_CLOSEADAPTER *);
-typedef long(__stdcall *PFTCD3DKMTWaitForVerticalBlankEvent)(TCD3DKMT_WAITFORVERTICALBLANKEVENT *);
-extern "C" __declspec(dllimport) void *__stdcall GetModuleHandleW(const wchar_t *pModuleName);
-extern "C" __declspec(dllimport) void *__stdcall GetProcAddress(void *hModule, const char *pName);
-extern "C" __declspec(dllimport) void *__stdcall GetDC(void *pWnd);
-extern "C" __declspec(dllimport) int __stdcall ReleaseDC(void *pWnd, void *pDc);
-#include <cstring> // memset(ZeroMemory 宏在本 TU 不可用)
-
-struct TCSynclineSyncState
-{
-	bool m_Tried = false;
-	bool m_Available = false;
-	TCD3DKMT_HANDLE m_hAdapter = 0;
-	unsigned int m_VidPnSourceId = 0;
-	PFTCD3DKMTWaitForVerticalBlankEvent m_pWaitVblank = nullptr;
-	PFTCD3DKMTCloseAdapter m_pCloseAdapter = nullptr;
-};
-static TCSynclineSyncState s_ScanlineSync;
-
-static bool ScanlineSyncEnsureAdapter()
-{
-	if(s_ScanlineSync.m_Tried)
-		return s_ScanlineSync.m_Available;
-	s_ScanlineSync.m_Tried = true;
-
-	void *pGdi = GetModuleHandleW(L"gdi32.dll");
-	if(!pGdi)
-		return false;
-	const PFTCD3DKMTOpenAdapterFromHdc pOpen = (PFTCD3DKMTOpenAdapterFromHdc)GetProcAddress(pGdi, "D3DKMTOpenAdapterFromHdc");
-	s_ScanlineSync.m_pWaitVblank = (PFTCD3DKMTWaitForVerticalBlankEvent)GetProcAddress(pGdi, "D3DKMTWaitForVerticalBlankEvent");
-	s_ScanlineSync.m_pCloseAdapter = (PFTCD3DKMTCloseAdapter)GetProcAddress(pGdi, "D3DKMTCloseAdapter");
-	if(!pOpen || !s_ScanlineSync.m_pWaitVblank || !s_ScanlineSync.m_pCloseAdapter)
-		return false;
-
-	void *hDc = GetDC(nullptr); // v1: 主输出
-	if(!hDc)
-		return false;
-	TCD3DKMT_OPENADAPTERFROMHDC Open;
-	memset(&Open, 0, sizeof(Open));
-	Open.hDc = hDc;
-	const long Status = pOpen(&Open);
-	ReleaseDC(nullptr, hDc);
-	if(Status < 0)
-		return false;
-	s_ScanlineSync.m_hAdapter = Open.hAdapter;
-	s_ScanlineSync.m_VidPnSourceId = Open.VidPnSourceId;
-	s_ScanlineSync.m_Available = true;
-	return true;
-}
-
-static void ScanlineSyncShutdown()
-{
-	if(s_ScanlineSync.m_Available && s_ScanlineSync.m_pCloseAdapter)
-	{
-		TCD3DKMT_CLOSEADAPTER Close;
-		memset(&Close, 0, sizeof(Close));
-		Close.hAdapter = s_ScanlineSync.m_hAdapter;
-		s_ScanlineSync.m_pCloseAdapter(&Close);
-	}
-	s_ScanlineSync = TCSynclineSyncState();
-}
-
-static void WaitScanlineVblank()
-{
-	if(!g_Config.m_TcScanlineSync || !ScanlineSyncEnsureAdapter())
-		return;
-	TCD3DKMT_WAITFORVERTICALBLANKEVENT Wait;
-	memset(&Wait, 0, sizeof(Wait));
-	Wait.hAdapter = s_ScanlineSync.m_hAdapter;
-	Wait.hDevice = 0;
-	Wait.VidPnSourceId = s_ScanlineSync.m_VidPnSourceId;
-	s_ScanlineSync.m_pWaitVblank(&Wait); // 阻塞至下一次垂直空白(≤一个刷新周期)
-}
-#endif
-
 void CClient::Run()
 {
 	m_LocalStartTime = m_GlobalStartTime = time_get();
@@ -3765,13 +3654,6 @@ void CClient::Run()
 			}
 #endif
 
-#if defined(CONF_FAMILY_WINDOWS)
-			// TClient: 垂直空白同步开启时,帧节奏由 vblank 接管 —— 关闭引擎限帧
-			// 防止双重节流(限帧到 180 再等 vblank 会互相打架)
-			if(g_Config.m_TcScanlineSync)
-				GfxRefreshRate = 0;
-#endif
-
 			const bool RenderDue = GfxRefreshRate ? Now >= NextRenderTime : UpdateDue;
 			if(IsRenderActive &&
 				(!AsyncRenderOld || m_pGraphics->IsIdle()) &&
@@ -3801,11 +3683,6 @@ void CClient::Run()
 				m_LastRenderTime = Now;
 
 				Render();
-#if defined(CONF_FAMILY_WINDOWS)
-				// TClient: 垂直空白同步 —— 等下一 vblank 再提交(治撕裂,无驱动队列)
-				if(g_Config.m_TcScanlineSync)
-					WaitScanlineVblank();
-#endif
 				m_pGraphics->Swap();
 			}
 
@@ -3863,7 +3740,6 @@ void CClient::Run()
 #if defined(CONF_FAMILY_WINDOWS)
 	// 还原定时器分辨率(与 Run 开头的 timeBeginPeriod(1) 配对)
 	timeEndPeriod(1);
-	ScanlineSyncShutdown(); // TClient: 关闭 D3DKMT 适配器
 #endif
 
 	GameClient()->RenderShutdownMessage();

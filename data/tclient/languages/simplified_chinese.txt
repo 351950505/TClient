@@ -1479,9 +1479,3 @@ Join team
 
 Player: %s
 == 玩家:%s
-
-VBlank sync (TClient)
-== 垂直空白同步(TClient)
-
-no tearing, manual pacing
-== 无撕裂,手动节奏

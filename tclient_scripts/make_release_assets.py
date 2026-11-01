@@ -51,6 +51,11 @@ EXCLUDED_ROOT_DIRS = (
 	"update",
 )
 
+# Subdirectories of data/ that players customize in place (sound packs, custom skins,
+# local maps). Updates ship game data only; these are never replaced even when file
+# names collide with official content, e.g. data/audio/foley_dbljump-01.wv.
+EXCLUDED_DATA_SUBDIRS = ("audio", "maps", "skins")
+
 # Files at the root of the installation that hold user data.
 EXCLUDED_ROOT_FILES = ("storage.cfg",)
 
@@ -96,6 +101,10 @@ def is_excluded(relative: Path) -> bool:
 	if root in EXCLUDED_ROOT_DIRS:
 		return True
 	if any(root.startswith(prefix) for prefix in EXCLUDED_DIR_PREFIXES):
+		return True
+
+	# Player-customized data subdirectories, e.g. data/audio/ sound packs.
+	if len(parts) >= 2 and root == "data" and parts[1].lower() in EXCLUDED_DATA_SUBDIRS:
 		return True
 
 	# Nested leftovers of the updater, e.g. data/update_staging_1234/.

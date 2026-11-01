@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.34",
+  "version": "1.7.8.36",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64382712,
-  "sha256": "6691e7e639c54cd736f025b1d4b9436b6d3726d3e0a4bfe649fe04c9c90ab944",
-  "notes": "基于 1.7.8.25 基线，新增：在打开设置菜单的玩家头顶显示齿轮（原版协议 PLAYERFLAG_IN_MENU，对所有玩家生效，无需信令，对方装原版也能被看到）。设置→TClient→名字标签可关闭。",
+  "size": 18047266,
+  "sha256": "fb77c403faeb6c374760f90d29824490cb640d1690eb6d982c0de4d3f87dee1a",
+  "notes": "Dynamic Island hides the music module when nothing is playing: the capsule shrinks to the clock cells only (round timer / local time), and disappears entirely when both are off.",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

@@ -2749,6 +2749,11 @@ public:
 				MakeGradient(X, PillY, Width, Height));
 		}
 
+		// 暂停是第三种状态：有曲目但没在播（m_ClockPlaying=false）。封面和歌名
+		// 保留，让人看得出停在哪首；文字、进度轨、等化器一起压暗，一眼区分"停住"
+		// 和"正在播"。
+		const float Dim = m_ClockPlaying ? 1.0f : 0.55f;
+
 		// ---- idle: clock cells + decorative equaliser ------------------------
 		// 没放歌时音乐模块整块跳过，胶囊里只留时钟和右端那排静止的音柱——用户
 		// 要求"右边那个跳动的保留，点缀一下"，但没歌时不跟随播放时钟，做成递增
@@ -2866,7 +2871,7 @@ public:
 					ColorRGBA(1.0f, 1.0f, 1.0f, 0.10f), IGraphics::CORNER_ALL, Rounding);
 				if(Frac > 0.0f)
 					m_pGraphics->DrawRect(RailX, RailY, std::max(RailH, RailW * Frac), RailH,
-						AccentColor(0.9f), IGraphics::CORNER_ALL, Rounding);
+						AccentColor(0.9f * Dim), IGraphics::CORNER_ALL, Rounding);
 			}
 		}
 
@@ -3003,7 +3008,7 @@ public:
 				const float SnappedH = std::max(2.0f, std::round(BarH * 0.5f) * 2.0f);
 				// 暂停态 0.35 在透明模式（无黑底）下几乎不可见，抬到 0.62；
 				// 播放态保持 0.85，两者的差异仍能看出"在动/没在动"。
-				const float BarAlpha = m_ClockPlaying ? 0.85f : 0.62f;
+				const float BarAlpha = m_ClockPlaying ? 0.85f : 0.34f;
 				DrawShape(EqCellX + EqPadL + i * (EqBarW + EqBarGap), EqY + (EqH - SnappedH), EqBarW, SnappedH,
 					EqBarW * 0.5f, IGraphics::CORNER_ALL, AccentColor(BarAlpha));
 			}
@@ -3054,12 +3059,12 @@ public:
 					m_TitleFitMaxW = MaxTextW;
 					m_TitleFitText = aTitleFit;
 				}
-				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.55f);
+				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.55f * Dim);
 				m_pTextRender->Text(TextX, TitleY, TitleSize, m_TitleFitText.c_str());
 			}
 
-			const ColorRGBA ColorUnsung(1.0f, 1.0f, 1.0f, 0.95f);       // not yet sung -> white
-			const ColorRGBA ColorSung = AccentColor(1.0f);                // sung / singing -> accent
+			const ColorRGBA ColorUnsung(1.0f, 1.0f, 1.0f, 0.95f * Dim);  // not yet sung -> white
+			const ColorRGBA ColorSung = AccentColor(Dim);                 // sung / singing -> accent
 
 			// Paint the current line at baseline X (already includes any marquee
 			// offset). If the line carries per-character timings, do a smooth
@@ -3196,7 +3201,7 @@ public:
 				m_SongFitMaxW = MaxTextW;
 				m_SongFitText = aFitSong;
 			}
-			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.96f);
+			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.96f * Dim);
 			m_pTextRender->Text(TextX, PillY + (Height - LyricSize) * 0.5f, LyricSize, m_SongFitText.c_str());
 		}
 		m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);

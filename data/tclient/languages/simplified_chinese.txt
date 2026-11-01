@@ -1479,3 +1479,6 @@ Join team
 
 Player: %s
 == 玩家:%s
+
+Show a gear above players who have the settings menu open
+== 在打开设置菜单的玩家头顶显示齿轮

@@ -2917,6 +2917,8 @@ if(CLIENT)
     components/tclient/player_indicator.cpp
     components/tclient/player_display_privacy.h
     components/tclient/player_indicator.h
+    components/tclient/player_status.cpp
+    components/tclient/player_status.h
     components/tclient/rainbow.cpp
     components/tclient/rainbow.h
     components/tclient/scripting.cpp

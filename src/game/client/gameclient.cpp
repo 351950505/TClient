@@ -171,6 +171,7 @@ void CGameClient::OnConsoleInit()
 						      &m_BindWheel, // TClient
 						      &m_PingWheel, // TClient
 				      &m_RelayClient, // TClient
+				      &m_PlayerStatus, // TClient (after relay: broadcasts go through its socket)
 						      &m_WarList, // TClient
 					      &m_IslandMusic, // TClient
 					      &m_StatusBar, // TClient

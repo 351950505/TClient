@@ -51,7 +51,6 @@ static constexpr const char *TCLIENT_INFO_URL = "https://update.tclient.app/info
 //   TClient-update-win64.json  清单（product/channel/version/platform/asset/size/sha256）
 //   TClient-update-win64.zip   整包，由独立的 TClientUpdater.exe 在主进程退出后替换
 // 旧的 update.tclient.app 逐文件更新器与本流程无关，也不受这里影响。
-static constexpr const char *TCLIENT_UPDATE_LATEST_URL = "https://github.com/351950505/TClient/releases/latest/download/";
 // 清单/签名的备用源（QmClient 做法）：raw.githubusercontent.com 不经过
 // release-assets 域名，国内可达性明显更好。发布时把清单+签名同时提交到
 // 仓库 update/ 目录即可。按顺序尝试，第一个成功的为准。
@@ -59,7 +58,11 @@ static constexpr const char *TCLIENT_UPDATE_RAW_BASE = "https://raw.githubuserco
 // 自建 gh-proxy 加速（用户部署）：把 github.com 的原始地址拼在代理域名后即可，
 // 对国内网络友好；下载 zip / helper 也走它。
 static constexpr const char *TCLIENT_UPDATE_PROXY_BASE = "https://github.me2.dpdns.org/";
-static constexpr const char *TCLIENT_UPDATE_GH_BASE = "https://github.com/351950505/TClient/releases/latest/download/";
+// 带版本号的 release 下载地址模板（%s = 版本号，如 "1.7.8.29"）。
+// 用 releases/download/v<版本>/ 而不是 latest/download/：走加速代理时 latest 链接
+// 要先回源解析出真实 tag 再 302 一次，多一次往返（实测首字节 0.7~1.4s），
+// 而版本号在清单里已有，直接拼死链可以省掉这一跳。
+static constexpr const char *TCLIENT_UPDATE_GH_VER_BASE = "https://github.com/351950505/TClient/releases/download/v%s/";
 // 候选清单源，按顺序尝试：加速代理 → github 直链 → raw 仓库
 static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {
 	"https://github.me2.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
@@ -1127,15 +1130,14 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 	str_copy(m_UpdateRelease.m_aVersion, pVersion);
 	// 大文件（zip/helper）：清单走代理源时同样走代理（用户自建 gh-proxy 加速），
 	// 否则回退 github releases 直链。raw 仓库放不下 61MB 包，不能用。
-	if(m_UpdateManifestSource == 0)
+	// 两种源都用"带版本号的死链"（releases/download/v<版本>/），避免 latest/download
+	// 在各层（代理/Cloudflare Worker）多一次回源解析与 302 往返。
 	{
-		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_ZIP_ASSET);
-		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_HELPER_ASSET);
-	}
-	else
-	{
-		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_ZIP_ASSET);
-		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_HELPER_ASSET);
+		char aVerBase[256];
+		str_format(aVerBase, sizeof(aVerBase), TCLIENT_UPDATE_GH_VER_BASE, m_UpdateRelease.m_aVersion);
+		const char *pBase = m_UpdateManifestSource == 0 ? TCLIENT_UPDATE_PROXY_BASE : "";
+		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s%s", pBase, aVerBase, TCLIENT_UPDATE_ZIP_ASSET);
+		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s%s", pBase, aVerBase, TCLIENT_UPDATE_HELPER_ASSET);
 	}
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
@@ -1423,10 +1425,14 @@ void CTClient::PollUpdateTasks()
 			char aSigUrl[512];
 			if(m_UpdateManifestSource == 2)
 				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
-			else if(m_UpdateManifestSource == 0)
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
 			else
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			{
+				// 与 zip/helper 一致：带版本号的死链，省掉 latest 的 302 往返
+				char aVerBase[256];
+				str_format(aVerBase, sizeof(aVerBase), TCLIENT_UPDATE_GH_VER_BASE, m_UpdateRelease.m_aVersion);
+				const char *pBase = m_UpdateManifestSource == 0 ? TCLIENT_UPDATE_PROXY_BASE : "";
+				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s%s", pBase, aVerBase, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			}
 			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
 			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
 			m_pUpdateManifestSigTask->MaxResponseSize(1024);
@@ -1471,10 +1477,14 @@ void CTClient::PollUpdateTasks()
 			char aSigUrl[512];
 			if(m_UpdateManifestSource == 2)
 				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
-			else if(m_UpdateManifestSource == 0)
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
 			else
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			{
+				// 与 zip/helper 一致：带版本号的死链，省掉 latest 的 302 往返
+				char aVerBase[256];
+				str_format(aVerBase, sizeof(aVerBase), TCLIENT_UPDATE_GH_VER_BASE, m_UpdateRelease.m_aVersion);
+				const char *pBase = m_UpdateManifestSource == 0 ? TCLIENT_UPDATE_PROXY_BASE : "";
+				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s%s", pBase, aVerBase, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+			}
 			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
 			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
 			m_pUpdateManifestSigTask->MaxResponseSize(1024);

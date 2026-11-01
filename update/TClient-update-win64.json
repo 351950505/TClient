@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.29",
+  "version": "1.7.8.30",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64383072,
-  "sha256": "cd4c055583320cea1c2be45172d94d04cff622bafd7b2151bdb21a0c5a0a6496",
-  "notes": "Reflex 修复(需在图形设置把渲染器切到 Vulkan);Vulkan 后端编入但默认仍 OpenGL;VBlank 同步改为跟随游戏所在显示器并修正结构体",
+  "size": 64383185,
+  "sha256": "00051511ccf12cb436f3b0c108db6b2902b29be998d9028bb1bb94ddf7a44de7",
+  "notes": "更新下载改用带版本号的直链(releases/download/v<版本>/)，省掉 latest 经加速代理时的 302 回源往返",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

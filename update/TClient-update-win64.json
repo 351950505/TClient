@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.30",
+  "version": "1.7.8.32",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64383185,
-  "sha256": "00051511ccf12cb436f3b0c108db6b2902b29be998d9028bb1bb94ddf7a44de7",
-  "notes": "更新下载改用带版本号的直链(releases/download/v<版本>/)，省掉 latest 经加速代理时的 302 回源往返",
+  "size": 64384642,
+  "sha256": "1a1e8cad9652459e54a84f2e44ea3d139014696f607a977addfaeaeb9cee78a5",
+  "notes": "新增：在打开设置菜单的玩家头顶显示齿轮。读原版协议自带的 PLAYERFLAG_IN_MENU，对所有玩家生效，不需要信令，也不需要对方装本客户端。设置→TClient→名字标签可关闭。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

@@ -410,9 +410,6 @@ MACRO_CONFIG_INT(TcRelay, tc_relay, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Pin
 MACRO_CONFIG_INT(TcRelayP2p, tc_relay_p2p, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Relay P2P direct send (off = all pings go through the signal server so everyone with the client sees them)")
 MACRO_CONFIG_STR(TcRelayAddr, tc_relay_addr, 64, "8.163.48.23:8305", CFGFLAG_CLIENT | CFGFLAG_SAVE, "TClient signal server address (ip:port, udp)")
 MACRO_CONFIG_INT(TcPingwheelEmoteMs, tc_pingwheel_emote_ms, 100, 100, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Emoticon channel send interval in ms (must be >= server sv_emoticon_ms_delay, else frames get dropped)")
-// 玩家状态标记：别人打开设置菜单时，在他头顶画一个齿轮。
-// 数据来自原版协议的 PLAYERFLAG_IN_MENU（服务器广播），对所有玩家生效，不依赖信令。
-MACRO_CONFIG_INT(TcShowSettingsGear, tc_show_settings_gear, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show a gear icon above players who have the settings menu open (uses the vanilla PLAYERFLAG_IN_MENU, works for all players)")
 MACRO_CONFIG_INT(TcTranslateRecentCount, tc_translate_recent_count, 5, 1, 16, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How many recent non-Chinese chat lines the translate-recent bind translates")
 MACRO_CONFIG_INT(TcScoreboardMedia, tc_scoreboard_media, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show music controls on the left of the scoreboard")
 MACRO_CONFIG_INT(TcProcessPriority, tc_process_priority, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Process priority class (0 = normal, 1 = above normal, 2 = high; keeps the game smooth when background apps spike the CPU; restart to apply)")

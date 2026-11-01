@@ -872,6 +872,3 @@ Changing name to %s near finish
 [translate]
 %s to %s failed: %s
 == 
-Show a gear above players who have the settings menu open
-== 在開啟設定選單的玩家頭頂顯示齒輪
-

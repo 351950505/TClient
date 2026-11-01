@@ -2578,8 +2578,10 @@ public:
 		// the karaoke fill, the progress rail and the equaliser. Content is either
 		// the song title or a single karaoke lyric line, whichever is enabled.
 
-		// 无曲状态不再折叠成计时小胶囊：音乐模块常显(2026-11-01 用户要求),
-		// 空态时标题位显示占位文案,封面位是占位圆环、等化器静止。
+		// 空态（没放歌）时音乐模块整体隐藏：胶囊收缩成只包住时钟单元，游戏计时
+		// 和本地时间照旧，封面 / 歌名 / 歌词 / 等化器 / 进度轨一概不画；两个时钟
+		// 都没开就整条胶囊都不画。用户 2026-11-02 要求，覆盖 1.7.8.18 的常显方案。
+		const bool Idle = Track.m_Title.empty() && Track.m_Artist.empty();
 
 		// content strings (artist intentionally not shown)
 		char aSong[512];
@@ -2693,7 +2695,18 @@ public:
 		// 打开本地时间等额外单元后，chrome 可能超过 MaxPillW 的可用量：
 		// 宽度至少要容得下 chrome + 最小歌词区，否则右侧单元会被挤出胶囊。
 		const float NeededW = ChromeW + 120.0f * Scale;
-		const float Width = std::floor(std::clamp(std::max(MaxPillW, NeededW), MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f;
+		// 空态且没有任何时钟要显示：干脆连胶囊都不画，不留一个空壳在屏幕顶上。
+		if(Idle && !ShowGameTime && !ShowLocalClock)
+		{
+			RestoreFace();
+			return;
+		}
+		// 空态胶囊只包住时钟单元（两个都开时并排，中间一条分隔线），宽度因此
+		// 可以缩到远小于播放态的固定宽；播放态宽度仍按内容算。
+		const float IdleW = (ShowGameTime ? ClockCellW : 0.0f) + (ShowLocalClock ? LocalClockCellW : 0.0f);
+		const float Width = Idle
+			? std::floor(std::clamp(IdleW, MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f
+			: std::floor(std::clamp(std::max(MaxPillW, NeededW), MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f;
 
 		// 夹住水平位置：偏移量很大时（滑条 ±600 还要乘缩放）胶囊会被推出屏幕，
 		// 右端的圆头和等化器被裁掉，看起来就是"右边没了"。留 8px 边距。
@@ -2726,6 +2739,35 @@ public:
 		{
 			DrawPanel(X, PillY, Width, Height, PillRounding, PillCorners, !NotchStyle,
 				MakeGradient(X, PillY, Width, Height));
+		}
+
+		// ---- idle: clock cells only -----------------------------------------
+		// 没放歌时音乐模块整块跳过，胶囊里只留时钟；这里单独画完就返回，
+		// 后续的进度轨 / 黑胶盘 / 歌词 / 等化器全部不执行。
+		if(Idle)
+		{
+			const float SepTop = PillY + Height * 0.19f;
+			const float SepH = Height * 0.62f;
+			float CursorX = X + (Width - IdleW) * 0.5f;
+			const float TextY = PillY + (Height - TimerSize) * 0.5f;
+			if(ShowGameTime)
+			{
+				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.80f);
+				m_pTextRender->Text(CursorX + ClockPad, TextY, TimerSize, aGameTime);
+				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
+				CursorX += ClockCellW;
+				if(ShowLocalClock)
+					m_pGraphics->DrawRect(CursorX, SepTop, 1.0f, SepH,
+						ColorRGBA(1.0f, 1.0f, 1.0f, 0.08f), IGraphics::CORNER_NONE, 0.0f);
+			}
+			if(ShowLocalClock)
+			{
+				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
+				m_pTextRender->Text(CursorX + ClockPad, TextY, TimerSize, aLocalClock);
+				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
+			}
+			RestoreFace();
+			return;
 		}
 
 		// ---- bottom progress rail -------------------------------------------

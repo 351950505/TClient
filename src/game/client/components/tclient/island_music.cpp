@@ -106,6 +106,13 @@ public:
 	std::string m_SongFitText;
 	// vinyl record spin angle (radians)
 	float m_VinylAngle = 0.0f;
+	// 空态等化器的节奏：本地玩家按 hook（右键）的间隔驱动相位推进，
+	// 按得越快跳得越急；停手后能量衰减回静止台阶。
+	float m_IdleBeatPhase = 0.0f;
+	float m_IdleBeatEnergy = 0.0f;
+	double m_IdleBeatLastPress = 0.0;
+	double m_IdleBeatInterval = 0.45;
+	bool m_IdleBeatHookDown = false;
 
 	~CImpl()
 	{
@@ -2701,9 +2708,10 @@ public:
 			RestoreFace();
 			return;
 		}
-		// 空态胶囊只包住时钟单元（两个都开时并排，中间一条分隔线），宽度因此
-		// 可以缩到远小于播放态的固定宽；播放态宽度仍按内容算。
-		const float IdleW = (ShowGameTime ? ClockCellW : 0.0f) + (ShowLocalClock ? LocalClockCellW : 0.0f);
+		// 空态胶囊只包住时钟单元和右端的装饰等化器（两个时钟都开时并排，中间
+		// 一条分隔线），宽度因此可以缩到远小于播放态的固定宽；播放态宽度仍按内容算。
+		const float IdleW = (ShowGameTime ? ClockCellW : 0.0f) + (ShowLocalClock ? LocalClockCellW : 0.0f) +
+			EqPadL + EqW + EqPadR;
 		const float Width = Idle
 			? std::floor(std::clamp(IdleW, MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f
 			: std::floor(std::clamp(std::max(MaxPillW, NeededW), MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f;
@@ -2741,13 +2749,44 @@ public:
 				MakeGradient(X, PillY, Width, Height));
 		}
 
-		// ---- idle: clock cells only -----------------------------------------
-		// 没放歌时音乐模块整块跳过，胶囊里只留时钟；这里单独画完就返回，
-		// 后续的进度轨 / 黑胶盘 / 歌词 / 等化器全部不执行。
+		// ---- idle: clock cells + decorative equaliser ------------------------
+		// 没放歌时音乐模块整块跳过，胶囊里只留时钟和右端那排静止的音柱——用户
+		// 要求"右边那个跳动的保留，点缀一下"，但没歌时不跟随播放时钟，做成递增
+		// 台阶的低亮造型，读作待机而不是"正在播放"。
 		if(Idle)
 		{
 			const float SepTop = PillY + Height * 0.19f;
 			const float SepH = Height * 0.62f;
+			// 节奏跟着本地玩家按 hook（右键）的速度走：按下边沿记录间隔，用间隔的
+			// 倒数推进相位；能量按时间衰减，停手约三秒就回到静态台阶。
+			const double NowSec = (double)time_get() / (double)time_freq();
+			static double s_LastBeatTick = 0.0;
+			const float Dt = s_LastBeatTick > 0.0 ? (float)std::clamp(NowSec - s_LastBeatTick, 0.0, 0.1) : 0.0f;
+			s_LastBeatTick = NowSec;
+			const CNetObj_Character *pLocalChar = m_pGameClient ? m_pGameClient->m_Snap.m_pLocalCharacter : nullptr;
+			const bool HookDown = pLocalChar && pLocalChar->m_HookState == 1;
+			if(HookDown && !m_IdleBeatHookDown)
+			{
+				if(m_IdleBeatLastPress > 0.0)
+				{
+					const double Gap = NowSec - m_IdleBeatLastPress;
+					if(Gap > 0.10 && Gap < 2.0) // 忽略抖动与长间隔（换图/发呆）
+						m_IdleBeatInterval = m_IdleBeatInterval * 0.7 + Gap * 0.3;
+				}
+				m_IdleBeatLastPress = NowSec;
+				m_IdleBeatPhase = 0.0f;
+				m_IdleBeatEnergy = 1.0f;
+			}
+			m_IdleBeatHookDown = HookDown;
+			if(m_IdleBeatLastPress > 0.0)
+			{
+				m_IdleBeatPhase += Dt * (float)(2.0 * pi / std::clamp(m_IdleBeatInterval, 0.12, 1.5));
+				m_IdleBeatEnergy *= std::exp(-Dt * 0.55f);
+			}
+			auto DrawSep = [&](float SepX) {
+				m_pGraphics->DrawRect(SepX, SepTop, 1.0f, SepH,
+					ColorRGBA(1.0f, 1.0f, 1.0f, 0.08f), IGraphics::CORNER_NONE, 0.0f);
+			};
 			float CursorX = X + (Width - IdleW) * 0.5f;
 			const float TextY = PillY + (Height - TimerSize) * 0.5f;
 			if(ShowGameTime)
@@ -2756,15 +2795,28 @@ public:
 				m_pTextRender->Text(CursorX + ClockPad, TextY, TimerSize, aGameTime);
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 				CursorX += ClockCellW;
-				if(ShowLocalClock)
-					m_pGraphics->DrawRect(CursorX, SepTop, 1.0f, SepH,
-						ColorRGBA(1.0f, 1.0f, 1.0f, 0.08f), IGraphics::CORNER_NONE, 0.0f);
+				DrawSep(CursorX);
 			}
 			if(ShowLocalClock)
 			{
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
 				m_pTextRender->Text(CursorX + ClockPad, TextY, TimerSize, aLocalClock);
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
+				CursorX += LocalClockCellW;
+				DrawSep(CursorX);
+			}
+			const float EqH = 18.0f * Scale;
+			const float EqY = PillY + (Height - EqH) * 0.5f;
+			for(int i = 0; i < NumBars; i++)
+			{
+				// 静止时是从 0.30 到 0.72 的递增台阶；有 hook 能量时整排跟着
+				// 相位起伏，四根柱子错开 0.7 rad，读作一次"弹动"。
+				const float Beat = 0.30f + 0.14f * (float)i +
+					m_IdleBeatEnergy * 0.55f * (0.5f + 0.5f * std::sin(m_IdleBeatPhase + (float)i * 0.7f));
+				const float BarH = std::max(EqH * 0.22f, EqH * std::clamp(Beat, 0.0f, 1.0f));
+				const float SnappedH = std::max(2.0f, std::round(BarH * 0.5f) * 2.0f);
+				DrawShape(CursorX + EqPadL + i * (EqBarW + EqBarGap), EqY + (EqH - SnappedH), EqBarW, SnappedH,
+					EqBarW * 0.5f, IGraphics::CORNER_ALL, AccentColor(0.55f + 0.35f * m_IdleBeatEnergy));
 			}
 			RestoreFace();
 			return;

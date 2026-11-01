@@ -175,7 +175,7 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 	// gfx_vsync 关掉。
 	MainView.HSplitTop(2.0f, nullptr, &MainView);
 	MainView.HSplitTop(20.0f, &Button, &MainView);
-	str_format(aBuf, sizeof(aBuf), "%s (%s)", TCLocalize("VBlank sync (TClient)"), TCLocalize("no tearing, manual pacing"));
+	str_format(aBuf, sizeof(aBuf), "%s (%s)", TCLocalize("VBlank sync (TClient)"), TCLocalize("no tearing, locks FPS to monitor refresh rate"));
 	if(DoButton_CheckBox(&g_Config.m_TcScanlineSync, aBuf, g_Config.m_TcScanlineSync, &Button))
 		g_Config.m_TcScanlineSync ^= 1;
 

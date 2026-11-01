@@ -1483,8 +1483,8 @@ Player: %s
 VBlank sync (TClient)
 == 垂直空白同步(TClient)
 
-no tearing, manual pacing
-== 无撕裂,手动节奏
+no tearing, locks FPS to monitor refresh rate
+== 无撕裂,帧率锁定为显示器刷新率
 
 NVIDIA Reflex low latency
 == NVIDIA Reflex 低延迟
@@ -1492,5 +1492,3 @@ NVIDIA Reflex low latency
 NVIDIA GPU + Vulkan only
 == 仅 NVIDIA 显卡 + Vulkan 生效
 
-VBlank sync (TClient)
-== 垂直空白同步(TClient)

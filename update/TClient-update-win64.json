@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.28",
+  "version": "1.7.8.29",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 64298860,
-  "sha256": "13a2303a3bc3180aa685a7f1623e5fe36093f3fea883f449760e16ee7aa748ec",
-  "notes": "1.7.8.28:图像页新增NVIDIA Reflex低延迟开关(VK_NV_low_latency2扩展,仅NVIDIA显卡+Vulkan后端生效,其它显卡/后端自动忽略)",
+  "size": 64383072,
+  "sha256": "cd4c055583320cea1c2be45172d94d04cff622bafd7b2151bdb21a0c5a0a6496",
+  "notes": "Reflex 修复(需在图形设置把渲染器切到 Vulkan);Vulkan 后端编入但默认仍 OpenGL;VBlank 同步改为跟随游戏所在显示器并修正结构体",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

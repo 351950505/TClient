@@ -2861,6 +2861,11 @@ void CGraphics_Threaded::Swap()
 	}
 
 	KickCommandBuffer();
+
+	// TClient: Reflex 的睡眠在渲染线程 present 之后执行;主线程默认领先一帧,
+	// 不等的话下一帧输入早于睡眠采样,睡眠反而加进延迟。生效时在此对齐。
+	if(IsTClientReflexActive())
+		WaitForIdle();
 }
 
 bool CGraphics_Threaded::SetVSync(bool State)
@@ -2911,6 +2916,18 @@ void CGraphics_Threaded::InsertSignal(CSemaphore *pSemaphore)
 	CCommandBuffer::SCommand_Signal Cmd;
 	Cmd.m_pSemaphore = pSemaphore;
 	AddCmd(Cmd);
+}
+
+static std::atomic<bool> s_TClientReflexActive{false};
+
+void SetTClientReflexActive(bool Active)
+{
+	s_TClientReflexActive.store(Active, std::memory_order_relaxed);
+}
+
+bool IsTClientReflexActive()
+{
+	return s_TClientReflexActive.load(std::memory_order_relaxed);
 }
 
 bool CGraphics_Threaded::IsIdle() const

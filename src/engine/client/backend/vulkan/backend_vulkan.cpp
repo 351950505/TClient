@@ -1006,17 +1006,26 @@ private:
 	// fault information (faulting GPU addresses and vendor specific fault codes).
 	bool m_DeviceFaultAvailable = false;
 	PFN_vkGetDeviceFaultInfoEXT m_pfnGetDeviceFaultInfoEXT = nullptr;
+#endif
 
 	// TClient: NVIDIA Reflex(VK_NV_low_latency2)——驱动侧低延迟节奏。非 N 卡
-	// 驱动不暴露该扩展,设备创建时自动滤除,零影响。tc_reflex 开启时在每帧
-	// acquire 前 vkLatencySleepNV(驱动按上帧 GPU 用时计算最佳 CPU 启动点)。
+	// 驱动不暴露该扩展,设备创建时自动滤除,零影响。tc_reflex 开启时:交换链带
+	// VkSwapchainLatencyCreateInfoNV 创建;每次 present 成功后 vkLatencySleepNV 并
+	// 等 timeline 信号量(驱动算出的最佳 CPU 启动点),同时打帧标记供驱动归因。
 	bool m_LatencyAvailable = false;
+	bool m_LatencySwapchainEnabled = false; // 当前交换链是否带 latency 创建信息
 	bool m_LatencyModeApplied = false; // 交换链重建后需重设
+	bool m_LatencySleepPending = false; // 上次 present 成功,下一帧开始前该睡
+	bool m_LatencyWaitTimeoutLogged = false;
 	VkSemaphore m_LatencySemaphore = VK_NULL_HANDLE; // timeline 型,LatencySleep 完成信号
 	uint64_t m_LatencySignalValue = 0;
+	uint64_t m_LatencyFrameId = 0; // 帧标记的 presentID,0 = 尚未开始
+	uint64_t m_LatencySleepCount = 0;
+	int64_t m_LatencySleepTotal = 0;
 	PFN_vkSetLatencySleepModeNV m_pfnSetLatencySleepModeNV = nullptr;
 	PFN_vkLatencySleepNV m_pfnLatencySleepNV = nullptr;
-#endif
+	PFN_vkSetLatencyMarkerNV m_pfnSetLatencyMarkerNV = nullptr;
+	PFN_vkWaitSemaphoresKHR m_pfnWaitSemaphoresKHR = nullptr;
 
 	VkDescriptorSetLayout m_StandardTexturedDescriptorSetLayout;
 	VkDescriptorSetLayout m_Standard3DTexturedDescriptorSetLayout;
@@ -2342,6 +2351,10 @@ protected:
 		SubmitInfo.commandBufferCount = 1;
 		SubmitInfo.pCommandBuffers = &CommandBuffer;
 
+		// TClient: Reflex 帧标记 —— 模拟阶段收尾、提交阶段开始
+		SetLatencyMarker(VK_LATENCY_MARKER_SIMULATION_END_NV);
+		SetLatencyMarker(VK_LATENCY_MARKER_RENDERSUBMIT_START_NV);
+
 		std::array<VkCommandBuffer, 2> aCommandBuffers = {};
 
 		if(m_vUsedMemoryCommandBuffer[m_CurImageIndex])
@@ -2396,6 +2409,10 @@ protected:
 
 		m_LastPresentedSwapChainImageIndex = m_CurImageIndex;
 
+		// TClient: Reflex —— present 前后打标记,成功则登记"下一帧开始前睡一次"
+		SetLatencyMarker(VK_LATENCY_MARKER_RENDERSUBMIT_END_NV);
+		SetLatencyMarker(VK_LATENCY_MARKER_PRESENT_START_NV);
+
 		VkResult QueuePresentRes = vkQueuePresentKHR(m_VKPresentQueue, &PresentInfo);
 		if(QueuePresentRes != VK_SUCCESS && QueuePresentRes != VK_SUBOPTIMAL_KHR)
 		{
@@ -2406,12 +2423,35 @@ protected:
 				return false;
 			}
 		}
+		else
+		{
+			SetLatencyMarker(VK_LATENCY_MARKER_PRESENT_END_NV);
+			// 本次 present 成功 → 下一帧开始前睡(规范:两次 present 之间恰好一次)
+			m_LatencySleepPending = m_LatencyModeApplied;
+		}
 
 		return true;
 	}
 
+	// TClient: Reflex 帧标记(仅睡眠模式生效时打;presentID 与 VkPresentIdKHR 无关)
+	void SetLatencyMarker(VkLatencyMarkerNV Marker)
+	{
+		if(!m_LatencyModeApplied || m_LatencyFrameId == 0 || m_pfnSetLatencyMarkerNV == nullptr)
+			return;
+		VkSetLatencyMarkerInfoNV MarkerInfo{};
+		MarkerInfo.sType = VK_STRUCTURE_TYPE_SET_LATENCY_MARKER_INFO_NV;
+		MarkerInfo.presentID = m_LatencyFrameId;
+		MarkerInfo.marker = Marker;
+		m_pfnSetLatencyMarkerNV(m_VKDevice, m_VKSwapChain, &MarkerInfo);
+	}
+
 	[[nodiscard]] bool PrepareFrame()
 	{
+		// TClient: tc_reflex 切换 → 重建交换链(开:带 latency 创建信息;关:恢复原交换链,
+		// 睡眠模式随旧交换链一起消失)
+		if(m_LatencyAvailable && m_LatencySwapchainEnabled != (g_Config.m_TcReflex != 0))
+			m_RecreateSwapChain = true;
+
 		if(m_RecreateSwapChain)
 		{
 			m_RecreateSwapChain = false;
@@ -2422,8 +2462,10 @@ protected:
 			RecreateSwapChain();
 		}
 
-		// TClient: NVIDIA Reflex —— acquire 前让驱动按上帧 GPU 用时把 CPU 卡到
-		// 最佳启动点(降输入延迟)。用 timeline 信号量作为 sleep 完成信号。
+		// TClient: NVIDIA Reflex —— 规范要求"在输入采样之前、两次 present 之间恰好
+		// 一次":vkLatencySleepNV 立即返回,必须再用 vkWaitSemaphores 等 timeline
+		// 信号量才真正睡(驱动按上帧 GPU 用时算出的启动点)。主线程在此等待后
+		// 才继续(见 CGraphics_Threaded::Swap),所以睡眠落在下一帧输入采样之前。
 #if defined(VK_NV_low_latency2) && defined(VK_KHR_timeline_semaphore)
 		if(m_LatencyAvailable && g_Config.m_TcReflex && m_pfnLatencySleepNV != nullptr && m_LatencySemaphore != VK_NULL_HANDLE)
 		{
@@ -2435,16 +2477,60 @@ protected:
 				ModeInfo.lowLatencyBoost = VK_FALSE;
 				ModeInfo.minimumIntervalUs = 0;
 				if(m_pfnSetLatencySleepModeNV(m_VKDevice, m_VKSwapChain, &ModeInfo) == VK_SUCCESS)
+				{
 					m_LatencyModeApplied = true;
+					log_info("gfx/vulkan", "NVIDIA Reflex low latency mode enabled.");
+				}
 			}
+
 			if(m_LatencyModeApplied)
 			{
-				VkLatencySleepInfoNV SleepInfo{};
-				SleepInfo.sType = VK_STRUCTURE_TYPE_LATENCY_SLEEP_INFO_NV;
-				SleepInfo.signalSemaphore = m_LatencySemaphore;
-				SleepInfo.value = ++m_LatencySignalValue;
-				m_pfnLatencySleepNV(m_VKDevice, m_VKSwapChain, &SleepInfo);
+				// TClient: 告诉主线程"Swap 后要等渲染线程",让睡眠落在下一帧输入采样前
+				SetTClientReflexActive(true);
+
+				// 每次成功 present 后睡一次(首次由 present 置位,交换链刚建好时不睡)
+				if(m_LatencySleepPending && m_pfnWaitSemaphoresKHR != nullptr)
+				{
+					m_LatencySleepPending = false;
+
+					VkLatencySleepInfoNV SleepInfo{};
+					SleepInfo.sType = VK_STRUCTURE_TYPE_LATENCY_SLEEP_INFO_NV;
+					SleepInfo.signalSemaphore = m_LatencySemaphore;
+					SleepInfo.value = ++m_LatencySignalValue;
+					m_pfnLatencySleepNV(m_VKDevice, m_VKSwapChain, &SleepInfo);
+
+					const int64_t SleepStart = time_get();
+					VkSemaphoreWaitInfo WaitInfo{};
+					WaitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+					WaitInfo.flags = 0;
+					WaitInfo.semaphoreCount = 1;
+					WaitInfo.pSemaphores = &m_LatencySemaphore;
+					WaitInfo.pValues = &m_LatencySignalValue;
+					// 100ms 上限:驱动异常时绝不能卡死游戏
+					const VkResult WaitRes = m_pfnWaitSemaphoresKHR(m_VKDevice, &WaitInfo, 100000000ULL);
+					if(WaitRes == VK_TIMEOUT && !m_LatencyWaitTimeoutLogged)
+					{
+						m_LatencyWaitTimeoutLogged = true;
+						log_warn("gfx/vulkan", "NVIDIA Reflex sleep wait timed out; continuing without it.");
+					}
+					m_LatencySleepTotal += time_get() - SleepStart;
+					m_LatencySleepCount++;
+				}
+
+				// 帧标记:供驱动把提交/present 归因到本帧(规范:"Correct attribution
+				// is required for latency reduction")。SIMULATION_START 必须在睡眠之后。
+				++m_LatencyFrameId;
+				SetLatencyMarker(VK_LATENCY_MARKER_SIMULATION_START_NV);
+				SetLatencyMarker(VK_LATENCY_MARKER_INPUT_SAMPLE_NV);
 			}
+			else
+			{
+				SetTClientReflexActive(false); // 模式没生效就别让主线程等
+			}
+		}
+		else
+		{
+			SetTClientReflexActive(false);
 		}
 #endif
 		auto AcqResult = vkAcquireNextImageKHR(m_VKDevice, m_VKSwapChain, std::numeric_limits<uint64_t>::max(), m_AcquireImageSemaphore, VK_NULL_HANDLE, &m_CurImageIndex);
@@ -4106,15 +4192,18 @@ public:
 		TimelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
 		TimelineFeatures.timelineSemaphore = VK_FALSE;
 #if defined(VK_NV_low_latency2) && defined(VK_KHR_timeline_semaphore)
+		// 两个扩展都必须真的启用:LatencySleep 的载体是 timeline 信号量,后端
+		// apiVersion=1.1(核心还没 timeline),缺一不可。
 		bool LatencyExtEnabled = false;
+		bool TimelineExtEnabled = false;
 		for(const char *pDevExt : vDevPropCNames)
 		{
 			if(str_comp(pDevExt, VK_NV_LOW_LATENCY_2_EXTENSION_NAME) == 0)
-			{
 				LatencyExtEnabled = true;
-				break;
-			}
+			else if(str_comp(pDevExt, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0)
+				TimelineExtEnabled = true;
 		}
+		LatencyExtEnabled = LatencyExtEnabled && TimelineExtEnabled;
 		if(LatencyExtEnabled)
 		{
 			PFN_vkGetPhysicalDeviceFeatures2 pfnQueryFeatures =
@@ -4133,7 +4222,7 @@ public:
 			if(TimelineSupported)
 			{
 				TimelineFeatures.timelineSemaphore = VK_TRUE;
-				TimelineFeatures.pNext = VKCreateInfo.pNext;
+				TimelineFeatures.pNext = const_cast<void *>(VKCreateInfo.pNext);
 				VKCreateInfo.pNext = &TimelineFeatures;
 			}
 		}
@@ -4152,7 +4241,10 @@ public:
 		{
 			m_pfnSetLatencySleepModeNV = (PFN_vkSetLatencySleepModeNV)vkGetDeviceProcAddr(m_VKDevice, "vkSetLatencySleepModeNV");
 			m_pfnLatencySleepNV = (PFN_vkLatencySleepNV)vkGetDeviceProcAddr(m_VKDevice, "vkLatencySleepNV");
-			if(m_pfnSetLatencySleepModeNV != nullptr && m_pfnLatencySleepNV != nullptr)
+			m_pfnSetLatencyMarkerNV = (PFN_vkSetLatencyMarkerNV)vkGetDeviceProcAddr(m_VKDevice, "vkSetLatencyMarkerNV");
+			m_pfnWaitSemaphoresKHR = (PFN_vkWaitSemaphoresKHR)vkGetDeviceProcAddr(m_VKDevice, "vkWaitSemaphoresKHR");
+			if(m_pfnSetLatencySleepModeNV != nullptr && m_pfnLatencySleepNV != nullptr &&
+				m_pfnSetLatencyMarkerNV != nullptr && m_pfnWaitSemaphoresKHR != nullptr)
 			{
 				VkSemaphoreTypeCreateInfo SemType{};
 				SemType.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
@@ -4404,9 +4496,26 @@ public:
 
 		OldSwapChain = m_VKSwapChain;
 
+		// TClient: Reflex 需要交换链声明参与低延迟模式(规范:"To allow low latency
+		// mode to be used by a swapchain, add a VkSwapchainLatencyCreateInfoNV
+		// structure to the pNext chain")。只在 tc_reflex 开启且驱动支持时挂;
+		// 默认关闭的玩家拿到的交换链与上游完全一致。
+#if defined(VK_NV_low_latency2)
+		VkSwapchainLatencyCreateInfoNV LatencySwapInfo{};
+		LatencySwapInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_LATENCY_CREATE_INFO_NV;
+		LatencySwapInfo.pNext = nullptr;
+		LatencySwapInfo.latencyModeEnable = VK_TRUE;
+		const bool EnableLatencySwapchain = m_LatencyAvailable && g_Config.m_TcReflex != 0;
+		m_LatencySwapchainEnabled = EnableLatencySwapchain;
+#endif
+
 		VkSwapchainCreateInfoKHR SwapInfo;
 		SwapInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+#if defined(VK_NV_low_latency2)
+		SwapInfo.pNext = EnableLatencySwapchain ? &LatencySwapInfo : nullptr;
+#else
 		SwapInfo.pNext = nullptr;
+#endif
 		SwapInfo.flags = 0;
 		SwapInfo.surface = m_VKPresentSurface;
 		SwapInfo.minImageCount = SwapImgCount;
@@ -5763,12 +5872,16 @@ public:
 		{
 			DestroySurface();
 			// TClient: Reflex 的 timeline 信号量要在设备销毁前释放
+			SetTClientReflexActive(false); // TClient: 前端不再等渲染线程
 			if(m_LatencySemaphore != VK_NULL_HANDLE)
 			{
 				vkDestroySemaphore(m_VKDevice, m_LatencySemaphore, nullptr);
 				m_LatencySemaphore = VK_NULL_HANDLE;
-				m_LatencyAvailable = false;
 			}
+			m_LatencyAvailable = false;
+			m_LatencyModeApplied = false;
+			m_LatencySwapchainEnabled = false;
+			m_LatencySleepPending = false;
 			vkDestroyDevice(m_VKDevice, nullptr);
 
 			if(g_Config.m_DbgGfx == DEBUG_GFX_MODE_MINIMUM || g_Config.m_DbgGfx == DEBUG_GFX_MODE_ALL)

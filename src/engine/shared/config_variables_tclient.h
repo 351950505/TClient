@@ -413,4 +413,3 @@ MACRO_CONFIG_INT(TcPingwheelEmoteMs, tc_pingwheel_emote_ms, 100, 100, 5000, CFGF
 MACRO_CONFIG_INT(TcTranslateRecentCount, tc_translate_recent_count, 5, 1, 16, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How many recent non-Chinese chat lines the translate-recent bind translates")
 MACRO_CONFIG_INT(TcScoreboardMedia, tc_scoreboard_media, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show music controls on the left of the scoreboard")
 MACRO_CONFIG_INT(TcProcessPriority, tc_process_priority, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Process priority class (0 = normal, 1 = above normal, 2 = high; keeps the game smooth when background apps spike the CPU; restart to apply)")
-MACRO_CONFIG_INT(TcPreciseLimiter, tc_precise_limiter, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "RTSS-style hybrid frame limiter wait (leaves a 1.2ms select margin and poll-spins the rest so frame starts align to sub-0.1ms; 0 = legacy wait)")

@@ -3383,14 +3383,12 @@ typedef struct TCD3DKMT_LUID
 	TCD3DKMT_LUID_LOWPART LowPart;
 	TCD3DKMT_LUID_HIGHPART HighPart;
 } TCD3DKMT_LUID;
-// d3dkmthk.h: { HDC hDc; D3DKMT_HANDLE hAdapter; LUID AdapterLuid; D3DDDI_VIDEO_PRESENT_SOURCE_ID VidPnSourceId; }
-// 曾多写一个 DeviceLuid(结构 32B,实际 24B),内核按真实布局回填,于是把
-// VidPnSourceId 读成了下一个 LUID 的低位 —— 单屏恰好都是 0 才没暴露。
 typedef struct TCD3DKMT_OPENADAPTERFROMHDC
 {
 	TCHDC hDc;
 	TCD3DKMT_HANDLE hAdapter;
 	TCD3DKMT_LUID AdapterLuid;
+	TCD3DKMT_LUID DeviceLuid;
 	unsigned int VidPnSourceId;
 } TCD3DKMT_OPENADAPTERFROMHDC;
 typedef struct TCD3DKMT_CLOSEADAPTER
@@ -3410,23 +3408,7 @@ extern "C" __declspec(dllimport) void *__stdcall GetModuleHandleW(const wchar_t 
 extern "C" __declspec(dllimport) void *__stdcall GetProcAddress(void *hModule, const char *pName);
 extern "C" __declspec(dllimport) void *__stdcall GetDC(void *pWnd);
 extern "C" __declspec(dllimport) int __stdcall ReleaseDC(void *pWnd, void *pDc);
-extern "C" __declspec(dllimport) void *__stdcall GetActiveWindow();
-extern "C" __declspec(dllimport) void *__stdcall MonitorFromWindow(void *hWnd, unsigned long Flags);
-extern "C" __declspec(dllimport) int __stdcall GetMonitorInfoW(void *hMonitor, void *pMonitorInfo);
-extern "C" __declspec(dllimport) void *__stdcall CreateDCW(const wchar_t *pDriver, const wchar_t *pDevice, const wchar_t *pOutput, const void *pInitData);
-extern "C" __declspec(dllimport) int __stdcall DeleteDC(void *hDc);
 #include <cstring> // memset(ZeroMemory 宏在本 TU 不可用)
-#include <cwchar>  // wcscmp/wcsncpy
-
-// winuser.h 的 MONITORINFOEXW(reinterpret_cast 有风险,这里按字段手抄)
-struct TCMONITORINFOEXW
-{
-	unsigned long cbSize;
-	long rcMonitor[4]; // RECT{l,t,r,b}
-	long rcWork[4];
-	unsigned long dwFlags;
-	wchar_t szDevice[32]; // CCHDEVICENAME
-};
 
 struct TCSynclineSyncState
 {
@@ -3434,101 +3416,40 @@ struct TCSynclineSyncState
 	bool m_Available = false;
 	TCD3DKMT_HANDLE m_hAdapter = 0;
 	unsigned int m_VidPnSourceId = 0;
-	wchar_t m_aDeviceName[32] = L""; // 当前适配器对应的显示器,跨屏时重开
-	int64_t m_NextTry = 0;           // 失败/跨屏后的重试节流
-	PFTCD3DKMTOpenAdapterFromHdc m_pOpenAdapter = nullptr;
 	PFTCD3DKMTWaitForVerticalBlankEvent m_pWaitVblank = nullptr;
 	PFTCD3DKMTCloseAdapter m_pCloseAdapter = nullptr;
 };
 static TCSynclineSyncState s_ScanlineSync;
 
-// 取游戏窗口所在显示器的设备名(拿不到就回退主显示器)
-static bool ScanlineSyncGetTargetDevice(wchar_t *pOut, size_t OutSize)
+static bool ScanlineSyncEnsureAdapter()
 {
-	void *pMonitor = nullptr;
-	const void *pWindow = GetActiveWindow();
-	if(pWindow != nullptr)
-		pMonitor = MonitorFromWindow(const_cast<void *>(pWindow), 2 /*MONITOR_DEFAULTTONEAREST*/);
-	if(pMonitor == nullptr)
-	{
-		void *hPrimary = GetDC(nullptr);
-		if(hPrimary == nullptr)
-			return false;
-		// 主显示器:靠 GetMonitorInfoW 拿不到 monitor,退回 \\.\DISPLAY1
-		ReleaseDC(nullptr, hPrimary);
-		wcsncpy(pOut, L"\\\\.\\DISPLAY1", OutSize);
-		pOut[OutSize - 1] = L'\0';
-		return true;
-	}
-	TCMONITORINFOEXW Info;
-	memset(&Info, 0, sizeof(Info));
-	Info.cbSize = sizeof(Info);
-	if(!GetMonitorInfoW(pMonitor, &Info))
+	if(s_ScanlineSync.m_Tried)
+		return s_ScanlineSync.m_Available;
+	s_ScanlineSync.m_Tried = true;
+
+	void *pGdi = GetModuleHandleW(L"gdi32.dll");
+	if(!pGdi)
 		return false;
-	wcsncpy(pOut, Info.szDevice, OutSize);
-	pOut[OutSize - 1] = L'\0';
-	return pOut[0] != L'\0';
-}
-
-static bool ScanlineSyncOpenAdapter()
-{
-	if(s_ScanlineSync.m_pOpenAdapter == nullptr)
-	{
-		void *pGdi = GetModuleHandleW(L"gdi32.dll");
-		if(!pGdi)
-			return false;
-		// gdi32.dll 常驻,函数指针取一次就够
-		s_ScanlineSync.m_pOpenAdapter = (PFTCD3DKMTOpenAdapterFromHdc)GetProcAddress(pGdi, "D3DKMTOpenAdapterFromHdc");
-		s_ScanlineSync.m_pWaitVblank = (PFTCD3DKMTWaitForVerticalBlankEvent)GetProcAddress(pGdi, "D3DKMTWaitForVerticalBlankEvent");
-		s_ScanlineSync.m_pCloseAdapter = (PFTCD3DKMTCloseAdapter)GetProcAddress(pGdi, "D3DKMTCloseAdapter");
-		if(s_ScanlineSync.m_pOpenAdapter == nullptr || s_ScanlineSync.m_pWaitVblank == nullptr || s_ScanlineSync.m_pCloseAdapter == nullptr)
-			return false;
-	}
-
-	wchar_t aDevice[32];
-	if(!ScanlineSyncGetTargetDevice(aDevice, std::size(aDevice)))
+	const PFTCD3DKMTOpenAdapterFromHdc pOpen = (PFTCD3DKMTOpenAdapterFromHdc)GetProcAddress(pGdi, "D3DKMTOpenAdapterFromHdc");
+	s_ScanlineSync.m_pWaitVblank = (PFTCD3DKMTWaitForVerticalBlankEvent)GetProcAddress(pGdi, "D3DKMTWaitForVerticalBlankEvent");
+	s_ScanlineSync.m_pCloseAdapter = (PFTCD3DKMTCloseAdapter)GetProcAddress(pGdi, "D3DKMTCloseAdapter");
+	if(!pOpen || !s_ScanlineSync.m_pWaitVblank || !s_ScanlineSync.m_pCloseAdapter)
 		return false;
 
-	// 窗口所在显示器变了(拖到另一块屏/切主屏) → 重开适配器
-	if(s_ScanlineSync.m_Available && wcscmp(aDevice, s_ScanlineSync.m_aDeviceName) == 0)
-		return true;
-	if(s_ScanlineSync.m_Available)
-	{
-		TCD3DKMT_CLOSEADAPTER Close;
-		memset(&Close, 0, sizeof(Close));
-		Close.hAdapter = s_ScanlineSync.m_hAdapter;
-		s_ScanlineSync.m_pCloseAdapter(&Close);
-		s_ScanlineSync.m_Available = false;
-	}
-
-	// 用目标显示器的 DC(而不是 GetDC(NULL) 的主屏),多屏才会等到正确的输出
-	void *hDc = CreateDCW(nullptr, aDevice, nullptr, nullptr);
-	if(hDc == nullptr)
+	void *hDc = GetDC(nullptr); // v1: 主输出
+	if(!hDc)
 		return false;
 	TCD3DKMT_OPENADAPTERFROMHDC Open;
 	memset(&Open, 0, sizeof(Open));
 	Open.hDc = hDc;
-	const long Status = s_ScanlineSync.m_pOpenAdapter(&Open);
-	DeleteDC(hDc);
+	const long Status = pOpen(&Open);
+	ReleaseDC(nullptr, hDc);
 	if(Status < 0)
 		return false;
-
 	s_ScanlineSync.m_hAdapter = Open.hAdapter;
 	s_ScanlineSync.m_VidPnSourceId = Open.VidPnSourceId;
-	wcsncpy(s_ScanlineSync.m_aDeviceName, aDevice, std::size(s_ScanlineSync.m_aDeviceName));
-	s_ScanlineSync.m_aDeviceName[std::size(s_ScanlineSync.m_aDeviceName) - 1] = L'\0';
 	s_ScanlineSync.m_Available = true;
 	return true;
-}
-
-// 每秒最多尝试一次(跨屏/失败都靠它重试),避免每帧折腾设备
-static bool ScanlineSyncEnsureAdapter()
-{
-	const int64_t Now = time_get();
-	if(s_ScanlineSync.m_NextTry != 0 && Now < s_ScanlineSync.m_NextTry)
-		return s_ScanlineSync.m_Available;
-	s_ScanlineSync.m_NextTry = Now + time_freq();
-	return ScanlineSyncOpenAdapter();
 }
 
 static void ScanlineSyncShutdown()
@@ -3552,16 +3473,7 @@ static void WaitScanlineVblank()
 	Wait.hAdapter = s_ScanlineSync.m_hAdapter;
 	Wait.hDevice = 0;
 	Wait.VidPnSourceId = s_ScanlineSync.m_VidPnSourceId;
-	// 阻塞至下一次垂直空白(≤一个刷新周期)。失败(设备被拔/失效)则关掉,靠
-	// ScanlineSyncEnsureAdapter 的节流重开,期间引擎限帧恢复接管
-	if(s_ScanlineSync.m_pWaitVblank(&Wait) < 0)
-	{
-		TCD3DKMT_CLOSEADAPTER Close;
-		memset(&Close, 0, sizeof(Close));
-		Close.hAdapter = s_ScanlineSync.m_hAdapter;
-		s_ScanlineSync.m_pCloseAdapter(&Close);
-		s_ScanlineSync.m_Available = false;
-	}
+	s_ScanlineSync.m_pWaitVblank(&Wait); // 阻塞至下一次垂直空白(≤一个刷新周期)
 }
 #endif
 
@@ -3854,10 +3766,9 @@ void CClient::Run()
 #endif
 
 #if defined(CONF_FAMILY_WINDOWS)
-			// TClient: 垂直空白同步生效时,帧节奏由 vblank 接管 —— 关闭引擎限帧
-			// 防止双重节流(限帧到 180 再等 vblank 会互相打架)。注意要确认适配器
-			// 真的可用:开不出来时若还清零限帧就成了完全不限帧
-			if(g_Config.m_TcScanlineSync && ScanlineSyncEnsureAdapter())
+			// TClient: 垂直空白同步开启时,帧节奏由 vblank 接管 —— 关闭引擎限帧
+			// 防止双重节流(限帧到 180 再等 vblank 会互相打架)
+			if(g_Config.m_TcScanlineSync)
 				GfxRefreshRate = 0;
 #endif
 

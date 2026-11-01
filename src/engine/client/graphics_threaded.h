@@ -661,11 +661,6 @@ enum EGraphicsBackendErrorCodes
 	GRAPHICS_BACKEND_ERROR_CODE_SDL_WINDOW_CREATE_FAILED,
 };
 
-// TClient: NVIDIA Reflex 状态(渲染线程写,主线程读)。生效时主线程在 Swap 后
-// 等渲染线程走完 present + Reflex 睡眠,下一帧的输入采样才落在睡眠之后。
-void SetTClientReflexActive(bool Active);
-bool IsTClientReflexActive();
-
 // interface for the graphics backend
 // all these functions are called on the main thread
 class IGraphicsBackend

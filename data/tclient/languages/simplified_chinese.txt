@@ -1492,3 +1492,6 @@ NVIDIA Reflex low latency
 NVIDIA GPU + Vulkan only
 == 仅 NVIDIA 显卡 + Vulkan 生效
 
+Show a gear above players who have the settings menu open
+== 在打开设置菜单的玩家头顶显示齿轮
+

@@ -79,6 +79,7 @@
 #include "components/tclient/pingwheel.h"
 #include "components/tclient/relay_client.h"
 #include "components/tclient/player_indicator.h"
+#include "components/tclient/player_status.h"
 #include "components/tclient/rainbow.h"
 #include "components/tclient/scripting.h"
 #include "components/tclient/skinprofiles.h"
@@ -235,6 +236,7 @@ public:
 	CBindWheel m_BindWheel;
 	CPingWheel m_PingWheel; // TClient
 	CRelayClient m_RelayClient; // TClient
+	CPlayerStatus m_PlayerStatus; // TClient
 	CBgDraw m_BgDraw;
 	CTClient m_TClient;
 	CTrails m_Trails;

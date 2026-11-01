@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.36",
+  "version": "1.7.8.37",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 18047266,
-  "sha256": "fb77c403faeb6c374760f90d29824490cb640d1690eb6d982c0de4d3f87dee1a",
-  "notes": "Dynamic Island hides the music module when nothing is playing: the capsule shrinks to the clock cells only (round timer / local time), and disappears entirely when both are off.",
+  "size": 18047736,
+  "sha256": "c41341f9cfc31aee42c1c9b0c6a583de56cf553e19440b747394312dc788387b",
+  "notes": "Idle Dynamic Island keeps a decorative equaliser whose beat follows the local player's hook (right click) rate; the round timer stays, the local clock is opt-in.",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

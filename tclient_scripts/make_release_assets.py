@@ -51,10 +51,12 @@ EXCLUDED_ROOT_DIRS = (
 	"update",
 )
 
-# Subdirectories of data/ that players customize in place (sound packs, custom skins,
-# local maps). Updates ship game data only; these are never replaced even when file
-# names collide with official content, e.g. data/audio/foley_dbljump-01.wv.
-EXCLUDED_DATA_SUBDIRS = ("audio", "maps", "skins")
+# Subdirectories of data/ that the *update* package ships. Everything else under
+# data/ is upstream game content: players customize some of it in place (sound
+# packs in data/audio, custom skins in data/skins, own maps in data/maps), so an
+# update that rewrites those files destroys their work. Only the resources this
+# project maintains travel with an update; fresh installs use the full package.
+UPDATE_DATA_SUBDIRS = ("tclient",)
 
 # Files at the root of the installation that hold user data.
 EXCLUDED_ROOT_FILES = ("storage.cfg",)
@@ -79,8 +81,13 @@ class PackageError(Exception):
 	pass
 
 
-def is_excluded(relative: Path) -> bool:
-	"""True if the file must not end up in the update zip."""
+def is_excluded(relative: Path, data_subdirs: tuple[str, ...] | None) -> bool:
+	"""True if the file must not end up in the zip.
+
+	data_subdirs selects how data/ is treated: None keeps every game resource
+	(full installation package), a tuple keeps only the named subdirectories
+	(update package), and an empty tuple drops data/ entirely.
+	"""
 	parts = relative.parts
 	if not parts:
 		return True
@@ -103,8 +110,8 @@ def is_excluded(relative: Path) -> bool:
 	if any(root.startswith(prefix) for prefix in EXCLUDED_DIR_PREFIXES):
 		return True
 
-	# Player-customized data subdirectories, e.g. data/audio/ sound packs.
-	if len(parts) >= 2 and root == "data" and parts[1].lower() in EXCLUDED_DATA_SUBDIRS:
+	# data/ is upstream game content unless a subdirectory is named explicitly.
+	if root == "data" and data_subdirs is not None and len(parts) >= 2 and parts[1].lower() not in data_subdirs:
 		return True
 
 	# Nested leftovers of the updater, e.g. data/update_staging_1234/.
@@ -115,7 +122,7 @@ def is_excluded(relative: Path) -> bool:
 	return False
 
 
-def collect_files(source: Path) -> list[tuple[str, Path]]:
+def collect_files(source: Path, data_subdirs: tuple[str, ...]) -> list[tuple[str, Path]]:
 	"""Returns (relative posix path, absolute path) for every file that belongs into the zip."""
 	if not source.is_dir():
 		raise PackageError(f"source directory does not exist: {source}")
@@ -128,12 +135,12 @@ def collect_files(source: Path) -> list[tuple[str, Path]]:
 		dir_names[:] = [
 			name
 			for name in dir_names
-			if not is_excluded((current / name).relative_to(source))
+			if not is_excluded((current / name).relative_to(source), data_subdirs)
 		]
 		for file_name in sorted(file_names):
 			absolute = current / file_name
 			relative = absolute.relative_to(source)
-			if is_excluded(relative):
+			if is_excluded(relative, data_subdirs):
 				continue
 			result.append((relative.as_posix(), absolute))
 	result.sort(key=lambda item: item[0])
@@ -216,6 +223,20 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
 	parser.add_argument("--product", default="TClient", help="Product name in the manifest (default: TClient)")
 	parser.add_argument("--channel", default="stable", help="Update channel in the manifest (default: stable)")
 	parser.add_argument("--platform", default="win64", help="Platform in the manifest (default: win64)")
+	parser.add_argument(
+		"--include-data",
+		default="",
+		help="Comma separated data/ subdirectories the update must also ship, e.g. shader.\n"
+		"By default only data/tclient travels with an update, all other game\n"
+		"resources are left untouched on the player's installation.",
+	)
+	parser.add_argument(
+		"--full-zip",
+		default=None,
+		help="Also write a full installation package (every game resource) to this\n"
+		"path, e.g. K:/out/TClient-v1.7.8.35-full-win64.zip. It is never consumed\n"
+		"by the updater and needs no manifest.",
+	)
 	parser.add_argument("--quiet", action="store_true", help="Only print the manifest and the summary")
 	return parser.parse_args(argv)
 
@@ -226,7 +247,9 @@ def main(argv: list[str]) -> int:
 	output = Path(args.output).resolve()
 
 	try:
-		files = collect_files(source)
+		extra_data = tuple(part.strip().lower() for part in args.include_data.split(",") if part.strip())
+		update_data = tuple(dict.fromkeys(UPDATE_DATA_SUBDIRS + extra_data))
+		files = collect_files(source, update_data)
 		if not files:
 			raise PackageError(f"no files to package found in {source}")
 		missing = [name for name in REQUIRED_FILES if name not in {relative for relative, _ in files}]
@@ -294,9 +317,29 @@ def main(argv: list[str]) -> int:
 
 		if not args.quiet:
 			print(f"source: {source}")
+			print(f"data dirs in the update: {', '.join(update_data) if update_data else '(none)'}")
 			print(f"files in the update: {len(files)}")
 			for relative, absolute in files:
 				print(f"  {relative} ({human_size(absolute.stat().st_size)})")
+
+		# 全量安装包：含全部上游游戏资源，只给首次安装/修复用，更新器从不读它
+		if args.full_zip:
+			full_path = Path(args.full_zip).resolve()
+			if full_path.suffix.lower() != ".zip":
+				raise PackageError(f"--full-zip must end in .zip: {full_path}")
+			full_files = collect_files(source, None)
+			full_missing = [name for name in REQUIRED_FILES if name not in {relative for relative, _ in full_files}]
+			if full_missing:
+				raise PackageError(f"required files missing from the full package: {', '.join(full_missing)}")
+			full_path.parent.mkdir(parents=True, exist_ok=True)
+			write_zip(full_files, full_path)
+			full_size = full_path.stat().st_size
+			full_digest = sha256_of(full_path)
+			if not args.quiet:
+				print(f"full package: {len(full_files)} files, {human_size(full_size)}")
+		else:
+			full_path = None
+
 		print()
 		print(f"zip:      {zip_path}")
 		print(f"manifest: {manifest_path}")
@@ -305,6 +348,9 @@ def main(argv: list[str]) -> int:
 		print(f"raw size: {human_size(uncompressed)}")
 		print(f"zip size: {human_size(size)} ({size} bytes)")
 		print(f"sha256:   {digest}")
+		if args.full_zip:
+			print(f"full zip: {full_path} ({human_size(full_size)}, {full_size} bytes)")
+			print(f"full sha256: {full_digest}")
 		print()
 		print("manifest:")
 		print(json.dumps(manifest, indent=2, ensure_ascii=False))

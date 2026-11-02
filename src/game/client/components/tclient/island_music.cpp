@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <ctime>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -39,7 +40,6 @@
 #define STBI_ONLY_BMP
 #define STBI_ONLY_GIF
 #include "lyric_parser.h"
-#include "lyric_parser.h"
 #include "stb_image.h"
 
 #if defined(CONF_FAMILY_WINDOWS)
@@ -65,11 +65,6 @@ using WmSessionManager = WmControl::GlobalSystemMediaTransportControlsSessionMan
 #else
 #define TCLIENT_HAS_WINRT_MUSIC 0
 #endif
-
-using TcLyric::SLyricLine;
-using TcLyric::SWord;
-using TcLyric::ParseSyncedLyrics;
-using TcLyric::ParseYrcLyrics;
 
 using TcLyric::SLyricLine;
 using TcLyric::SWord;
@@ -518,6 +513,10 @@ public:
 	std::string m_CoverFailedKey;       // key whose cover fetch already failed
 	std::vector<uint8_t> m_CoverPng;    // raw PNG bytes for m_CoverKey
 	bool m_CoverDirty = false;          // set by worker when new bytes arrive
+
+	static constexpr size_t COVER_MAX_BYTES = 16u * 1024u * 1024u;
+	static constexpr int COVER_MAX_DIMENSION = 4096;
+	static constexpr size_t COVER_MAX_PIXELS = 16u * 1024u * 1024u;
 
 	// render-thread side texture cache
 	std::string m_LoadedCoverKey;       // key currently decoded into m_CoverTexture
@@ -1557,7 +1556,9 @@ public:
 				m_LyricsState = ELyricsState::IDLE;
 				m_vLines.clear();
 				AbortRequest();
+#if defined(CONF_FAMILY_WINDOWS)
 				AbortNetease();
+#endif
 			}
 			return;
 		}
@@ -1618,7 +1619,6 @@ public:
 		if(Key != m_ActiveKey)
 		{
 			AbortRequest();
-			AbortNetease();
 			m_ActiveKey = Key;
 			m_vLines.clear();
 			ResetMediaClock();
@@ -1735,6 +1735,20 @@ public:
 				*(volatile double *)((uint8_t *)m_pIslandView + offsetof(SIslandShm, ClientDurationMs)) = 0.0;
 		}
 
+		// Evict only before inserting a new track, never while a request handler
+		// holds a reference to an entry. Keep the in-flight entry if there is one.
+		if(m_NeteaseData.find(Key) == m_NeteaseData.end())
+		{
+			while(m_NeteaseData.size() >= NETEASE_META_MAX)
+			{
+				auto It = m_NeteaseData.begin();
+				if(It->first == m_NeteaseInFlight)
+					++It;
+				if(It == m_NeteaseData.end())
+					break;
+				m_NeteaseData.erase(It);
+			}
+		}
 		SNeteaseMeta &Meta = m_NeteaseData[Key];
 		Meta.m_Title = Track.m_Title;
 		Meta.m_Artist = Track.m_Artist;
@@ -1915,7 +1929,7 @@ public:
 				unsigned char *pResultPtr = nullptr;
 				size_t ResultLen = 0;
 				pFinished->Result(&pResultPtr, &ResultLen);
-				if(pResultPtr != nullptr && ResultLen > 0)
+				if(pResultPtr != nullptr && ResultLen > 0 && ResultLen <= COVER_MAX_BYTES)
 				{
 					std::lock_guard<std::mutex> Lock(m_Mutex);
 					m_CoverPng.assign(pResultPtr, pResultPtr + ResultLen);
@@ -2219,8 +2233,6 @@ public:
 			Meta.m_TriedLyric = true;
 		}
 
-		if(m_NeteaseData.size() >= NETEASE_META_MAX)
-			m_NeteaseData.clear();
 		if(ApplyToActive && !m_NeteaseInFlight.empty() && Key == m_ActiveKey)
 			m_LyricsState = Meta.m_LyricState;
 
@@ -2228,7 +2240,6 @@ public:
 		// ProcessNetease 可达——QQ 收口后没有网易请求完成帧,且换 m_ActiveKey
 		// 会被下一帧的 key 检查中止,是死码。)
 	}
-#endif
 
 	// ---------------- QQ 音乐第三源（NetEase NOTFOUND 后、lrclib 前） ----------------
 	// 两阶段：搜索(w=标题 歌手)拿 songmid → 歌词接口拿明文 LRC。解析复用 ParseSyncedLyrics。
@@ -2298,6 +2309,7 @@ public:
 		if(pRoot != nullptr && pRoot != &json_value_none)
 			json_value_free(pRoot);
 	}
+#endif
 
 	int FindLineIndex(int64_t PositionMs) const
 	{
@@ -2473,16 +2485,28 @@ public:
 			m_CoverTextureValid = false;
 		}
 		m_LoadedCoverKey = Key;
-		if(m_LoadedPng.empty())
+		if(m_LoadedPng.empty() || m_LoadedPng.size() > COVER_MAX_BYTES || m_LoadedPng.size() > (size_t)std::numeric_limits<int>::max())
 		{
-			m_LastTexResult = "empty-png len=" + std::to_string((int)m_LoadedPng.size());
+			m_LastTexResult = "invalid cover bytes=" + std::to_string(m_LoadedPng.size());
 			return false;
 		}
+		const int InputSize = (int)m_LoadedPng.size();
 		int IW = 0, IH = 0, IChannels = 0;
-		unsigned char *pPixels = stbi_load_from_memory(m_LoadedPng.data(), (int)m_LoadedPng.size(), &IW, &IH, &IChannels, 4);
-		if(!pPixels || IW <= 0 || IH <= 0)
+		auto ValidDimensions = [](int W, int H) {
+			if(W <= 0 || H <= 0 || W > COVER_MAX_DIMENSION || H > COVER_MAX_DIMENSION)
+				return false;
+			const size_t Width = (size_t)W, Height = (size_t)H;
+			return Width <= COVER_MAX_PIXELS / Height && Width <= std::numeric_limits<size_t>::max() / Height / 4;
+		};
+		if(!stbi_info_from_memory(m_LoadedPng.data(), InputSize, &IW, &IH, &IChannels) || !ValidDimensions(IW, IH))
 		{
-			m_LastTexResult = "stbi-FAIL bytes=" + std::to_string((int)m_LoadedPng.size()) + " err=" + std::string(stbi_failure_reason() ? stbi_failure_reason() : "?");
+			m_LastTexResult = "invalid cover dimensions or format";
+			return false;
+		}
+		unsigned char *pPixels = stbi_load_from_memory(m_LoadedPng.data(), InputSize, &IW, &IH, &IChannels, 4);
+		if(!pPixels || !ValidDimensions(IW, IH))
+		{
+			m_LastTexResult = "stbi-FAIL bytes=" + std::to_string(m_LoadedPng.size()) + " err=" + std::string(stbi_failure_reason() ? stbi_failure_reason() : "?");
 			stbi_image_free(pPixels);
 			return false;
 		}
@@ -2491,6 +2515,12 @@ public:
 		Image.m_Height = (size_t)IH;
 		Image.m_Format = CImageInfo::FORMAT_RGBA;
 		Image.Allocate();
+		if(!Image.m_pData)
+		{
+			stbi_image_free(pPixels);
+			m_LastTexResult = "cover allocation failed";
+			return false;
+		}
 		memcpy(Image.m_pData, pPixels, (size_t)IW * (size_t)IH * 4);
 		stbi_image_free(pPixels);
 		// 网易云黑胶样式：封面裁成圆形（边缘 2px 抗锯齿），黑胶边从圆外露出
@@ -2506,7 +2536,7 @@ public:
 					const float Dx = x - CXp;
 					const float Dy = y - CYp;
 					const float Edge = Radius - std::sqrt(Dx * Dx + Dy * Dy);
-					unsigned char &Alpha = pPx[(y * IW + x) * 4 + 3];
+					unsigned char &Alpha = pPx[((size_t)y * (size_t)IW + (size_t)x) * 4 + 3];
 					if(Edge <= 0.0f)
 						Alpha = 0;
 					else if(Edge < 2.0f)

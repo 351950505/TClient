@@ -12,6 +12,18 @@
 
 ##### translated strings #####
 
+Yes: %d
+== 赞成：%d
+
+No: %d
+== 反对：%d
+
+Not voted: %d
+== 未投：%d
+
+Total: %d
+== 总数：%d
+
 Clan
 == 战队
 
@@ -1482,3 +1494,45 @@ Player: %s
 
 Show a gear above players who have the settings menu open
 == 在打开设置菜单的玩家头顶显示齿轮
+
+Type:
+== 类别：
+
+Reload
+== 重新加载
+
+Show grid
+== 显示网格
+
+Search
+== 搜索
+
+Source asset
+== 来源素材
+
+Main asset
+== 主素材
+
+Source (drag parts from the left)
+== 来源（从左侧拖拽部件）
+
+Result (drop parts on the right)
+== 拼合结果（将部件拖放到右侧）
+
+Selected
+== 已选中
+
+Part replaced.
+== 已替换部件。
+
+Part reset to default.
+== 该部件已恢复默认。
+
+All slots reset.
+== 已重置全部槽位。
+
+Reset slot
+== 重置槽位
+
+No preview
+== 无法预览

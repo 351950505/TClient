@@ -291,7 +291,7 @@ public:
 		CBgDrawItem(This, Data[0])
 	{
 		if(Data.size() > 1)
-			for(auto It = Data.begin() + 1; It != Data.end() - 1; ++It)
+			for(auto It = Data.begin() + 1; It != Data.end(); ++It)
 			{
 				const CBgDrawItemDataPoint &Point = *It;
 				MoveTo(Point);
@@ -422,13 +422,18 @@ bool CBgDraw::Load(const char *pFilename, bool Verbose)
 	if(!Handle)
 		return false;
 
-	auto ReadLine = [Handle](char *pBuf, int Length) -> bool {
-		if(!io_read(Handle, pBuf, Length))
-			return false;
-		size_t Len = str_length(pBuf);
-		while(Len > 0 && (pBuf[Len - 1] == '\n' || pBuf[Len - 1] == '\r'))
-			pBuf[--Len] = '\0';
-		return true;
+	const int64_t FileSize = io_length(Handle);
+	if(FileSize < 0 || FileSize > BgDrawFile::MAX_FILE_SIZE)
+	{
+		io_close(Handle);
+		GameClient()->Echo("Failed to load background drawing: file size unavailable or exceeds 16 MiB");
+		return false;
+	}
+	BgDrawFile::CLineReader Reader([Handle](char *pBuf, unsigned Size) {
+		return io_read(Handle, pBuf, Size);
+	});
+	auto ReadLine = [&Reader](char *pBuf, int Length) {
+		return Reader.ReadLine(pBuf, Length);
 	};
 
 	std::deque<CBgDrawItemData> Queue;
@@ -447,6 +452,11 @@ bool CBgDraw::Load(const char *pFilename, bool Verbose)
 		}
 	}
 	io_close(Handle);
+	if(Reader.LimitExceeded())
+	{
+		GameClient()->Echo("Failed to load background drawing: read exceeds 16 MiB");
+		return false;
+	}
 	MakeSpaceFor(Queue.size());
 	for(const CBgDrawItemData &Data : Queue)
 		AddItem(*GameClient(), Data);
@@ -478,6 +488,7 @@ void CBgDraw::MakeSpaceFor(int Count)
 {
 	if(g_Config.m_TcBgDrawMaxItems == 0 || Count >= g_Config.m_TcBgDrawMaxItems)
 	{
+		m_apActiveItems.fill(std::nullopt);
 		m_pvItems->clear();
 		return;
 	}
@@ -536,8 +547,8 @@ void CBgDraw::OnRender()
 		{
 			if(ActiveItem.has_value())
 				(*ActiveItem)->MoveTo(Pos);
-			else
-				ActiveItem = AddItem(*GameClient(), Pos);
+			else if(CBgDrawItem *pItem = AddItem(*GameClient(), Pos))
+				ActiveItem = pItem;
 			m_Dirty = true;
 		}
 		else if(ActiveItem.has_value())
@@ -594,7 +605,14 @@ void CBgDraw::OnRender()
 		}
 	}
 	// Remove killed items
-	if(m_pvItems->remove_if([&](CBgDrawItem &Item) { return Item.m_Killed; }))
+	if(m_pvItems->remove_if([&](CBgDrawItem &Item) {
+		   if(!Item.m_Killed)
+			   return false;
+		   for(auto &ActiveItem : m_apActiveItems)
+			   if(ActiveItem.value_or(nullptr) == &Item)
+				   ActiveItem = std::nullopt;
+		   return true;
+	   }))
 		m_Dirty = true;
 	Graphics()->SetColor(ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f));
 }

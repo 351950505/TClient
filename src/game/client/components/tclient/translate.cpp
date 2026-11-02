@@ -19,31 +19,6 @@
 #include <algorithm>
 #include <memory>
 
-static void UrlEncode(const char *pText, char *pOut, size_t Length)
-{
-	if(Length == 0)
-		return;
-	size_t OutPos = 0;
-	for(const char *p = pText; *p && OutPos < Length - 1; ++p)
-	{
-		unsigned char c = *(const unsigned char *)p;
-		if(isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
-		{
-			if(OutPos >= Length - 1)
-				break;
-			pOut[OutPos++] = c;
-		}
-		else
-		{
-			if(OutPos + 3 >= Length)
-				break;
-			snprintf(pOut + OutPos, 4, "%%%02X", c);
-			OutPos += 3;
-		}
-	}
-	pOut[OutPos] = '\0';
-}
-
 static std::string UrlEncodeString(const char *pText)
 {
 	std::string Out;
@@ -357,9 +332,9 @@ public:
 			Json.WriteStrValue(g_Config.m_TcTranslateKey);
 		}
 		Json.EndObject();
-		CreateHttpRequest(Http, g_Config.m_TcTranslateEndpoint[0] == '\0' ? "localhost:5000/translate" : g_Config.m_TcTranslateEndpoint);
-		const char *pJson = Json.GetOutputString().c_str();
-		m_pHttpRequest->PostJson(pJson);
+		const std::string Payload = Json.GetOutputString();
+		PrepareHttpPost(g_Config.m_TcTranslateEndpoint[0] == '\0' ? "localhost:5000/translate" : g_Config.m_TcTranslateEndpoint, "application/json", Payload.data(), Payload.size());
+		RunHttpRequest(Http);
 	}
 };
 
@@ -406,18 +381,15 @@ public:
 		ITranslateBackendHttp(pName)
 	{
 		// GET with query string: this endpoint does not accept a form body.
-		// CHttpRequest::m_aUrl is 256 bytes. Size the text buffer from what is
-		// left after the base URL and fixed query prefix, so a long message is
-		// not silently truncated into a wrong translation.
-		char aText[256];
+		// Reject requests that cannot fit in CHttpRequest's 256-byte URL buffer.
 		const char *pBase = g_Config.m_TcTranslateEndpoint[0] != '\0' ? g_Config.m_TcTranslateEndpoint : "https://clients5.google.com/translate_a/t";
-		const int FixedLen = str_length(pBase) +
-				      (int)str_length("?client=dict-chrome-ex&sl=auto&tl=&q=") + str_length(EncodeTarget(pTargetLang));
-		const int TextBudget = std::clamp(256 - FixedLen - 1, 16, (int)sizeof(aText) - 1);
-		UrlEncode(pText, aText, (size_t)TextBudget + 1);
-		char aUrl[256];
-		str_format(aUrl, sizeof(aUrl), "%s?client=dict-chrome-ex&sl=auto&tl=%s&q=%s", pBase, EncodeTarget(pTargetLang), aText);
-		CreateHttpRequest(Http, aUrl);
+		const std::string Url = std::string(pBase) + "?client=dict-chrome-ex&sl=auto&tl=" + EncodeTarget(pTargetLang) + "&q=" + UrlEncodeString(pText);
+		if(Url.size() >= 256)
+		{
+			str_copy(m_aInitError, "Google alternate request URL exceeds 255 bytes");
+			return;
+		}
+		CreateHttpRequest(Http, Url.c_str());
 	}
 };
 
@@ -493,13 +465,15 @@ public:
 		// Query params go in the POST body, not the URL -- keeps the URL
 		// itself short and fixed (see CreateHttpRequestPost) regardless of
 		// how long pText is.
-		char aBody[4096];
-		str_format(aBody, sizeof(aBody), "client=gtx&sl=auto&dt=t&tl=%s&q=", EncodeTarget(pTargetLang));
-
-		UrlEncode(pText, aBody + strlen(aBody), sizeof(aBody) - strlen(aBody));
+		const std::string Body = std::string("client=gtx&sl=auto&dt=t&tl=") + EncodeTarget(pTargetLang) + "&q=" + UrlEncodeString(pText);
+		if(Body.size() >= 4096)
+		{
+			str_copy(m_aInitError, "Google request body exceeds 4095 bytes");
+			return;
+		}
 
 		const char *pEndpoint = g_Config.m_TcTranslateEndpoint[0] != '\0' ? g_Config.m_TcTranslateEndpoint : "https://translate.googleapis.com/translate_a/single";
-		CreateHttpRequestPost(Http, pEndpoint, aBody);
+		CreateHttpRequestPost(Http, pEndpoint, Body.c_str());
 	}
 };
 
@@ -1440,7 +1414,7 @@ void CTranslate::OnConsoleInit()
 
 void CTranslate::Translate(int Id, bool ShowProgress)
 {
-	if(Id < 0 || Id > (int)std::size(GameClient()->m_aClients))
+	if(Id < 0 || Id >= (int)std::size(GameClient()->m_aClients))
 	{
 		GameClient()->m_Chat.Echo("Not a valid ID");
 		return;

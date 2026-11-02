@@ -124,6 +124,7 @@ void CScoreboard::ResetTexts()
 		Player.m_ScoreMillis.Reset(TextRender());
 		Player.m_Name.Reset(TextRender());
 		Player.m_MuteMark.Reset(TextRender());
+		Player.m_VoteMark.Reset(TextRender());
 		Player.m_ReadyMark.Reset(TextRender());
 		Player.m_Clan.Reset(TextRender());
 		Player.m_Ping.Reset(TextRender());
@@ -854,6 +855,16 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 					TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
 					Player.m_MuteMark.Render(TextRender(), vec2(NameTextOffset, TextY), NameColor);
 					NameTextOffset += Player.m_MuteMark.Width();
+				}
+				if(pInfo->m_Local && GameClient()->m_Voting.IsVoting() && GameClient()->m_Voting.TakenChoice() != 0)
+				{
+					Player.m_VoteMark.Update(TextRender(), "✓", FontSize);
+					const float MarkSpacing = FontSize * 0.2f;
+					if(NameTextOffset - NameOffset + Player.m_VoteMark.Width() + MarkSpacing <= NameLength)
+					{
+						Player.m_VoteMark.Render(TextRender(), vec2(NameTextOffset, TextY), ColorRGBA(0.1f, 1.0f, 0.1f, TextColor.a));
+						NameTextOffset += Player.m_VoteMark.Width() + MarkSpacing;
+					}
 				}
 				Player.m_Name.Update(TextRender(), aBuf, FontSize, std::max(NameLength - (NameTextOffset - NameOffset), 0.0f), TEXTFLAG_RENDER | TEXTFLAG_ELLIPSIS_AT_END);
 				Player.m_Name.Render(TextRender(), vec2(NameTextOffset, TextY), NameColor);

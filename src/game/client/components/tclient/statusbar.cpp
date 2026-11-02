@@ -59,7 +59,7 @@ float CStatusBar::GetDurationWidth(int Duration)
 
 float CStatusBar::AngleWidth()
 {
-	if(GameClient()->m_Snap.m_SpecInfo.m_SpectatorId == SPEC_FREEVIEW)
+	if(m_PlayerId < 0 || m_PlayerId >= MAX_CLIENTS)
 		return 0.0f;
 
 	return TextRender()->TextWidth(m_FontSize, "000.00");
@@ -84,7 +84,7 @@ void CStatusBar::AngleRender()
 
 float CStatusBar::PingWidth()
 {
-	if(!GameClient()->m_Snap.m_apPlayerInfos[m_PlayerId])
+	if(m_PlayerId < 0 || m_PlayerId >= MAX_CLIENTS || !GameClient()->m_Snap.m_apPlayerInfos[m_PlayerId])
 		return 0.0f;
 
 	return TextRender()->TextWidth(m_FontSize, "0000");
@@ -169,7 +169,7 @@ void CStatusBar::FPSRender()
 
 float CStatusBar::PositionWidth()
 {
-	if(!GameClient()->m_Snap.m_apPlayerInfos[m_PlayerId])
+	if(m_PlayerId < 0 || m_PlayerId >= MAX_CLIENTS || !GameClient()->m_Snap.m_apPlayerInfos[m_PlayerId])
 		return 0.0f;
 
 	return TextRender()->TextWidth(m_FontSize, "-0000.00, -0000.00");
@@ -188,7 +188,7 @@ void CStatusBar::PositionRender()
 
 float CStatusBar::VelocityWidth()
 {
-	if(!GameClient()->m_Snap.m_apPlayerInfos[m_PlayerId])
+	if(m_PlayerId < 0 || m_PlayerId >= MAX_CLIENTS || !GameClient()->m_Snap.m_apPlayerInfos[m_PlayerId])
 		return 0.0f;
 
 	return TextRender()->TextWidth(m_FontSize, "+00.00, +00.00");

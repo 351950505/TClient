@@ -28,9 +28,9 @@ void CWarList::OnConsoleInit()
 
 	// In-game commands
 	Console()->Register("war_name_index", "i[group_index] s[name] ?r[reason]", CFGFLAG_CLIENT, ConNameIndex, this, "Remove a clan war entry");
-	Console()->Register("war_clan_index", "s[group_index] s[name] ?r[reason]", CFGFLAG_CLIENT, ConClanIndex, this, "Remove a clan war entry");
+	Console()->Register("war_clan_index", "i[group_index] s[name] ?r[reason]", CFGFLAG_CLIENT, ConClanIndex, this, "Remove a clan war entry");
 	Console()->Register("remove_war_name_index", "i[group_index] s[name]", CFGFLAG_CLIENT, ConRemoveNameIndex, this, "Remove a clan war entry");
-	Console()->Register("remove_war_clan_index", "s[group_index] s[name]", CFGFLAG_CLIENT, ConRemoveClanIndex, this, "Remove a clan war entry");
+	Console()->Register("remove_war_clan_index", "i[group_index] s[name]", CFGFLAG_CLIENT, ConRemoveClanIndex, this, "Remove a clan war entry");
 }
 
 // In-game war Commands
@@ -128,7 +128,7 @@ void CWarList::AddWarEntryInGame(int WarType, const char *pName, const char *pRe
 {
 	if(str_comp(pName, "") == 0)
 		return;
-	if(WarType >= (int)m_WarTypes.size())
+	if(WarType < 0 || WarType >= (int)m_WarTypes.size())
 		return;
 
 	CWarType *pWarType = m_WarTypes[WarType];
@@ -170,7 +170,7 @@ void CWarList::RemoveWarEntryInGame(int WarType, const char *pName, bool IsClan)
 {
 	if(str_comp(pName, "") == 0)
 		return;
-	if(WarType >= (int)m_WarTypes.size())
+	if(WarType < 0 || WarType >= (int)m_WarTypes.size())
 		return;
 
 	CWarType *pWarType = m_WarTypes[WarType];
@@ -326,11 +326,12 @@ void CWarList::RemoveWarType(const char *pType)
 		// Find all war entries and set them to None if they are using this type
 		for(CWarEntry &Entry : m_vWarEntries)
 		{
-			if(*Entry.m_pWarType == **It)
+			if(Entry.m_pWarType == *It)
 			{
 				Entry.m_pWarType = m_pWarTypeNone;
 			}
 		}
+		delete *It;
 		m_WarTypes.erase(It);
 	}
 }

@@ -37,6 +37,7 @@ class CVoting : public CComponent
 	void Callvote(const char *pType, const char *pValue, const char *pReason);
 
 	void RenderBars(CUIRect Bars) const;
+	void RenderVoteCounts(CUIRect View, float FontSize) const;
 
 public:
 	friend class CTClient; // TClient

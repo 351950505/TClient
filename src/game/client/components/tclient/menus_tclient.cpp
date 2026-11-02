@@ -407,8 +407,8 @@ int CMenus::DoButtonNoRect_FontIcon(CButtonContainer *pButtonContainer, const ch
 
 void CMenus::PopupConfirmRemoveWarType()
 {
-	GameClient()->m_WarList.RemoveWarType(m_pRemoveWarType->m_aWarName);
-	m_pRemoveWarType = nullptr;
+	GameClient()->m_WarList.RemoveWarType(m_aRemoveWarType);
+	m_aRemoveWarType[0] = '\0';
 }
 
 void CMenus::RenderSettingsTClient(CUIRect MainView)
@@ -1956,7 +1956,9 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 
 	// ======WAR ENTRIES======
 	static CWarEntry *s_pSelectedEntry = nullptr;
-	static CWarType *s_pSelectedType = GameClient()->m_WarList.m_WarTypes[0];
+	// Resolve the selection anew each frame: groups may be removed while a popup is open.
+	static char s_aSelectedType[MAX_WARLIST_TYPE_LENGTH] = "none";
+	CWarType *pSelectedType = GameClient()->m_WarList.FindWarType(s_aSelectedType);
 	{
 		Column1.HSplitTop(HeadlineHeight, &Label, &Column1);
 		Label.VSplitRight(25.0f, &Label, &Button);
@@ -2080,7 +2082,7 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 					s_IsName = true;
 					s_IsClan = false;
 				}
-				s_pSelectedType = s_pSelectedEntry->m_pWarType;
+				pSelectedType = s_pSelectedEntry->m_pWarType;
 			}
 		}
 
@@ -2159,27 +2161,27 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 
 	if(DoButtonLineSize_Menu(&s_OverrideButton, TCLocalize("Override Entry"), 0, &ButtonL, LineSize) && s_pSelectedEntry)
 	{
-		if(s_pSelectedEntry && s_pSelectedType && (str_comp(s_aEntryName, "") != 0 || str_comp(s_aEntryClan, "") != 0))
+		if(s_pSelectedEntry && pSelectedType && (str_comp(s_aEntryName, "") != 0 || str_comp(s_aEntryClan, "") != 0))
 		{
 			str_copy(s_pSelectedEntry->m_aName, s_aEntryName);
 			str_copy(s_pSelectedEntry->m_aClan, s_aEntryClan);
 			str_copy(s_pSelectedEntry->m_aReason, s_aEntryReason);
-			s_pSelectedEntry->m_pWarType = s_pSelectedType;
+			s_pSelectedEntry->m_pWarType = pSelectedType;
 		}
 	}
 	if(DoButtonLineSize_Menu(&s_AddButton, TCLocalize("Add Entry"), 0, &ButtonR, LineSize))
 	{
-		if(s_pSelectedType)
-			GameClient()->m_WarList.AddWarEntry(s_aEntryName, s_aEntryClan, s_aEntryReason, s_pSelectedType->m_aWarName);
+		if(pSelectedType)
+			GameClient()->m_WarList.AddWarEntry(s_aEntryName, s_aEntryClan, s_aEntryReason, pSelectedType->m_aWarName);
 	}
 	Column2.HSplitTop(MarginSmall, nullptr, &Column2);
 	Column2.HSplitTop(HeadlineFontSize + MarginSmall, &Button, &Column2);
-	if(s_pSelectedType)
+	if(pSelectedType)
 	{
 		float Shade = 0.0f;
 		Button.Draw(ColorRGBA(Shade, Shade, Shade, 0.25f), 15, 3.0f);
-		TextRender()->TextColor(s_pSelectedType->m_Color);
-		Ui()->DoLabel(&Button, s_pSelectedType->m_aWarName, HeadlineFontSize, TEXTALIGN_MC);
+		TextRender()->TextColor(pSelectedType->m_Color);
+		Ui()->DoLabel(&Button, pSelectedType->m_aWarName, HeadlineFontSize, TEXTALIGN_MC);
 		TextRender()->TextColor(TextRender()->DefaultTextColor());
 	}
 
@@ -2207,7 +2209,7 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 
 	CUIRect WarTypeList;
 	Column3.HSplitBottom(180.0f, &WarTypeList, &Column3);
-	m_pRemoveWarType = nullptr;
+	bool RemoveWarType = false;
 	int SelectedOldType = -1;
 	static CListBox s_WarTypeListBox;
 	s_WarTypeListBox.DoStart(25.0f, GameClient()->m_WarList.m_WarTypes.size(), 1, 2, SelectedOldType, &WarTypeList, true, IGraphics::CORNER_ALL, true);
@@ -2226,7 +2228,7 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 		if(!pType)
 			continue;
 
-		if(s_pSelectedType && pType == s_pSelectedType)
+		if(pSelectedType && pType == pSelectedType)
 			SelectedOldType = i;
 
 		const CListboxItem Item = s_WarTypeListBox.DoNextItem(&s_vTypeItemIds[i], SelectedOldType >= 0 && SelectedOldType == i);
@@ -2242,7 +2244,10 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 			DeleteButton.HSplitTop(20.0f, &DeleteButton, nullptr);
 			DeleteButton.Margin(2.0f, &DeleteButton);
 			if(DoButtonNoRect_FontIcon(&s_vTypeDeleteButtons[i], FontIcon::TRASH, 0, &DeleteButton, IGraphics::CORNER_ALL))
-				m_pRemoveWarType = pType;
+			{
+				str_copy(m_aRemoveWarType, pType->m_aWarName);
+				RemoveWarType = true;
+			}
 		}
 		TextRender()->TextColor(pType->m_Color);
 		Ui()->DoLabel(&TypeRect, pType->m_aWarName, StandardFontSize, TEXTALIGN_ML);
@@ -2251,19 +2256,19 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 	const int NewSelectedType = s_WarTypeListBox.DoEnd();
 	if((SelectedOldType != NewSelectedType && NewSelectedType >= 0) || (NewSelectedType >= 0 && Ui()->HotItem() == &s_vTypeItemIds[NewSelectedType] && Ui()->MouseButtonClicked(0)))
 	{
-		s_pSelectedType = GameClient()->m_WarList.m_WarTypes[NewSelectedType];
+		pSelectedType = GameClient()->m_WarList.m_WarTypes[NewSelectedType];
 		if(!Ui()->LastMouseButton(1) && !Ui()->LastMouseButton(2))
 		{
-			str_copy(s_aTypeName, s_pSelectedType->m_aWarName);
-			s_GroupColor = s_pSelectedType->m_Color;
+			str_copy(s_aTypeName, pSelectedType->m_aWarName);
+			s_GroupColor = pSelectedType->m_Color;
 		}
 	}
-	if(m_pRemoveWarType != nullptr)
+	if(RemoveWarType)
 	{
 		char aMessage[256];
 		str_format(aMessage, sizeof(aMessage),
 			TCLocalize("Are you sure that you want to remove '%s' from your war groups?"),
-			m_pRemoveWarType->m_aWarName);
+			m_aRemoveWarType);
 		PopupConfirm(TCLocalize("Remove War Group"), aMessage, TCLocalize("Yes"), TCLocalize("No"), &CMenus::PopupConfirmRemoveWarType);
 	}
 
@@ -2284,14 +2289,15 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 	Column3.HSplitTop(LineSize * 2.0f, &Button, &Column3);
 	Button.VSplitMid(&ButtonL, &ButtonR, MarginSmall);
 	bool OverrideDisabled = NewSelectedType == 0;
-	if(DoButtonLineSize_Menu(&s_OverrideGroupButton, TCLocalize("Override Group"), 0, &ButtonL, LineSize, OverrideDisabled) && s_pSelectedType)
+	if(DoButtonLineSize_Menu(&s_OverrideGroupButton, TCLocalize("Override Group"), 0, &ButtonL, LineSize, OverrideDisabled) && pSelectedType)
 	{
-		if(s_pSelectedType && str_comp(s_aTypeName, "") != 0)
+		if(pSelectedType && str_comp(s_aTypeName, "") != 0)
 		{
-			str_copy(s_pSelectedType->m_aWarName, s_aTypeName);
-			s_pSelectedType->m_Color = s_GroupColor;
+			str_copy(pSelectedType->m_aWarName, s_aTypeName);
+			pSelectedType->m_Color = s_GroupColor;
 		}
 	}
+	str_copy(s_aSelectedType, pSelectedType->m_aWarName);
 	bool AddDisabled = str_comp(GameClient()->m_WarList.FindWarType(s_aTypeName)->m_aWarName, "none") != 0 || str_comp(s_aTypeName, "none") == 0;
 	if(DoButtonLineSize_Menu(&s_AddGroupButton, TCLocalize("Add Group"), 0, &ButtonR, LineSize, AddDisabled))
 	{

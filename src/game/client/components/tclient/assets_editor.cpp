@@ -18,7 +18,13 @@
 #include <game/client/gameclient.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
+
+#if defined(CONF_FAMILY_WINDOWS)
+#include <base/windows.h>
+#endif
 
 // 类别 -> 内置贴图 id / 资产目录名
 static const char *s_apTypeNames[CAssetsEditor::TYPE_COUNT] = {
@@ -68,6 +74,39 @@ char *CAssetsEditor::ConfigVariable() const
 	}
 }
 
+const char *CAssetsEditor::MainAssetName() const
+{
+	const char *pName = m_aaMainAsset[m_Type];
+	return pName[0] ? pName : "default";
+}
+
+const char *CAssetsEditor::DonorAssetName() const
+{
+	const char *pName = m_aaDonorAsset[m_Type];
+	return pName[0] ? pName : "default";
+}
+
+void CAssetsEditor::SetMainAsset(const char *pName)
+{
+	if(!pName || !pName[0])
+		pName = "default";
+	if(str_comp(MainAssetName(), pName) == 0)
+		return;
+	str_copy(m_aaMainAsset[m_Type], pName, sizeof(m_aaMainAsset[m_Type]));
+	m_Revision++;
+	// 槽位的默认来源跟着主素材走，换主素材等于换画布底，重建槽位。
+	if(m_Loaded)
+		BuildSlots();
+}
+
+void CAssetsEditor::SetDonorAsset(const char *pName)
+{
+	if(!pName || !pName[0])
+		pName = "default";
+	str_copy(m_aaDonorAsset[m_Type], pName, sizeof(m_aaDonorAsset[m_Type]));
+	m_Revision++;
+}
+
 void CAssetsEditor::SetType(int Type)
 {
 	if(Type < 0 || Type >= TYPE_COUNT || Type == m_Type)
@@ -78,6 +117,7 @@ void CAssetsEditor::SetType(int Type)
 	m_vAssets.clear();
 	m_CanvasW = 0;
 	m_CanvasH = 0;
+	m_Revision++;
 	for(auto &Entry : m_vImageCache)
 		Entry.m_Image.Free();
 	m_vImageCache.clear();
@@ -135,9 +175,9 @@ ColorRGBA CAssetsEditor::ApplyBlend(const ColorRGBA &Base, const ColorRGBA &Tint
 			Mixed.l = TintHsl.l;
 		const ColorRGBA FromHsl = color_cast<ColorRGBA>(Mixed);
 		Result = ColorRGBA(
-			Base.r + (FromHsl.r - Base.r) * S,
-			Base.g + (FromHsl.g - Base.g) * S,
-			Base.b + (FromHsl.b - Base.b) * S,
+			Base.r + (FromHsl.r - Base.r) * S * Tint.a,
+			Base.g + (FromHsl.g - Base.g) * S * Tint.a,
+			Base.b + (FromHsl.b - Base.b) * S * Tint.a,
 			Base.a);
 		return Result;
 	}
@@ -161,7 +201,7 @@ static void BlitScaledTinted(CImageInfo &Dst, const CImageInfo &Src,
 	if(Dst.m_Format != CImageInfo::FORMAT_RGBA || Src.m_Format != CImageInfo::FORMAT_RGBA)
 		return;
 
-	const bool TintIdentity = Tint.r >= 0.999f && Tint.g >= 0.999f && Tint.b >= 0.999f && Tint.a >= 0.999f;
+	const bool TintIdentity = Strength <= 0 || Tint.a <= 0.0f || (BlendMode == CAssetsEditor::BLEND_MULTIPLY && Tint.r >= 0.999f && Tint.g >= 0.999f && Tint.b >= 0.999f);
 	for(int y = 0; y < DstH; y++)
 	{
 		const int Dy = DstY + y;
@@ -180,8 +220,6 @@ static void BlitScaledTinted(CImageInfo &Dst, const CImageInfo &Src,
 				continue;
 
 			const uint8_t *pSrc = Src.m_pData + ((size_t)Sy * Src.m_Width + (size_t)Sx) * 4;
-			if(pSrc[3] == 0)
-				continue;
 			uint8_t *pDst = Dst.m_pData + ((size_t)Dy * Dst.m_Width + (size_t)Dx) * 4;
 			if(TintIdentity)
 			{
@@ -193,12 +231,10 @@ static void BlitScaledTinted(CImageInfo &Dst, const CImageInfo &Src,
 			}
 			const ColorRGBA Base(pSrc[0] / 255.0f, pSrc[1] / 255.0f, pSrc[2] / 255.0f, pSrc[3] / 255.0f);
 			const ColorRGBA Mixed = CAssetsEditor::ApplyBlend(Base, Tint, BlendMode, Strength);
-			// 目标已有内容时按 alpha 混合叠加（默认贴图底 → 覆盖）
-			const float SrcA = Base.a * Mixed.a;
-			pDst[0] = (uint8_t)std::lround(std::clamp(Mixed.r * SrcA + (pDst[0] / 255.0f) * (1.0f - SrcA), 0.0f, 1.0f) * 255.0f);
-			pDst[1] = (uint8_t)std::lround(std::clamp(Mixed.g * SrcA + (pDst[1] / 255.0f) * (1.0f - SrcA), 0.0f, 1.0f) * 255.0f);
-			pDst[2] = (uint8_t)std::lround(std::clamp(Mixed.b * SrcA + (pDst[2] / 255.0f) * (1.0f - SrcA), 0.0f, 1.0f) * 255.0f);
-			pDst[3] = (uint8_t)std::max<int>(pDst[3], (int)(SrcA * 255.0f));
+			pDst[0] = (uint8_t)std::lround(std::clamp(Mixed.r, 0.0f, 1.0f) * 255.0f);
+			pDst[1] = (uint8_t)std::lround(std::clamp(Mixed.g, 0.0f, 1.0f) * 255.0f);
+			pDst[2] = (uint8_t)std::lround(std::clamp(Mixed.b, 0.0f, 1.0f) * 255.0f);
+			pDst[3] = pSrc[3];
 		}
 	}
 }
@@ -209,16 +245,34 @@ const CImageInfo *CAssetsEditor::LoadImage(const char *pAssetName) const
 	if(str_comp(pAssetName, "default") == 0)
 	{
 		const int ImageId = ImageIdForType(m_Type);
-		if(ImageId < 0)
+		if(ImageId >= 0)
+			str_copy(aPath, g_pData->m_aImages[ImageId].m_pFilename);
+		else if(m_Type == TYPE_SKIN)
+			str_copy(aPath, "skins/default.png");
+		else if(m_Type == TYPE_ENTITIES)
+			str_copy(aPath, "editor/entities_clear/ddnet.png");
+		else
 			return nullptr;
-		str_copy(aPath, g_pData->m_aImages[ImageId].m_pFilename);
 	}
 	else
 	{
-		// 自定义资产：优先 assets/<类别>/<名字>/<类别>.png（目录式），其次单文件
-		str_format(aPath, sizeof(aPath), "assets/%s/%s/%s.png", TypeName(m_Type), pAssetName, TypeName(m_Type));
-		if(!Storage()->FileExists(aPath, IStorage::TYPE_ALL))
-			str_format(aPath, sizeof(aPath), "assets/%s/%s.png", TypeName(m_Type), pAssetName);
+		// 优先用扫描时解析好的路径（皮肤来自 skins/，其余来自 assets/<类别>/）
+		aPath[0] = '\0';
+		for(const SAssetEntry &Entry : m_vAssets)
+		{
+			if(str_comp(Entry.m_aName, pAssetName) == 0 && Entry.m_aPath[0])
+			{
+				str_copy(aPath, Entry.m_aPath);
+				break;
+			}
+		}
+		if(!aPath[0])
+		{
+			// 兜底：优先 assets/<类别>/<名字>/<类别>.png（目录式），其次单文件
+			str_format(aPath, sizeof(aPath), "assets/%s/%s/%s.png", TypeName(m_Type), pAssetName, TypeName(m_Type));
+			if(!Storage()->FileExists(aPath, IStorage::TYPE_ALL))
+				str_format(aPath, sizeof(aPath), "assets/%s/%s.png", TypeName(m_Type), pAssetName);
+		}
 	}
 
 	for(auto &Entry : m_vImageCache)
@@ -241,11 +295,15 @@ const CImageInfo *CAssetsEditor::LoadImage(const char *pAssetName) const
 bool CAssetsEditor::BuildSlots()
 {
 	m_vSlots.clear();
+	m_CanvasW = 0;
+	m_CanvasH = 0;
+	m_Revision++;
 	const CImageInfo *pDefault = LoadImage("default");
 	if(!pDefault)
 		return false;
 	m_CanvasW = (int)pDefault->m_Width;
 	m_CanvasH = (int)pDefault->m_Height;
+	const char *pMainName = MainAssetName();
 
 	const int ImageId = ImageIdForType(m_Type);
 	if(ImageId < 0)
@@ -267,7 +325,7 @@ bool CAssetsEditor::BuildSlots()
 					Slot.m_SrcY = Slot.m_DstY;
 					Slot.m_SrcW = Slot.m_DstW;
 					Slot.m_SrcH = Slot.m_DstH;
-					str_copy(Slot.m_aSource, "default");
+					str_copy(Slot.m_aSource, pMainName);
 					str_format(Slot.m_aFamily, sizeof(Slot.m_aFamily), "entities:%d:%d", X, Y);
 					str_format(Slot.m_aLabel, sizeof(Slot.m_aLabel), "%d,%d", X, Y);
 					m_vSlots.push_back(Slot);
@@ -276,25 +334,47 @@ bool CAssetsEditor::BuildSlots()
 		}
 		else if(m_Type == TYPE_SKIN)
 		{
-			// 皮肤是网格拼图，切成 8x8 的小格便于整块替换
-			const int Cell = 8;
-			for(int Y = 0; Y + Cell <= m_CanvasH; Y += Cell)
+			// 皮肤按 QmClient 的部件划分：身体/双脚两块 96x96，背部与底部 32 像素条。
+			// 不再切成 8x8 小格——那样左侧拖拽区全是碎片，看不出部位。
+			struct SSkinSlotDef
 			{
-				for(int X = 0; X + Cell <= m_CanvasW; X += Cell)
-				{
-					SSlot Slot;
-					Slot.m_DstX = X;
-					Slot.m_DstY = Y;
-					Slot.m_DstW = Cell;
-					Slot.m_DstH = Cell;
-					Slot.m_SrcX = X;
-					Slot.m_SrcY = Y;
-					Slot.m_SrcW = Cell;
-					Slot.m_SrcH = Cell;
-					str_copy(Slot.m_aSource, "default");
-					str_format(Slot.m_aFamily, sizeof(Slot.m_aFamily), "skin:%d:%d", X, Y);
-					m_vSlots.push_back(Slot);
-				}
+				const char *m_pFamily;
+				const char *m_pLabel;
+				int m_X, m_Y, m_W, m_H;
+			};
+			static const SSkinSlotDef s_aSkinSlotDefs[] = {
+				{"skin:body", "body", 0, 0, 96, 96},
+				{"skin:feet", "feet", 96, 0, 96, 96},
+				{"skin:right_strip_0", "right0", 192, 0, 32, 32},
+				{"skin:right_strip_1", "right1", 224, 0, 32, 32},
+				{"skin:right_strip_2", "right2", 192, 32, 64, 32},
+				{"skin:right_strip_3", "right3", 192, 64, 64, 32},
+				{"skin:bottom_strip_0", "bottom0", 0, 96, 32, 32},
+				{"skin:bottom_strip_1", "bottom1", 32, 96, 32, 32},
+				{"skin:bottom_strip_2", "bottom2", 64, 96, 32, 32},
+				{"skin:bottom_strip_3", "bottom3", 96, 96, 32, 32},
+				{"skin:bottom_strip_4", "bottom4", 128, 96, 32, 32},
+				{"skin:bottom_strip_5", "bottom5", 160, 96, 32, 32},
+				{"skin:bottom_strip_6", "bottom6", 192, 96, 32, 32},
+				{"skin:bottom_strip_7", "bottom7", 224, 96, 32, 32},
+			};
+			for(const SSkinSlotDef &Def : s_aSkinSlotDefs)
+			{
+				if(Def.m_X + Def.m_W > m_CanvasW || Def.m_Y + Def.m_H > m_CanvasH)
+					continue;
+				SSlot Slot;
+				Slot.m_DstX = Def.m_X;
+				Slot.m_DstY = Def.m_Y;
+				Slot.m_DstW = Def.m_W;
+				Slot.m_DstH = Def.m_H;
+				Slot.m_SrcX = Def.m_X;
+				Slot.m_SrcY = Def.m_Y;
+				Slot.m_SrcW = Def.m_W;
+				Slot.m_SrcH = Def.m_H;
+				str_copy(Slot.m_aSource, pMainName);
+				str_copy(Slot.m_aFamily, Def.m_pFamily);
+				str_copy(Slot.m_aLabel, Def.m_pLabel);
+				m_vSlots.push_back(Slot);
 			}
 		}
 		else
@@ -305,7 +385,7 @@ bool CAssetsEditor::BuildSlots()
 			Slot.m_DstH = m_CanvasH;
 			Slot.m_SrcW = m_CanvasW;
 			Slot.m_SrcH = m_CanvasH;
-			str_copy(Slot.m_aSource, "default");
+			str_copy(Slot.m_aSource, pMainName);
 			str_copy(Slot.m_aFamily, "full");
 			str_copy(Slot.m_aLabel, TypeName(m_Type));
 			m_vSlots.push_back(Slot);
@@ -358,7 +438,7 @@ bool CAssetsEditor::BuildSlots()
 		Slot.m_SrcY = Slot.m_DstY;
 		Slot.m_SrcW = Slot.m_DstW;
 		Slot.m_SrcH = Slot.m_DstH;
-		str_copy(Slot.m_aSource, "default");
+		str_copy(Slot.m_aSource, pMainName);
 		str_copy(Slot.m_aLabel, Sprite.m_pName ? Sprite.m_pName : "part");
 		str_copy(Slot.m_aFamily, Slot.m_aLabel);
 		m_vSlots.push_back(Slot);
@@ -378,14 +458,42 @@ void CAssetsEditor::EnsureLoaded()
 
 void CAssetsEditor::ReloadAssets()
 {
+	for(auto &Entry : m_vImageCache)
+		Entry.m_Image.Free();
+	m_vImageCache.clear();
 	m_vAssets.clear();
+	m_Revision++;
 	SAssetEntry Default;
 	Default.m_IsDefault = true;
 	str_copy(Default.m_aName, "default");
 	str_copy(Default.m_aPath, "default");
 	m_vAssets.push_back(Default);
 
-	// 扫描 assets/<类别>/ 下的单文件和子目录
+	// 皮肤类别的来源素材就是 skins/ 下的整张皮肤（与 QmClient 一致），
+	// 而不是 assets/skin 里的导出资材，否则左侧拖拽区没有可用的皮肤可选。
+	if(m_Type == TYPE_SKIN)
+	{
+		Storage()->ListDirectory(IStorage::TYPE_ALL, "skins", [](const char *pName, int IsDir, int DirType, void *pUser) {
+			CAssetsEditor *pThis = (CAssetsEditor *)pUser;
+			if(IsDir || !str_endswith(pName, ".png"))
+				return 0;
+			SAssetEntry Entry;
+			str_truncate(Entry.m_aName, sizeof(Entry.m_aName), pName, str_length(pName) - 4);
+			if(str_comp(Entry.m_aName, "default") == 0)
+				return 0;
+			for(const SAssetEntry &Existing : pThis->m_vAssets)
+			{
+				if(str_comp(Existing.m_aName, Entry.m_aName) == 0)
+					return 0;
+			}
+			str_format(Entry.m_aPath, sizeof(Entry.m_aPath), "skins/%s.png", Entry.m_aName);
+			pThis->m_vAssets.push_back(Entry);
+			return 0;
+		}, this);
+		return;
+	}
+
+	// 扫描 assets/<类别>/ 下的单文件和子目录，同时把解析后的真实路径记下来
 	char aDir[IO_MAX_PATH_LENGTH];
 	str_format(aDir, sizeof(aDir), "assets/%s", TypeName(m_Type));
 	Storage()->ListDirectory(IStorage::TYPE_ALL, aDir, [](const char *pName, int IsDir, int DirType, void *pUser) {
@@ -396,9 +504,21 @@ void CAssetsEditor::ReloadAssets()
 			return 0;
 		SAssetEntry Entry;
 		if(IsDir)
+		{
 			str_copy(Entry.m_aName, pName);
+			str_format(Entry.m_aPath, sizeof(Entry.m_aPath), "assets/%s/%s/%s.png", CAssetsEditor::TypeName(pThis->m_Type), pName, CAssetsEditor::TypeName(pThis->m_Type));
+			if(!pThis->Storage()->FileExists(Entry.m_aPath, IStorage::TYPE_ALL))
+			{
+				str_format(Entry.m_aPath, sizeof(Entry.m_aPath), "assets/%s/%s.png", CAssetsEditor::TypeName(pThis->m_Type), pName);
+				if(!pThis->Storage()->FileExists(Entry.m_aPath, IStorage::TYPE_ALL))
+					return 0;
+			}
+		}
 		else
+		{
 			str_truncate(Entry.m_aName, sizeof(Entry.m_aName), pName, str_length(pName) - 4);
+			str_format(Entry.m_aPath, sizeof(Entry.m_aPath), "assets/%s/%s.png", CAssetsEditor::TypeName(pThis->m_Type), Entry.m_aName);
+		}
 		for(const SAssetEntry &Existing : pThis->m_vAssets)
 		{
 			if(str_comp(Existing.m_aName, Entry.m_aName) == 0)
@@ -416,8 +536,9 @@ void CAssetsEditor::ResetSlots()
 
 bool CAssetsEditor::Compose(CImageInfo &Out) const
 {
-	const CImageInfo *pDefault = LoadImage("default");
-	if(!pDefault || m_CanvasW <= 0 || m_CanvasH <= 0)
+	const char *pMainName = MainAssetName();
+	const CImageInfo *pMain = LoadImage(pMainName);
+	if(!pMain || !pMain->m_pData || pMain->m_Format != CImageInfo::FORMAT_RGBA || m_CanvasW <= 0 || m_CanvasH <= 0)
 		return false;
 
 	CImageInfo Result;
@@ -428,33 +549,112 @@ bool CAssetsEditor::Compose(CImageInfo &Out) const
 	if(!Result.m_pData)
 		return false;
 
-	// 底图：整张默认贴图
+	// 底图：整张主素材。主素材与画布同尺寸时直接拷贝，否则缩放铺满。
+	if((int)pMain->m_Width == m_CanvasW && (int)pMain->m_Height == m_CanvasH)
 	{
 		const size_t RowBytes = (size_t)m_CanvasW * 4;
-		for(int y = 0; y < m_CanvasH && y < (int)pDefault->m_Height; y++)
-			mem_copy(Result.m_pData + (size_t)y * RowBytes, pDefault->m_pData + (size_t)y * pDefault->m_Width * 4, RowBytes);
+		for(int y = 0; y < m_CanvasH; y++)
+			mem_copy(Result.m_pData + (size_t)y * RowBytes, pMain->m_pData + (size_t)y * pMain->m_Width * 4, RowBytes);
+	}
+	else
+	{
+		BlitScaledTinted(Result, *pMain, 0, 0, m_CanvasW, m_CanvasH, 0, 0, (int)pMain->m_Width, (int)pMain->m_Height,
+			ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), BLEND_MULTIPLY, 100);
 	}
 
 	for(const SSlot &Slot : m_vSlots)
 	{
-		const bool Identity = Slot.m_Tint.r >= 0.999f && Slot.m_Tint.g >= 0.999f && Slot.m_Tint.b >= 0.999f && Slot.m_Tint.a >= 0.999f;
-		const bool SameSource = str_comp(Slot.m_aSource, "default") == 0;
-		// 来源和调色都没改：保持底图原样
+		const bool Identity = Slot.m_BlendStrength <= 0 || Slot.m_Tint.a <= 0.0f || (Slot.m_BlendMode == BLEND_MULTIPLY && Slot.m_Tint.r >= 0.999f && Slot.m_Tint.g >= 0.999f && Slot.m_Tint.b >= 0.999f);
+		const bool SameSource = str_comp(Slot.m_aSource, pMainName) == 0;
+		// 来源和调色都没改：底图里已经是这块内容
 		if(Identity && SameSource && Slot.m_SrcX == Slot.m_DstX && Slot.m_SrcY == Slot.m_DstY &&
 			Slot.m_SrcW == Slot.m_DstW && Slot.m_SrcH == Slot.m_DstH)
 			continue;
 
 		const CImageInfo *pSource = LoadImage(Slot.m_aSource);
-		if(!pSource)
-			continue;
+		if(!pSource || !pSource->m_pData || pSource->m_Format != CImageInfo::FORMAT_RGBA)
+		{
+			Result.Free();
+			return false;
+		}
+		int SrcX = Slot.m_SrcX, SrcY = Slot.m_SrcY, SrcW = Slot.m_SrcW, SrcH = Slot.m_SrcH;
+		if(SameSource && SrcX == Slot.m_DstX && SrcY == Slot.m_DstY && SrcW == Slot.m_DstW && SrcH == Slot.m_DstH)
+		{
+			const int Right = (int)((int64_t)(SrcX + SrcW) * pSource->m_Width / m_CanvasW);
+			const int Bottom = (int)((int64_t)(SrcY + SrcH) * pSource->m_Height / m_CanvasH);
+			SrcX = (int)((int64_t)SrcX * pSource->m_Width / m_CanvasW);
+			SrcY = (int)((int64_t)SrcY * pSource->m_Height / m_CanvasH);
+			SrcW = Right - SrcX;
+			SrcH = Bottom - SrcY;
+		}
+		if(SrcX < 0 || SrcY < 0 || SrcW <= 0 || SrcH <= 0 || (int64_t)SrcX + SrcW > (int64_t)pSource->m_Width || (int64_t)SrcY + SrcH > (int64_t)pSource->m_Height)
+		{
+			Result.Free();
+			return false;
+		}
 		BlitScaledTinted(Result, *pSource,
 			Slot.m_DstX, Slot.m_DstY, Slot.m_DstW, Slot.m_DstH,
-			Slot.m_SrcX, Slot.m_SrcY, Slot.m_SrcW, Slot.m_SrcH,
+			SrcX, SrcY, SrcW, SrcH,
 			Slot.m_Tint, Slot.m_BlendMode, Slot.m_BlendStrength);
 	}
 
 	Out = std::move(Result);
 	return true;
+}
+
+void CAssetsEditor::ApplyDrop(int TargetSlotIndex, int DonorSlotIndex, const char *pDonorName)
+{
+	if(TargetSlotIndex < 0 || TargetSlotIndex >= (int)m_vSlots.size() || DonorSlotIndex < 0 || DonorSlotIndex >= (int)m_vSlots.size())
+		return;
+	if(!pDonorName || !pDonorName[0])
+		return;
+
+	const SSlot &DonorSlot = m_vSlots[DonorSlotIndex];
+	SSlot &TargetSlot = m_vSlots[TargetSlotIndex];
+
+	// 来源素材尺寸可能和画布不同，按比例把来源矩形映射到 donor 的像素坐标。
+	const CImageInfo *pDonorImage = LoadImage(pDonorName);
+	if(!pDonorImage || !pDonorImage->m_pData || pDonorImage->m_Format != CImageInfo::FORMAT_RGBA || m_CanvasW <= 0 || m_CanvasH <= 0 || pDonorImage->m_Width == 0 || pDonorImage->m_Height == 0)
+		return;
+	const int SrcImgW = (int)pDonorImage->m_Width;
+	const int SrcImgH = (int)pDonorImage->m_Height;
+	int SrcX = DonorSlot.m_DstX;
+	int SrcY = DonorSlot.m_DstY;
+	int SrcW = DonorSlot.m_DstW;
+	int SrcH = DonorSlot.m_DstH;
+	if(m_CanvasW > 0 && m_CanvasH > 0 && (SrcImgW != m_CanvasW || SrcImgH != m_CanvasH))
+	{
+		const int Right = (int)((int64_t)(SrcX + SrcW) * SrcImgW / m_CanvasW);
+		const int Bottom = (int)((int64_t)(SrcY + SrcH) * SrcImgH / m_CanvasH);
+		SrcX = (int)((int64_t)SrcX * SrcImgW / m_CanvasW);
+		SrcY = (int)((int64_t)SrcY * SrcImgH / m_CanvasH);
+		SrcW = Right - SrcX;
+		SrcH = Bottom - SrcY;
+	}
+	if(SrcX < 0 || SrcY < 0 || SrcW <= 0 || SrcH <= 0 || (int64_t)SrcX + SrcW > SrcImgW || (int64_t)SrcY + SrcH > SrcImgH)
+		return;
+	str_copy(TargetSlot.m_aSource, pDonorName);
+	TargetSlot.m_SrcX = std::clamp(SrcX, 0, std::max(0, SrcImgW - 1));
+	TargetSlot.m_SrcY = std::clamp(SrcY, 0, std::max(0, SrcImgH - 1));
+	TargetSlot.m_SrcW = std::max(1, std::min(SrcW, SrcImgW - TargetSlot.m_SrcX));
+	TargetSlot.m_SrcH = std::max(1, std::min(SrcH, SrcImgH - TargetSlot.m_SrcY));
+	m_Revision++;
+}
+
+void CAssetsEditor::ResetSlot(int SlotIndex)
+{
+	if(SlotIndex < 0 || SlotIndex >= (int)m_vSlots.size())
+		return;
+	SSlot &Slot = m_vSlots[SlotIndex];
+	str_copy(Slot.m_aSource, MainAssetName());
+	Slot.m_SrcX = Slot.m_DstX;
+	Slot.m_SrcY = Slot.m_DstY;
+	Slot.m_SrcW = Slot.m_DstW;
+	Slot.m_SrcH = Slot.m_DstH;
+	Slot.m_Tint = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
+	Slot.m_BlendMode = BLEND_MULTIPLY;
+	Slot.m_BlendStrength = 100;
+	m_Revision++;
 }
 
 bool CAssetsEditor::Export(const char *pName, char *pOutPath, int OutPathSize, char *pError, int ErrorSize)
@@ -487,23 +687,38 @@ bool CAssetsEditor::Export(const char *pName, char *pOutPath, int OutPathSize, c
 	}
 
 	char aDir[IO_MAX_PATH_LENGTH];
-	str_format(aDir, sizeof(aDir), "assets/%s", TypeName(m_Type));
-	Storage()->CreateFolder("assets", IStorage::TYPE_SAVE);
+	if(m_Type == TYPE_SKIN)
+		str_copy(aDir, "skins");
+	else
+		str_format(aDir, sizeof(aDir), "assets/%s", TypeName(m_Type));
+	if(m_Type != TYPE_SKIN)
+		Storage()->CreateFolder("assets", IStorage::TYPE_SAVE);
 	Storage()->CreateFolder(aDir, IStorage::TYPE_SAVE);
 
 	char aRel[IO_MAX_PATH_LENGTH];
 	str_format(aRel, sizeof(aRel), "%s/%s.png", aDir, pName);
 	char aFull[IO_MAX_PATH_LENGTH];
-	IOHANDLE File = Storage()->OpenFile(aRel, IOFLAG_WRITE, IStorage::TYPE_SAVE, aFull, sizeof(aFull));
+	Storage()->GetCompletePath(IStorage::TYPE_SAVE, aRel, aFull, sizeof(aFull));
+	if(Storage()->FileExists(aRel, IStorage::TYPE_ALL))
+	{
+		Composed.Free();
+		if(pError)
+			str_copy(pError, "output file already exists", ErrorSize);
+		return false;
+	}
+#if defined(CONF_FAMILY_WINDOWS)
+	IOHANDLE File = _wfopen(windows_utf8_to_wide(aFull).c_str(), L"wbx");
+#else
+	IOHANDLE File = fopen(aFull, "wbx");
+#endif
 	if(!File)
 	{
 		Composed.Free();
 		if(pError)
-			str_copy(pError, "could not open the output file", ErrorSize);
+			str_copy(pError, errno == EEXIST ? "output file already exists" : "could not open the output file", ErrorSize);
 		return false;
 	}
 	const bool Ok = CImageLoader::SavePng(File, aRel, Composed);
-	io_close(File);
 	Composed.Free();
 	if(!Ok)
 	{
@@ -515,15 +730,5 @@ bool CAssetsEditor::Export(const char *pName, char *pOutPath, int OutPathSize, c
 	if(pOutPath && OutPathSize > 0)
 		str_copy(pOutPath, aRel, OutPathSize);
 
-	// 缓存失效：同名资产可能已存在
-	for(auto &Entry : m_vImageCache)
-	{
-		if(Entry.m_Path == aFull)
-		{
-			Entry.m_Image.Free();
-			Entry.m_Path.clear();
-			break;
-		}
-	}
 	return true;
 }

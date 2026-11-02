@@ -889,7 +889,7 @@ private:
 	void RenderTeeCute(const CAnimState *pAnim, const CTeeRenderInfo *pInfo, int Emote, vec2 Dir, vec2 Pos, bool CuteEyes, float Alpha = 1.0f);
 
 	// TClient
-	const CWarType *m_pRemoveWarType = nullptr;
+	char m_aRemoveWarType[MAX_WARLIST_TYPE_LENGTH] = "";
 	void PopupConfirmRemoveWarType();
 	void RenderDevSkin(vec2 RenderPos, float Size, const char *pSkinName, const char *pBackupSkin, bool CustomColors, int FeetColor, int BodyColor, int Emote, bool Rainbow, bool Cute,
 		ColorRGBA ColorFeet = ColorRGBA(0, 0, 0, 0), ColorRGBA ColorBody = ColorRGBA(0, 0, 0, 0));

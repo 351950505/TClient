@@ -353,7 +353,7 @@ void CVoting::Render()
 		return;
 	}
 
-	CUIRect View = {0.0f, 60.0f, 120.0f, 38.0f};
+	CUIRect View = {0.0f, 60.0f, 120.0f, 54.0f};
 	View.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f), IGraphics::CORNER_R, 3.0f);
 	View.Margin(3.0f, &View);
 
@@ -390,6 +390,10 @@ void CVoting::Render()
 	RenderBars(Row);
 
 	View.HSplitTop(3.0f, nullptr, &View);
+	View.HSplitTop(13.0f, &Row, &View);
+	RenderVoteCounts(Row, 6.0f);
+
+	View.HSplitTop(3.0f, nullptr, &View);
 	View.HSplitTop(6.0f, &Row, &View);
 	Row.VSplitMid(&LeftColumn, &RightColumn, 4.0f);
 
@@ -405,6 +409,31 @@ void CVoting::Render()
 	Ui()->DoLabel(&RightColumn, aBuf, 6.0f, TEXTALIGN_MR);
 
 	TextRender()->TextColor(TextRender()->DefaultTextColor());
+}
+
+void CVoting::RenderVoteCounts(CUIRect View, float FontSize) const
+{
+	const char *apFormats[] = {
+		TCLocalize("Yes: %d"), TCLocalize("No: %d"),
+		TCLocalize("Not voted: %d"), TCLocalize("Total: %d")};
+	const int aCounts[] = {m_Yes, m_No, m_Pass, m_Total};
+	for(int i = 0; i < 4; i += 2)
+	{
+		CUIRect Row, Left, Right;
+		View.HSplitTop(FontSize, &Row, &View);
+		Row.VSplitMid(&Left, &Right, 2.0f);
+		for(int j = 0; j < 2; ++j)
+		{
+			char aCount[128];
+			str_format(aCount, sizeof(aCount), apFormats[i + j], aCounts[i + j]);
+			const CUIRect &Column = j == 0 ? Left : Right;
+			const float Width = TextRender()->TextWidth(FontSize, aCount);
+			const float AdjustedSize = Width > Column.w ? FontSize * Column.w / Width : FontSize;
+			Ui()->DoLabel(&Column, aCount, AdjustedSize, j == 0 ? TEXTALIGN_ML : TEXTALIGN_MR);
+		}
+		if(i == 0)
+			View.HSplitTop(1.0f, nullptr, &View);
+	}
 }
 
 void CVoting::RenderBars(CUIRect Bars) const

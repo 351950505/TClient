@@ -8,15 +8,16 @@
 //   - 叠加颜色（16 种混合模式 + 强度）
 // 合成结果导出成 assets/<类别>/<名字>.png，并自动设为当前使用的资产。
 //
-// 与 QmClient 的差异：这里只做「换源 + 调色 + 导出」，不做拖拽到槽位之外的
-// 自由摆位；槽位几何固定来自内置 sprite 定义，保证导出的贴图坐标与引擎
-// 读取时一致（否则贴图错位）。
+// 交互对齐 QmClient：左边是「来源素材」的槽位网格，右边是「主素材 + 已换源
+// 槽位」的合成结果，从左侧把部件拖到右侧槽位上即完成换源；拖拽只改槽位的
+// 来源矩形，不改变槽位几何，保证导出贴图坐标与引擎读取时一致。
 
 #include <base/color.h>
 #include <base/types.h>
 
 #include <engine/image.h>
 
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -104,6 +105,16 @@ public:
 	int Type() const { return m_Type; }
 	void SetType(int Type);
 
+	// 「主素材」是右侧合成底图，也是所有未被拖拽覆盖的槽位的来源；
+	// 「来源素材」（donor）是左侧拖拽区显示的那张图。按类别分别记忆。
+	const char *MainAssetName() const;
+	const char *DonorAssetName() const;
+	void SetMainAsset(const char *pName);
+	void SetDonorAsset(const char *pName);
+
+	// 结构/素材变化计数，UI 用它判断左侧贴图缓存是否过期。
+	int Revision() const { return m_Revision; }
+
 	// 切换类别时重建槽位。来源素材列表会在第一次需要时扫描。
 	void EnsureLoaded();
 	void ReloadAssets();
@@ -113,6 +124,15 @@ public:
 	const std::vector<SSlot> &Slots() const { return m_vSlots; }
 	std::vector<SSlot> &Slots() { return m_vSlots; }
 
+	// 按素材名取解码后的贴图（默认图或 assets/ 下的自定义图）。
+	// 返回的指针在下一次 ReloadAssets/SetType 前有效。
+	const CImageInfo *LoadAssetImage(const char *pAssetName) const { return LoadImage(pAssetName); }
+
+	// 拖放：把来源素材的第 DonorSlotIndex 个部件盖到第 TargetSlotIndex 个槽位上。
+	void ApplyDrop(int TargetSlotIndex, int DonorSlotIndex, const char *pDonorName);
+	// 单个槽位恢复成主素材原始内容（调色也清除）。
+	void ResetSlot(int SlotIndex);
+
 	// 该类别导出时的固定尺寸；0 表示尚无（还没加载默认图）。
 	int CanvasWidth() const { return m_CanvasW; }
 	int CanvasHeight() const { return m_CanvasH; }
@@ -121,7 +141,7 @@ public:
 	// Out 会被重新分配为 CanvasWidth x CanvasHeight 的 RGBA。
 	bool Compose(CImageInfo &Out) const;
 
-	// 导出到 assets/<类别名>/<Name>.png。成功后返回完整路径，失败返回空。
+	// 皮肤导出到 skins/<Name>.png，其余导出到 assets/<类别名>/<Name>.png；已存在时失败。
 	bool Export(const char *pName, char *pOutPath, int OutPathSize, char *pError, int ErrorSize);
 
 	// 该类别对应的资产配置缓冲（可写，用于导出后自动选中）；不支持运行时切换的类别返回 nullptr。
@@ -136,6 +156,11 @@ public:
 private:
 	int m_Type = TYPE_GAME;
 	bool m_Loaded = false;
+	int m_Revision = 0;
+
+	// 每类别独立记忆选中的主素材/来源素材；空串表示 "default"。
+	char m_aaMainAsset[TYPE_COUNT][64] = {};
+	char m_aaDonorAsset[TYPE_COUNT][64] = {};
 
 	std::vector<SAssetEntry> m_vAssets;
 	std::vector<SSlot> m_vSlots;
@@ -149,7 +174,7 @@ private:
 		std::string m_Path;
 		CImageInfo m_Image;
 	};
-	mutable std::vector<SCachedImage> m_vImageCache;
+	mutable std::deque<SCachedImage> m_vImageCache;
 
 	const CImageInfo *LoadImage(const char *pAssetName) const;
 	bool BuildSlots();

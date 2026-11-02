@@ -160,3 +160,5 @@ tags
 
 # TClient
 !steam_api.dll
+# Local standalone test executable (the source remains trackable).
+/scripts/bg_draw_file_standalone

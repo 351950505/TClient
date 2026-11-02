@@ -307,7 +307,7 @@ void CTClient::OnMessage(int MsgType, void *pRawMsg)
 		CNetMsg_Sv_Chat *pMsg = (CNetMsg_Sv_Chat *)pRawMsg;
 		int ClientId = pMsg->m_ClientId;
 
-		if(ClientId < 0 || ClientId > MAX_CLIENTS)
+		if(ClientId < 0 || ClientId >= MAX_CLIENTS)
 			return;
 		int LocalId = GameClient()->m_Snap.m_LocalClientId;
 		if(ClientId == LocalId)
@@ -315,7 +315,8 @@ void CTClient::OnMessage(int MsgType, void *pRawMsg)
 
 		bool PingMessage = false;
 
-		bool ValidIds = !(GameClient()->m_aLocalIds[0] < 0 || (GameClient()->Client()->DummyConnected() && GameClient()->m_aLocalIds[1] < 0));
+		bool ValidIds = GameClient()->m_aLocalIds[0] >= 0 && GameClient()->m_aLocalIds[0] < MAX_CLIENTS &&
+			(!GameClient()->Client()->DummyConnected() || (GameClient()->m_aLocalIds[1] >= 0 && GameClient()->m_aLocalIds[1] < MAX_CLIENTS));
 
 		if(ValidIds && ClientId >= 0 && ClientId != GameClient()->m_aLocalIds[0] && (!GameClient()->Client()->DummyConnected() || ClientId != GameClient()->m_aLocalIds[1]))
 		{
@@ -1666,7 +1667,7 @@ static void StripStr(const char *pIn, char *pOut, const char *pEnd)
 
 void CTClient::RenderMiniVoteHud()
 {
-	CUIRect View = {0.0f, 60.0f, 70.0f, 35.0f};
+	CUIRect View = {0.0f, 60.0f, 70.0f, 47.0f};
 	View.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f), IGraphics::CORNER_R, 3.0f);
 	View.Margin(3.0f, &View);
 
@@ -1705,6 +1706,10 @@ void CTClient::RenderMiniVoteHud()
 	View.HSplitTop(3.0f, nullptr, &View);
 	View.HSplitTop(3.0f, &Row, &View);
 	GameClient()->m_Voting.RenderBars(Row);
+
+	View.HSplitTop(3.0f, nullptr, &View);
+	View.HSplitTop(9.0f, &Row, &View);
+	GameClient()->m_Voting.RenderVoteCounts(Row, 4.0f);
 
 	// F3 / F4
 	View.HSplitTop(3.0f, nullptr, &View);

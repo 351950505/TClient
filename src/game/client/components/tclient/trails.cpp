@@ -74,6 +74,8 @@ void CTrails::OnRender()
 		int StartTick;
 		const int GameTick = Client()->GameTick(g_Config.m_ClDummy);
 		const int PredTick = Client()->PredGameTick(g_Config.m_ClDummy);
+		if(GameTick < 0)
+			continue;
 		float IntraTick;
 		if(PredictPlayer)
 		{
@@ -130,6 +132,8 @@ void CTrails::OnRender()
 		for(int i = 0; i < TrailLength; i++)
 		{
 			CTrailPart Part;
+			if(StartTick < 0 || i > StartTick)
+				break;
 			int PosTick = StartTick - i;
 			if(PredictPlayer)
 			{

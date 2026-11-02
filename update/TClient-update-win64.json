@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.41",
+  "version": "1.7.8.42",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 18047473,
-  "sha256": "103f517e57c66a99cf03b33b2fffb05b29da68362645c8e378486bc6b00849bd",
-  "notes": "Idle island mark redesigned: a 1.5px accent ring with a centre hub replaces the four stepped bars, so a stopped player reads as a parked record instead of a signal meter.",
+  "size": 18047466,
+  "sha256": "2ab2db6a1577b3cffb38286b92da75f580bdf469dafa5617626beba0ef519ae0",
+  "notes": "Idle island mark: centre hub removed (read as a stray dot rather than a record spindle), ring alpha raised to 70 percent, and the circle now snaps to whole pixels so its edge no longer shimmers.",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

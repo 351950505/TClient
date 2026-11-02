@@ -2679,6 +2679,8 @@ public:
 		const float EqBarW = 4.0f * Scale;
 		const float EqBarGap = 3.0f * Scale;
 		const float EqW = NumBars * EqBarW + (NumBars - 1) * EqBarGap;
+		// 空态右端装饰的边长（正方形框，内接一个圆）。与播放态柱区同高。
+		const float EqSize = 18.0f * Scale;
 
 		// ---- layout: gauge cells split by hairline dividers -----------------
 		// Each zone is a cell with its own horizontal padding; a 1 px rule sits on
@@ -2755,7 +2757,7 @@ public:
 		// 空态胶囊只包住时钟单元和右端的装饰等化器（两个时钟都开时并排，中间
 		// 一条分隔线），宽度因此可以缩到远小于播放态的固定宽；播放态宽度仍按内容算。
 		const float IdleW = (ShowGameTime ? ClockCellW : 0.0f) + (ShowLocalClock ? LocalClockCellW : 0.0f) +
-			EqPadL + EqW + EqPadR;
+			EqPadL + EqSize + EqPadR;
 		const float Width = Idle
 			? std::floor(std::clamp(IdleW, MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f
 			: std::floor(std::clamp(std::max(MaxPillW, NeededW), MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f;
@@ -2830,17 +2832,20 @@ public:
 				CursorX += LocalClockCellW;
 				DrawSep(CursorX);
 			}
-			const float EqH = 18.0f * Scale;
-			const float EqY = PillY + (Height - EqH) * 0.5f;
-			for(int i = 0; i < NumBars; i++)
-			{
-				// 从 0.30 到 0.72 的递增台阶，静止不动。
-				const float Beat = 0.30f + 0.14f * (float)i;
-				const float BarH = std::max(EqH * 0.22f, EqH * std::clamp(Beat, 0.0f, 1.0f));
-				const float SnappedH = std::max(2.0f, std::round(BarH * 0.5f) * 2.0f);
-				DrawShape(CursorX + EqPadL + i * (EqBarW + EqBarGap), EqY + (EqH - SnappedH), EqBarW, SnappedH,
-					EqBarW * 0.5f, IGraphics::CORNER_ALL, AccentColor(0.55f));
-			}
+			// 待机唱片：一枚 1 px 细环 + 中心轴孔。原来那四根递增音柱在 18 px 的
+			// 小框里是四个独立形状，读起来像音量条/信号格；一个环加一个孔只有两层
+			// 视觉信息，安静、有焦点，仍然是"这里平时放音乐"的隐喻。播放态的黑胶
+			// 是实心盘 + 封面，这里是线稿，两者不会混。
+			const float DiscR = EqSize * 0.5f;
+			const float DiscCX = CursorX + EqPadL + DiscR;
+			const float DiscCY = PillY + Height * 0.5f;
+			// 透明模式下没有胶囊底撑腰，环线必须够粗、alpha 够高，否则直接压在
+			// 亮场景上会消失（四柱当年就踩过这个"右边缺了"的坑）。
+			DrawShape(DiscCX - DiscR, DiscCY - DiscR, DiscR * 2.0f, DiscR * 2.0f, DiscR,
+				IGraphics::CORNER_ALL, AccentColor(0.62f), std::max(1.0f, 1.5f * Scale));
+			const float HubR = std::max(2.0f * Scale, DiscR * 0.24f);
+			DrawShape(DiscCX - HubR, DiscCY - HubR, HubR * 2.0f, HubR * 2.0f, HubR,
+				IGraphics::CORNER_ALL, AccentColor(0.95f));
 			RestoreFace();
 			return;
 		}

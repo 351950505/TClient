@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.39",
+  "version": "1.7.8.40",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 18047994,
-  "sha256": "d0aba1efd39a13ddf87a6e974eb39efe8fa858c141e6e1f0c9ec1ac044f9001d",
-  "notes": "Fix: idle detection now reads the real playback status (stopped vs paused vs playing), so a stopped or exited player no longer pins the island to a dead track; the idle equaliser responds to hook presses again.",
+  "size": 18047221,
+  "sha256": "bda670627b91d58c8644d6566755577e40f4715756f8d60bbe275c0db691c565",
+  "notes": "Idle equaliser is static again (hook-paced bouncing removed as requested); playback state is debounced so the pill stops rebuilding on provider flapping.",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

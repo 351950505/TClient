@@ -2836,16 +2836,17 @@ public:
 			// 小框里是四个独立形状，读起来像音量条/信号格；一个环加一个孔只有两层
 			// 视觉信息，安静、有焦点，仍然是"这里平时放音乐"的隐喻。播放态的黑胶
 			// 是实心盘 + 封面，这里是线稿，两者不会混。
-			const float DiscR = EqSize * 0.5f;
-			const float DiscCX = CursorX + EqPadL + DiscR;
-			const float DiscCY = PillY + Height * 0.5f;
+			// 只有一个环：中心那个"轴孔"点在 18 px 里读不出唱片含义，反倒像个
+			// 不明所以的高亮点，去掉。
+			// 半径与圆心都吸附到整数像素：DrawShape 内部按 lround 贴图，半像素的
+			// 圆心会让圆环边缘每帧落在不同的像素栅格上，看着像在抖。
+			const float DiscR = std::round(EqSize * 0.5f);
+			const float DiscCX = std::round(CursorX + EqPadL + DiscR);
+			const float DiscCY = std::round(PillY + Height * 0.5f);
 			// 透明模式下没有胶囊底撑腰，环线必须够粗、alpha 够高，否则直接压在
 			// 亮场景上会消失（四柱当年就踩过这个"右边缺了"的坑）。
 			DrawShape(DiscCX - DiscR, DiscCY - DiscR, DiscR * 2.0f, DiscR * 2.0f, DiscR,
-				IGraphics::CORNER_ALL, AccentColor(0.62f), std::max(1.0f, 1.5f * Scale));
-			const float HubR = std::max(2.0f * Scale, DiscR * 0.24f);
-			DrawShape(DiscCX - HubR, DiscCY - HubR, HubR * 2.0f, HubR * 2.0f, HubR,
-				IGraphics::CORNER_ALL, AccentColor(0.95f));
+				IGraphics::CORNER_ALL, AccentColor(0.70f), std::max(1.0f, 1.5f * Scale));
 			RestoreFace();
 			return;
 		}

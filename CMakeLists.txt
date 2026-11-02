@@ -1013,7 +1013,7 @@ set_src(DEP_MD5_SRC GLOB src/engine/external/md5 md5.c md5.h)
 add_library(md5 EXCLUDE_FROM_ALL OBJECT ${DEP_MD5_SRC})
 
 # ed25519 (public domain, orlp/ed25519): 更新清单签名验证
-set_src(DEP_ED25519_SRC GLOB src/engine/external/ed25519 verify.c sha512.c fe.c ge.c sc.c add_scalar.c)
+set_src(DEP_ED25519_SRC GLOB src/engine/external/ed25519 add_scalar.c ed25519.h fe.c fe.h fixedint.h ge.c ge.h precomp_data.h sc.c sc.h sha512.c sha512.h verify.c)
 add_library(ed25519 EXCLUDE_FROM_ALL OBJECT ${DEP_ED25519_SRC})
 target_include_directories(ed25519 PRIVATE ${PROJECT_SOURCE_DIR}/src/engine/external/ed25519)
 set(DEP_ED25519 $<TARGET_OBJECTS:ed25519>)
@@ -2157,6 +2157,22 @@ set(EXPECTED_DATA
   tclient/languages/traditional_chinese.txt
   tclient/languages/turkish.txt
   tclient/languages/ukrainian.txt
+  tclient/pings/危险.png
+  tclient/pings/危险.wv
+  tclient/pings/推进.png
+  tclient/pings/推进.wv
+  tclient/pings/撤退.png
+  tclient/pings/撤退.wv
+  tclient/pings/支援.png
+  tclient/pings/支援.wv
+  tclient/pings/敌消.png
+  tclient/pings/敌消.wv
+  tclient/pings/等等.png
+  tclient/pings/等等.wv
+  tclient/pings/赶来.png
+  tclient/pings/赶来.wv
+  tclient/pings/集合.png
+  tclient/pings/集合.wv
   themes/auto.png
   themes/autumn.png
   themes/autumn_day.map
@@ -2877,6 +2893,8 @@ if(CLIENT)
     components/spectator.h
     components/statboard.cpp
     components/statboard.h
+    components/tclient/assets_editor.cpp
+    components/tclient/assets_editor.h
     components/tclient/bg_draw.cpp
     components/tclient/bg_draw.h
     components/tclient/bg_draw_file.cpp
@@ -2889,16 +2907,12 @@ if(CLIENT)
     components/tclient/custom_communities.cpp
     components/tclient/custom_communities.h
     components/tclient/data_version.h
-    components/tclient/assets_editor.cpp
-    components/tclient/assets_editor.h
-    components/tclient/menus_tclient_assets.cpp
     components/tclient/island_music.cpp
     components/tclient/island_music.h
     components/tclient/lyric_parser.cpp
     components/tclient/lyric_parser.h
-    components/tclient/relay_client.cpp
-    components/tclient/relay_client.h
     components/tclient/menus_tclient.cpp
+    components/tclient/menus_tclient_assets.cpp
     components/tclient/mod.cpp
     components/tclient/mod.h
     components/tclient/moving_tiles.cpp
@@ -2911,32 +2925,35 @@ if(CLIENT)
     components/tclient/pet.h
     components/tclient/pingwheel.cpp
     components/tclient/pingwheel.h
-    components/tclient/spectator_friends.h
-    components/tclient/player_indicator.cpp
     components/tclient/player_display_privacy.h
+    components/tclient/player_indicator.cpp
     components/tclient/player_indicator.h
     components/tclient/player_status.cpp
     components/tclient/player_status.h
     components/tclient/rainbow.cpp
     components/tclient/rainbow.h
+    components/tclient/relay_client.cpp
+    components/tclient/relay_client.h
     components/tclient/scripting.cpp
     components/tclient/scripting.h
     components/tclient/scripting/impl.cpp
     components/tclient/scripting/impl.h
     components/tclient/skinprofiles.cpp
     components/tclient/skinprofiles.h
+    components/tclient/spectator_friends.h
     components/tclient/statusbar.cpp
     components/tclient/statusbar.h
+    components/tclient/stb_image.h
     components/tclient/streamer_mode.cpp
     components/tclient/streamer_word_filter.cpp
     components/tclient/streamer_word_filter.h
-    components/tclient/stb_image.h
     components/tclient/tclient.cpp
     components/tclient/tclient.h
     components/tclient/trails.cpp
     components/tclient/trails.h
     components/tclient/translate.cpp
     components/tclient/translate.h
+    components/tclient/update_public_key.h
     components/tclient/warlist.cpp
     components/tclient/warlist.h
     components/tooltips.cpp
@@ -2945,6 +2962,7 @@ if(CLIENT)
     components/touch_controls.h
     components/voting.cpp
     components/voting.h
+    fastinput.h
     gameclient.cpp
     gameclient.h
     laser_data.cpp

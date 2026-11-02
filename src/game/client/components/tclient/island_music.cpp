@@ -108,11 +108,6 @@ public:
 	float m_VinylAngle = 0.0f;
 	// 空态等化器的节奏：本地玩家按 hook（右键）的间隔驱动相位推进，
 	// 按得越快跳得越急；停手后能量衰减回静止台阶。
-	float m_IdleBeatPhase = 0.0f;
-	float m_IdleBeatEnergy = 0.0f;
-	double m_IdleBeatLastPress = 0.0;
-	double m_IdleBeatInterval = 0.45;
-	bool m_IdleBeatHookDown = false;
 
 	~CImpl()
 	{
@@ -1288,6 +1283,13 @@ public:
 
 	// media clock
 	int64_t m_ClockPositionMs = 0;
+	// 播放状态去抖：部分播放器的 SMTC Status 会在 Playing/Paused/Stopped 之间
+	// 反复抖，一次抖动就翻转整条岛的布局（宽度、内容全换），看起来像"卡"。
+	// 要求候选状态连续稳定一小段时间才真正切换。
+	bool m_IdleState = false;
+	bool m_IdleStateCandidate = false;
+	double m_IdleCandidateSince = 0.0;
+
 	int64_t m_ClockTick = 0;
 	int64_t m_ClockDurationMs = 0;
 	bool m_ClockPlaying = false;
@@ -2600,20 +2602,35 @@ public:
 		// "没放歌也没消失"就是这个）。
 		const bool HasTrack = !Track.m_Title.empty() || !Track.m_Artist.empty();
 		const bool Stopped = HasTrack && !Track.m_Playing && !Track.m_Paused;
-		const bool Idle = !HasTrack || Stopped;
+		const bool RawIdle = !HasTrack || Stopped;
+
+		// 去抖后再决定，避免状态抖动把整条岛翻来覆去地重建。
+		{
+			const double NowIdle = (double)time_get() / (double)time_freq();
+			if(RawIdle != m_IdleStateCandidate)
+			{
+				m_IdleStateCandidate = RawIdle;
+				m_IdleCandidateSince = NowIdle;
+			}
+			else if(m_IdleStateCandidate != m_IdleState && NowIdle - m_IdleCandidateSince > 0.25)
+			{
+				m_IdleState = m_IdleStateCandidate;
+			}
+		}
+		const bool Idle = m_IdleState;
 
 		// 状态切换时打一行，用户再报"没消失/不跳"时可以直接看日志定位是
 		// 哪个 provider 报了什么样的状态。
 		{
 			static int s_LastStateSig = -1;
-			const int StateSig = (Idle ? 4 : 0) + (Track.m_Playing ? 2 : 0) + (Track.m_Paused ? 1 : 0);
+			const int StateSig = (RawIdle ? 4 : 0) + (Track.m_Playing ? 2 : 0) + (Track.m_Paused ? 1 : 0);
 			if(StateSig != s_LastStateSig)
 			{
 				s_LastStateSig = StateSig;
 				char aLogTitle[96];
 				str_copy(aLogTitle, Track.m_Title.c_str(), sizeof(aLogTitle));
 				dbg_msg("island_music", "state=%s playing=%d paused=%d title='%s'",
-					Idle ? "idle" : "active", Track.m_Playing ? 1 : 0, Track.m_Paused ? 1 : 0, aLogTitle);
+					RawIdle ? "idle" : "active", Track.m_Playing ? 1 : 0, Track.m_Paused ? 1 : 0, aLogTitle);
 			}
 		}
 
@@ -2789,32 +2806,8 @@ public:
 		{
 			const float SepTop = PillY + Height * 0.19f;
 			const float SepH = Height * 0.62f;
-			// 节奏跟着本地玩家按 hook（右键）的速度走：按下边沿记录间隔，用间隔的
-			// 倒数推进相位；能量按时间衰减，停手约三秒就回到静态台阶。
-			const double NowSec = (double)time_get() / (double)time_freq();
-			static double s_LastBeatTick = 0.0;
-			const float Dt = s_LastBeatTick > 0.0 ? (float)std::clamp(NowSec - s_LastBeatTick, 0.0, 0.1) : 0.0f;
-			s_LastBeatTick = NowSec;
-			const CNetObj_Character *pLocalChar = m_pGameClient ? m_pGameClient->m_Snap.m_pLocalCharacter : nullptr;
-			const bool HookDown = pLocalChar && pLocalChar->m_HookState == 1;
-			if(HookDown && !m_IdleBeatHookDown)
-			{
-				if(m_IdleBeatLastPress > 0.0)
-				{
-					const double Gap = NowSec - m_IdleBeatLastPress;
-					if(Gap > 0.10 && Gap < 2.0) // 忽略抖动与长间隔（换图/发呆）
-						m_IdleBeatInterval = m_IdleBeatInterval * 0.7 + Gap * 0.3;
-				}
-				m_IdleBeatLastPress = NowSec;
-				m_IdleBeatPhase = 0.0f;
-				m_IdleBeatEnergy = 1.0f;
-			}
-			m_IdleBeatHookDown = HookDown;
-			if(m_IdleBeatLastPress > 0.0)
-			{
-				m_IdleBeatPhase += Dt * (float)(2.0 * pi / std::clamp(m_IdleBeatInterval, 0.12, 1.5));
-				m_IdleBeatEnergy *= std::exp(-Dt * 0.55f);
-			}
+			// 音柱保持静止的递增台阶。1.7.8.37 曾让它跟着本地玩家的 hook 频率跳，
+			// 用户实测后又卡又吵，1.7.8.40 移除；这里只做右端点缀，不表达任何状态。
 			auto DrawSep = [&](float SepX) {
 				m_pGraphics->DrawRect(SepX, SepTop, 1.0f, SepH,
 					ColorRGBA(1.0f, 1.0f, 1.0f, 0.08f), IGraphics::CORNER_NONE, 0.0f);
@@ -2841,14 +2834,12 @@ public:
 			const float EqY = PillY + (Height - EqH) * 0.5f;
 			for(int i = 0; i < NumBars; i++)
 			{
-				// 静止时是从 0.30 到 0.72 的递增台阶；有 hook 能量时整排跟着
-				// 相位起伏，四根柱子错开 0.7 rad，读作一次"弹动"。
-				const float Beat = 0.30f + 0.14f * (float)i +
-					m_IdleBeatEnergy * 0.55f * (0.5f + 0.5f * std::sin(m_IdleBeatPhase + (float)i * 0.7f));
+				// 从 0.30 到 0.72 的递增台阶，静止不动。
+				const float Beat = 0.30f + 0.14f * (float)i;
 				const float BarH = std::max(EqH * 0.22f, EqH * std::clamp(Beat, 0.0f, 1.0f));
 				const float SnappedH = std::max(2.0f, std::round(BarH * 0.5f) * 2.0f);
 				DrawShape(CursorX + EqPadL + i * (EqBarW + EqBarGap), EqY + (EqH - SnappedH), EqBarW, SnappedH,
-					EqBarW * 0.5f, IGraphics::CORNER_ALL, AccentColor(0.55f + 0.35f * m_IdleBeatEnergy));
+					EqBarW * 0.5f, IGraphics::CORNER_ALL, AccentColor(0.55f));
 			}
 			RestoreFace();
 			return;

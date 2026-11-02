@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.42",
+  "version": "1.7.8.43",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 18047466,
-  "sha256": "2ab2db6a1577b3cffb38286b92da75f580bdf469dafa5617626beba0ef519ae0",
-  "notes": "Idle island mark: centre hub removed (read as a stray dot rather than a record spindle), ring alpha raised to 70 percent, and the circle now snaps to whole pixels so its edge no longer shimmers.",
+  "size": 18058889,
+  "sha256": "5e239cd0301cf5b3e71abd8daf6d6f6c8444f5c2eea5babd65f7c5c576b31868",
+  "notes": "Asset editor becomes two-pane with drag-and-drop, right-click reset and persistent dye; vote HUD shows yes/no/pass/total and the scoreboard marks your own vote; hardening for background drawing files, translation backends, warlist, statusbar and trails.",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

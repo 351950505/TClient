@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.38",
+  "version": "1.7.8.39",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 18047870,
-  "sha256": "c1695820a6fc366bc8dc08e4fb8a8131c7d448b086dc4b37f3518263574fd869",
-  "notes": "Paused playback is its own state: cover and title stay, text/progress/equaliser dim to 55 percent so a pause reads as paused, not playing.",
+  "size": 18047994,
+  "sha256": "d0aba1efd39a13ddf87a6e974eb39efe8fa858c141e6e1f0c9ec1ac044f9001d",
+  "notes": "Fix: idle detection now reads the real playback status (stopped vs paused vs playing), so a stopped or exited player no longer pins the island to a dead track; the idle equaliser responds to hook presses again.",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

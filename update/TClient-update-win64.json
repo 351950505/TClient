@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.40",
+  "version": "1.7.8.41",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 18047221,
-  "sha256": "bda670627b91d58c8644d6566755577e40f4715756f8d60bbe275c0db691c565",
-  "notes": "Idle equaliser is static again (hook-paced bouncing removed as requested); playback state is debounced so the pill stops rebuilding on provider flapping.",
+  "size": 18047473,
+  "sha256": "103f517e57c66a99cf03b33b2fffb05b29da68362645c8e378486bc6b00849bd",
+  "notes": "Idle island mark redesigned: a 1.5px accent ring with a centre hub replaces the four stepped bars, so a stopped player reads as a parked record instead of a signal meter.",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 306688,

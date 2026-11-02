@@ -71,6 +71,7 @@
 - **[DDNet](https://github.com/ddnet/ddnet)** — 整个游戏本体、物理、网络协议与地图格式的基础。
 - **[TaterClient / TClient](https://github.com/TaterClient/TClient)** — 直接上游分支,本仓库在它的基础上做定制。
 - **MeowClient (MeowClient-Next)** — 快速输入的 Meow / Next / Snow 等模式对齐它的预测路径与钩锁逻辑。
-- **QmClient** — 参考与移植了多处:素材编辑器(Assets Editor)整体移植、主播模式、观战选择器好友分列、聊天 Ping 图标化,以及更新清单的 Ed25519 签名方案。
+- **[BestClient](https://github.com/BestProjectTeam/BestClient)** — 快速输入的 Best / Saiko / Delta / Cloud 四种模式移植自它。
+- **[QmClient](https://github.com/wxj881027/QmClient)** — 参考与移植了多处:素材编辑器(Assets Editor)整体移植、主播模式、观战选择器好友分列、聊天 Ping 图标化,以及更新清单的 Ed25519 签名方案。
 
 感谢以上项目与 DDNet 社区的所有贡献者。

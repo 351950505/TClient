@@ -134,6 +134,10 @@ public:
 		int64_t m_DurationMs = 0;
 		int64_t m_PositionMs = 0;
 		bool m_Playing = false;
+		// 暂停是"有曲目但没在播"的第三种状态。单独记下来才能把"暂停"和
+		// "会话已停止/播放器已退出"分开：SMTC 在播放器退出后仍会挂着上一条
+		// 元数据，只看标题非空的话岛会永远停在那首死歌上。
+		bool m_Paused = false;
 	};
 
 	// ---------------- SMTC worker (Windows) ----------------
@@ -156,6 +160,7 @@ public:
 			auto PlaybackInfo = Session.GetPlaybackInfo();
 			auto Status = PlaybackInfo.PlaybackStatus();
 			Out.m_Playing = Status == WmControl::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+			Out.m_Paused = Status == WmControl::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Paused;
 
 			auto Timeline = Session.GetTimelineProperties();
 			auto ToMs = [](winrt::Windows::Foundation::TimeSpan Span) {
@@ -1188,6 +1193,7 @@ public:
 		Out.m_Artist = Raw.substr(Sep + 3);
 		// LS pauseStatus 明确暂停时强制暂停：双保险，monitor 旧版未重启或电表误判时兜底。
 		Out.m_Playing = Snap.Playing != 0 && Snap.Paused == 0;
+		Out.m_Paused = Snap.Paused != 0;
 
 		// 位置来源（v7.1）：
 		//  1) watcher（WatcherMs，最权威）：netease-watcher hook 的网易云内部真实位置，
@@ -2588,7 +2594,28 @@ public:
 		// 空态（没放歌）时音乐模块整体隐藏：胶囊收缩成只包住时钟单元，游戏计时
 		// 和本地时间照旧，封面 / 歌名 / 歌词 / 等化器 / 进度轨一概不画；两个时钟
 		// 都没开就整条胶囊都不画。用户 2026-11-02 要求，覆盖 1.7.8.18 的常显方案。
-		const bool Idle = Track.m_Title.empty() && Track.m_Artist.empty();
+		// 三态：空态（没有任何曲目，或会话已明确停止/退出）、播放、暂停。
+		// 判据用 Status 而不是"标题是否非空"：Windows 会把已退出播放器的 SMTC
+		// 会话继续挂一段时间，只按标题判断的话岛永远收不起来（用户报的
+		// "没放歌也没消失"就是这个）。
+		const bool HasTrack = !Track.m_Title.empty() || !Track.m_Artist.empty();
+		const bool Stopped = HasTrack && !Track.m_Playing && !Track.m_Paused;
+		const bool Idle = !HasTrack || Stopped;
+
+		// 状态切换时打一行，用户再报"没消失/不跳"时可以直接看日志定位是
+		// 哪个 provider 报了什么样的状态。
+		{
+			static int s_LastStateSig = -1;
+			const int StateSig = (Idle ? 4 : 0) + (Track.m_Playing ? 2 : 0) + (Track.m_Paused ? 1 : 0);
+			if(StateSig != s_LastStateSig)
+			{
+				s_LastStateSig = StateSig;
+				char aLogTitle[96];
+				str_copy(aLogTitle, Track.m_Title.c_str(), sizeof(aLogTitle));
+				dbg_msg("island_music", "state=%s playing=%d paused=%d title='%s'",
+					Idle ? "idle" : "active", Track.m_Playing ? 1 : 0, Track.m_Paused ? 1 : 0, aLogTitle);
+			}
+		}
 
 		// content strings (artist intentionally not shown)
 		char aSong[512];

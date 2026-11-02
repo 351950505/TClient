@@ -112,6 +112,7 @@ public:
 			"editor",
 			"editor/automap",
 			"ghosts",
+			"logs",
 			"teehistorian"};
 
 		for(const char *pDir : COMMON_DIRS)

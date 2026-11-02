@@ -5417,6 +5417,20 @@ int main(int argc, const char **argv)
 		pSteam->ClearConnectAddress();
 	}
 
+	// TClient: default to a per-day session log so disconnects and crashes are
+	// always diagnosable afterwards (the 2026-11-03 connection-drop investigation
+	// was blind because no client build wrote a console log). The auto-assigned
+	// path is cleared again below so it never becomes a sticky settings.cfg entry
+	// frozen at the first launch date; an explicit logfile= keeps working.
+	bool AutoLogfile = false;
+	if(!g_Config.m_Logfile[0])
+	{
+		char aTimestamp[32];
+		str_timestamp(aTimestamp, sizeof(aTimestamp));
+		str_format(g_Config.m_Logfile, sizeof(g_Config.m_Logfile), "logs/ddnet-log-%s.log", aTimestamp);
+		AutoLogfile = true;
+	}
+
 	if(g_Config.m_Logfile[0])
 	{
 		const int Mode = g_Config.m_Logappend ? IOFLAG_APPEND : IOFLAG_WRITE;
@@ -5432,6 +5446,8 @@ int main(int argc, const char **argv)
 			log_error("client", "failed to open '%s' for logging", g_Config.m_Logfile);
 			pFutureFileLogger->Set(log_logger_noop());
 		}
+		if(AutoLogfile)
+			g_Config.m_Logfile[0] = '\0';
 	}
 	else
 	{

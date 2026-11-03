@@ -572,6 +572,7 @@ void CClient::OnEnterGame(bool Dummy)
 	m_aReceivedSnapshots[Dummy] = 0;
 	m_aSnapshotParts[Dummy] = 0;
 	m_aSnapshotIncomingDataSize[Dummy] = 0;
+	m_aSnapshotGapTrackers[Dummy].Reset();
 	m_SnapCrcErrors = 0;
 	// Also make gameclient aware that snapshots have been purged
 	GameClient()->InvalidateSnapshot();
@@ -837,7 +838,12 @@ void CClient::DisconnectWithReason(const char *pReason)
 
 	DummyDisconnect(pReason);
 	m_LinkProbeTracker.Reset(time_get());
+	for(auto &SnapshotGapTracker : m_aSnapshotGapTrackers)
+		SnapshotGapTracker.Reset();
 	net_dup_clear_copies();
+	m_UpstreamRescuedPackets = 0.0;
+	m_UpstreamRateTime = 0;
+	m_UpstreamRatePackets = g_NetDupPacketsSent;
 	m_UpstreamProbeEnabled = false;
 	m_NextUpstreamProbeTime = 0;
 	m_PingStartTime = 0;
@@ -974,6 +980,9 @@ void CClient::DummyDisconnect(const char *pReason)
 	m_aapSnapshots[1][SNAP_CURRENT] = nullptr;
 	m_aapSnapshots[1][SNAP_PREV] = nullptr;
 	m_aReceivedSnapshots[1] = 0;
+	// [SNAPSHOT-GAP] the dummy reconnects to the same server but starts a new tick
+	// stream; drop the old reference point so a reconnect is not counted as loss.
+	m_aSnapshotGapTrackers[CONN_DUMMY].Reset();
 	m_DummyConnected = false;
 	m_DummyConnecting = false;
 	m_DummyReconnectOnReload = false;
@@ -1355,6 +1364,7 @@ const char *CClient::LoadMap(const char *pName, const char *pFilename, const std
 		m_aReceivedSnapshots[Dummy] = 0;
 		m_aSnapshotParts[Dummy] = 0;
 		m_aSnapshotIncomingDataSize[Dummy] = 0;
+		m_aSnapshotGapTrackers[Dummy].Reset();
 	}
 	m_SnapCrcErrors = 0;
 	GameClient()->InvalidateSnapshot();
@@ -2050,7 +2060,7 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 			{
 				return;
 			}
-			if(m_LinkProbeTracker.Confirm(*pId))
+			if(m_LinkProbeTracker.Confirm(*pId, time_get()))
 				return;
 			if(m_ServerCapabilities.m_PingEx && m_CurrentServerCurrentPingTime >= 0 && *pId == m_CurrentServerPingUuid)
 			{
@@ -2410,7 +2420,11 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 					}
 
 					// add new
-					m_aSnapshotStorage[Conn].Add(GameTick, time_get(), SnapSize, TmpBuffer3.AsSnapshot(), AltSnapSize, AltSnapBuffer.AsSnapshot());
+					const int64_t SnapshotTime = time_get();
+					m_aSnapshotStorage[Conn].Add(GameTick, SnapshotTime, SnapSize, TmpBuffer3.AsSnapshot(), AltSnapSize, AltSnapBuffer.AsSnapshot());
+					// [SNAPSHOT-GAP] only fully verified snapshots count, so CRC/unpack
+					// failures returned above never look like downstream packet loss.
+					m_aSnapshotGapTrackers[Conn].OnSnapshot(GameTick, SnapshotTime);
 
 					if(!Dummy)
 					{
@@ -2972,6 +2986,15 @@ void CClient::UpdateDemoIntraTimers()
 	m_aGameIntraTickSincePrev[0] = pInfo->m_IntraTickSincePrev;
 }
 
+// [SNAPSHOT-GAP] 下行链路状态的只读出口：灵动岛/设置页只展示，不参与发包决策。
+// 主连接没有足够样本（刚进图、换图、刚重连）时返回 -1，调用方显示"采样中"。
+float CClient::DownlinkLossPercent() const
+{
+	if(State() != IClient::STATE_ONLINE && State() != IClient::STATE_DEMOPLAYBACK)
+		return -1.0f;
+	return m_aSnapshotGapTrackers[CONN_MAIN].RecentLossPercent(time_get());
+}
+
 void CClient::Update()
 {
 	m_LinkProbeTracker.OnFrame(time_get(), time_freq());
@@ -2983,6 +3006,11 @@ void CClient::Update()
 	// 想先量一量再决定开不开都做不到。真正要不要复制由 Copies() 按上限和实测值决定。
 	const bool ProbeEnabled = MainOnline && g_Config.m_ClDupUpstreamProbe && m_ServerCapabilities.m_PingEx;
 	const int64_t Now = time_get();
+
+	// [SNAPSHOT-GAP] close a finished gap event even if no further snapshot arrives,
+	// otherwise the counters would only show up in the log on the next loss.
+	for(auto &SnapshotGapTracker : m_aSnapshotGapTrackers)
+		SnapshotGapTracker.Update(Now);
 
 	if(ProbeEnabled != m_UpstreamProbeEnabled)
 	{
@@ -3020,15 +3048,19 @@ void CClient::Update()
 		// 只报三个有用的数：每秒发多少个包、实测丢包概率、估算被复制救回来的包数。
 		// 正式上线防刷屏（用户要求 2026-10-26）：只有"丢包率 / 已补救"相对上一次打印有变化才输出，
 		// 不设心跳；内部固定按 1 秒窗口采样速率，数值不变就一个字都不吐（份数/失同步计数不参与触发）。
-		static int64_t s_LastRateTime = 0;        // 上一个 1 秒统计窗口的起点
-		static int64_t s_LastPackets = 0;
+		int64_t &s_LastRateTime = m_UpstreamRateTime; // 上一个 1 秒统计窗口的起点，断线重置
+		int64_t &s_LastPackets = m_UpstreamRatePackets;
 		static int s_LastPrintedLossKey = -99;    // 上次打印的丢包率状态：0=未测量 1=采样中 >=1000=实测(千分位)
 		static int s_LastPrintedSavedTenths = -1; // 上次打印的"已补救"十分位(个/秒)
+		static int64_t s_LastPrintedDownKey = -1; // 上次打印的下行缺口(突发事件/随机事件)
 		if(MainOnline)
 		{
 			const int64_t ElapsedFreq = Now - s_LastRateTime;
 			if(s_LastRateTime == 0 || ElapsedFreq >= time_freq())
 			{
+				// 第一个窗口没有真实起点（s_LastRateTime==0），或断线/卡顿导致窗口异常长
+				// （>3 秒），都只用于重建基准，不参与积分，否则累计数会被凭空放大。
+				const bool FirstWindow = s_LastRateTime == 0 || ElapsedFreq > 3 * time_freq();
 				const bool HasEst = m_LinkProbeTracker.HasEstimate();
 				// 按实际经过的时间算速率，不假设一定是一秒（最低 0.5 秒防除零）
 				double Seconds = ElapsedFreq > 0 ? (double)ElapsedFreq / (double)time_freq() : 1.0;
@@ -3048,24 +3080,35 @@ void CClient::Update()
 					if(RecoveredRatio > 0.0)
 						SavedPerSec = PerSec * RecoveredRatio;
 				}
+				// 累计"救回来的包"：用本窗口的实际时长积分，避免每秒四舍五入的累积误差。
+				// 只在真正复制（份数>=2）时累加，单发阶段 SavedPerSec 恒为 0。
+				if(!FirstWindow)
+					m_UpstreamRescuedPackets += SavedPerSec * Seconds;
 				// 丢包率按状态键比较：未测量/采样中/实测千分位，任何一个换了都算"变了"
 				const int LossKey = !ProbeEnabled ? 0 : (!HasEst ? 1 : 1000 + (int)(m_LinkProbeTracker.UnconfirmedPercent() * 10.0f + 0.5f));
 				const int SavedTenths = (int)(SavedPerSec * 10.0 + 0.5);
+				// [SNAPSHOT-GAP] 下行统计只按事件计数触发；占比是派生值，同样只在事件变化时刷新，
+				// 10 秒滑动窗口不参与触发，避免每秒刷屏。
+				const CSnapshotGapTracker &SnapshotGap = m_aSnapshotGapTrackers[CONN_MAIN];
+				const int64_t DownKey = ((int64_t)SnapshotGap.BurstLossEvents() << 32) | (uint32_t)SnapshotGap.RandomLossEvents();
 				s_LastRateTime = Now; // 无论打不打印，窗口都要重开，防速率随时间稀释造成假变化
 				s_LastPackets = g_NetDupPacketsSent;
-				if(LossKey != s_LastPrintedLossKey || SavedTenths != s_LastPrintedSavedTenths)
+				if(LossKey != s_LastPrintedLossKey || SavedTenths != s_LastPrintedSavedTenths || DownKey != s_LastPrintedDownKey)
 				{
 					s_LastPrintedLossKey = LossKey;
 					s_LastPrintedSavedTenths = SavedTenths;
+					s_LastPrintedDownKey = DownKey;
 					// 失同步状态不挂在 dup-upstream 行尾了（用户要求：有 dup-upstream 渠道就够了）；
 					// 检测开启/关闭时 desync 渠道自己会打一行，不重复。
 					if(!ProbeEnabled)
-						dbg_msg("dup-upstream", "发包=%.0f个/秒 份数=%d 丢包率=未测量 已补救=0个/秒", PerSec, g_NetDupUpstream);
+						dbg_msg("dup-upstream", "发包=%.0f个/秒 份数=%d 丢包率=未测量 已补救=0个/秒 下行丢包=突发%d/随机%d 突发占比=%d%% 近10秒丢失=%d",
+							PerSec, g_NetDupUpstream, SnapshotGap.BurstLossEvents(), SnapshotGap.RandomLossEvents(), SnapshotGap.BurstPercent(), SnapshotGap.RecentLossTicks(Now));
 					else if(!HasEst)
-						dbg_msg("dup-upstream", "发包=%.0f个/秒 份数=%d 丢包率=采样中 已补救=0个/秒", PerSec, g_NetDupUpstream);
+						dbg_msg("dup-upstream", "发包=%.0f个/秒 份数=%d 丢包率=采样中 已补救=0个/秒 下行丢包=突发%d/随机%d 突发占比=%d%% 近10秒丢失=%d",
+							PerSec, g_NetDupUpstream, SnapshotGap.BurstLossEvents(), SnapshotGap.RandomLossEvents(), SnapshotGap.BurstPercent(), SnapshotGap.RecentLossTicks(Now));
 					else
-						dbg_msg("dup-upstream", "发包=%.0f个/秒 份数=%d 丢包率=%.1f%% 已补救=%.1f个/秒",
-							PerSec, g_NetDupUpstream, m_LinkProbeTracker.UnconfirmedPercent(), SavedPerSec);
+						dbg_msg("dup-upstream", "发包=%.0f个/秒 份数=%d 丢包率=%.1f%% 已补救=%.1f个/秒 下行丢包=突发%d/随机%d 突发占比=%d%% 近10秒丢失=%d",
+							PerSec, g_NetDupUpstream, m_LinkProbeTracker.UnconfirmedPercent(), SavedPerSec, SnapshotGap.BurstLossEvents(), SnapshotGap.RandomLossEvents(), SnapshotGap.BurstPercent(), SnapshotGap.RecentLossTicks(Now));
 				}
 			}
 		}

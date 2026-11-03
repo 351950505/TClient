@@ -22,6 +22,7 @@
 #include <base/str.h>
 #include <base/time.h>
 
+#include <engine/client/link_probe.h>
 #include <engine/graphics.h>
 #include <engine/http.h>
 #include <engine/shared/config.h>
@@ -2698,6 +2699,106 @@ public:
 		if(ShowGameTime)
 			GameW = m_pTextRender->TextWidth(TimerSize, aGameTime);
 
+		// ---- link status cell (left of the game clock) -----------------------
+		// One LED plus one number. The dot carries the verdict (green / amber /
+		// red), the number stays secondary: latency while healthy, loss percentage
+		// as soon as packets are actually being dropped. The cell reserves width
+		// for the widest possible readout, so the capsule never breathes as the
+		// value changes.
+		const bool ShowLink = g_Config.m_TcIslandLinkStatus != 0 && m_pClient->State() == IClient::STATE_ONLINE;
+		float LinkLoss = -1.0f;
+		float LinkLatencyMs = 0.0f;
+		if(ShowLink)
+		{
+			const CLinkProbeTracker *pProbe = m_pClient->LinkProbe();
+			if(pProbe && pProbe->HasRecentEstimate())
+				LinkLoss = pProbe->RecentUnconfirmedPercent();
+			const float DownLoss = m_pClient->DownlinkLossPercent();
+			if(DownLoss >= 0.0f)
+				LinkLoss = LinkLoss < 0.0f ? DownLoss : std::max(LinkLoss, DownLoss);
+			else if(LinkLoss < (float)g_Config.m_ClDupUpstreamLowPct)
+				LinkLoss = -1.0f; // 下行没有新鲜观测时，上行正常不能代表整条链路良好。
+			if(pProbe && pProbe->HasLatency())
+				LinkLatencyMs = pProbe->AverageLatencyMs();
+		}
+		const bool LinkKnown = LinkLoss >= 0.0f;
+		const int LinkLevel = !LinkKnown ? 0 : (LinkLoss >= (float)g_Config.m_ClDupUpstreamHighPct ? 2 : (LinkLoss >= (float)g_Config.m_ClDupUpstreamLowPct ? 1 : 0));
+		char aLinkText[16];
+		if(!LinkKnown)
+			str_copy(aLinkText, "--");
+		else if(LinkLevel > 0)
+			str_format(aLinkText, sizeof(aLinkText), "%.1f%%", LinkLoss);
+		else if(LinkLatencyMs > 0.0f)
+			str_format(aLinkText, sizeof(aLinkText), "%d ms", (int)(LinkLatencyMs + 0.5f));
+		else
+			str_copy(aLinkText, "--");
+		// 双发累计救回的包数（估算值）：同一格里第二行小字，和上面的丢包率/延迟同源，
+		// 这样看链路状态时不用再去翻日志。0 时整行留白，保持高度和宽度恒定。
+		const int64_t LinkRescued = ShowLink ? m_pClient->UpstreamRescuedPackets() : 0;
+		char aRescuedText[16];
+		if(LinkRescued <= 0)
+			aRescuedText[0] = '\0';
+		else if(LinkRescued < 1000)
+			str_format(aRescuedText, sizeof(aRescuedText), "\xE2\x86\x91~%lld", (long long)LinkRescued);
+		else if(LinkRescued < 999950)
+			str_format(aRescuedText, sizeof(aRescuedText), "\xE2\x86\x91~%.1fk", (double)LinkRescued / 1000.0);
+		else if(LinkRescued < 999950000)
+			str_format(aRescuedText, sizeof(aRescuedText), "\xE2\x86\x91~%.1fM", (double)LinkRescued / 1000000.0);
+		else
+			str_format(aRescuedText, sizeof(aRescuedText), "\xE2\x86\x91~%.1e", (double)LinkRescued);
+		const bool HasRescued = aRescuedText[0] != '\0';
+		const float LinkSize = 13.0f * Scale;
+		const float LinkSubSize = 10.0f * Scale;
+		const float LinkDot = 6.0f * Scale;
+		const float LinkGap = 7.0f * Scale;
+		const float LinkPad = 17.0f * Scale;
+		const float LinkTextW = ShowLink ? std::max(std::max(m_pTextRender->TextWidth(LinkSize, "9999 ms"), m_pTextRender->TextWidth(LinkSize, "100.0%")),
+			std::max(std::max(m_pTextRender->TextWidth(LinkSubSize, "\xE2\x86\x91~999.9k"), m_pTextRender->TextWidth(LinkSubSize, "\xE2\x86\x91~999.9M")),
+				m_pTextRender->TextWidth(LinkSubSize, "\xE2\x86\x91~9.9e+18"))) : 0.0f;
+		const float LinkCellW = ShowLink ? (LinkPad + LinkDot + LinkGap + LinkTextW + LinkPad) : 0.0f;
+		auto LinkColor = [&](float Alpha) -> ColorRGBA {
+			if(!LinkKnown)
+				return ColorRGBA(1.0f, 1.0f, 1.0f, 0.30f * Alpha);
+			if(LinkLevel >= 2)
+				return ColorRGBA(0.98f, 0.42f, 0.38f, Alpha);
+			if(LinkLevel >= 1)
+				return ColorRGBA(0.99f, 0.75f, 0.30f, Alpha);
+			return ColorRGBA(0.42f, 0.88f, 0.55f, Alpha);
+		};
+		// One cell, drawn identically in the idle and playing layouts so the two
+		// states cannot drift apart. Sampling = hollow ring (nothing to report yet,
+		// not a green light); measured = solid LED with a faint halo so the colour
+		// reads at a glance against a busy map.
+		auto DrawLinkCell = [&](float CellX, float Alpha) {
+			const float CY = PillY + Height * 0.5f;
+			const float R = std::round(LinkDot * 0.5f);
+			if(!LinkKnown)
+				DrawShape(CellX + LinkPad, CY - R, R * 2.0f, R * 2.0f, R, IGraphics::CORNER_ALL,
+					LinkColor(0.55f * Alpha), std::max(1.0f, 1.2f * Scale));
+			else
+			{
+				const float HaloR = R + 2.0f * Scale;
+				DrawShape(CellX + LinkPad + R - HaloR, CY - HaloR, HaloR * 2.0f, HaloR * 2.0f, HaloR,
+					IGraphics::CORNER_ALL, LinkColor(0.16f * Alpha));
+				DrawShape(CellX + LinkPad, CY - R, R * 2.0f, R * 2.0f, R, IGraphics::CORNER_ALL,
+					LinkColor(0.95f * Alpha));
+			}
+			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, (LinkKnown ? 0.72f : 0.42f) * Alpha);
+			const float TextX = CellX + LinkPad + LinkDot + LinkGap;
+			if(HasRescued)
+			{
+				// 两行模式：主读数略上移，救援累计做第二行小字，整格仍在胶囊中线上。
+				const float TwoLineH = LinkSize + LinkSubSize * 0.92f;
+				const float TopY = PillY + (Height - TwoLineH) * 0.5f;
+				m_pTextRender->Text(TextX, TopY, LinkSize, aLinkText);
+				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.42f * Alpha);
+				m_pTextRender->Text(TextX, TopY + LinkSize * 1.02f, LinkSubSize, aRescuedText);
+			}
+			else
+				m_pTextRender->Text(TextX, PillY + (Height - LinkSize) * 0.5f, LinkSize, aLinkText);
+			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
+		};
+
 		// ---- right zone: equaliser only -------------------------------------
 		// The elapsed time used to live here, but the progress hairline along the
 		// bottom edge already says how far into the track we are, so the number
@@ -2763,7 +2864,7 @@ public:
 		const float LocalClockCellW = ShowLocalClock ? (ClockPad + LocalClockTextW + ClockPad) : 0.0f;
 		const float TextGapL = 14.0f * Scale;          // disc cell -> lyric text
 		const float TextGapR = 20.0f * Scale;          // lyric text -> divider（与绘制侧保持一致）
-		const float LeftChrome = (ShowGameTime ? ClockCellW : 0.0f) + DiscCellW + TextGapL;
+		const float LeftChrome = LinkCellW + (ShowGameTime ? ClockCellW : 0.0f) + DiscCellW + TextGapL;
 		const float RightChrome = TextGapR + EqCellW + (ShowLocalClock ? ClockPad + LocalClockTextW + ClockPad : 0.0f);
 		const float ChromeW = LeftChrome + RightChrome;
 		// the widest the capsule may get on this screen: keep it on-screen with a
@@ -2779,14 +2880,14 @@ public:
 		// 宽度至少要容得下 chrome + 最小歌词区，否则右侧单元会被挤出胶囊。
 		const float NeededW = ChromeW + 120.0f * Scale;
 		// 空态且没有任何时钟要显示：干脆连胶囊都不画，不留一个空壳在屏幕顶上。
-		if(Idle && !ShowGameTime && !ShowLocalClock)
+		if(Idle && !ShowGameTime && !ShowLocalClock && !ShowLink)
 		{
 			RestoreFace();
 			return;
 		}
 		// 空态胶囊只包住时钟单元和右端的装饰等化器（两个时钟都开时并排，中间
 		// 一条分隔线），宽度因此可以缩到远小于播放态的固定宽；播放态宽度仍按内容算。
-		const float IdleW = (ShowGameTime ? ClockCellW : 0.0f) + (ShowLocalClock ? LocalClockCellW : 0.0f) +
+		const float IdleW = LinkCellW + (ShowGameTime ? ClockCellW : 0.0f) + (ShowLocalClock ? LocalClockCellW : 0.0f) +
 			EqPadL + EqSize + EqPadR;
 		const float Width = Idle
 			? std::floor(std::clamp(IdleW, MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f
@@ -2846,6 +2947,12 @@ public:
 			};
 			float CursorX = X + (Width - IdleW) * 0.5f;
 			const float TextY = PillY + (Height - TimerSize) * 0.5f;
+			if(ShowLink)
+			{
+				DrawLinkCell(CursorX, 1.0f);
+				CursorX += LinkCellW;
+				DrawSep(CursorX);
+			}
 			if(ShowGameTime)
 			{
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.80f);
@@ -2942,6 +3049,12 @@ public:
 		};
 
 		float CellX = X;
+		if(ShowLink)
+		{
+			DrawLinkCell(CellX, Dim);
+			CellX += LinkCellW;
+			DrawDivider(CellX);
+		}
 		if(ShowGameTime)
 		{
 			// game round time, dim white so it recedes next to the artwork

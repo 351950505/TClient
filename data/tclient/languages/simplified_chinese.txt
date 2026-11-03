@@ -1536,3 +1536,36 @@ Reset slot
 
 No preview
 == 无法预览
+
+Upstream loss %.1f%%
+== 上行丢包率 %.1f%%
+
+Upstream loss: sampling...
+== 上行丢包率: 采样中
+
+Latency %.0f ms  Jitter %.0f ms
+== 延迟 %.0f ms  抖动 %.0f ms
+
+Latency/Jitter: sampling...
+== 延迟/抖动: 采样中
+
+Link status: sampling...
+== 链路状态: 采样中
+
+Link status: Good
+== 链路状态: 良好
+
+Link status: Jittery
+== 链路状态: 抖动
+
+Link status: Packet loss
+== 链路状态: 丢包
+
+Show network status before the game clock
+== 在游戏时间前显示网络状态
+
+Duplicate-send rescue estimate: %lld
+== 双发补救总数（估算）：%lld
+
+Duplicate-send rescue estimate: none yet
+== 双发补救总数（估算）：暂无

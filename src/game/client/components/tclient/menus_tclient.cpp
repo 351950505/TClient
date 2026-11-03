@@ -2,6 +2,7 @@
 #include <base/math.h>
 #include <base/types.h>
 
+#include <engine/client/link_probe.h>
 #include <engine/font_icons.h>
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
@@ -878,6 +879,70 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		else
 			Column.HSplitTop(LineSize * 2, nullptr, &Column);
 	}
+	// [DUP-UPSTREAM 状态区] 只读展示探针的实时结果（最近 4 秒短窗口 + 最近若干次回包 RTT）。
+	// 状态判定阈值：上行丢包率 <1% 良好，1%~5% 抖动，>=5% 丢包。
+	// 这里只读，不影响发包份数（Copies() 仍用 10 秒长窗口，见 link_probe.h）。
+	// 始终占四行，避免数据到达时整段 UI 高度跳动。
+	{
+		const CLinkProbeTracker *pProbe = Client() != nullptr ? Client()->LinkProbe() : nullptr;
+		const bool HasRecent = pProbe != nullptr && pProbe->HasRecentEstimate();
+		const bool HasLatency = pProbe != nullptr && pProbe->HasLatency();
+		const float LossPct = HasRecent ? pProbe->RecentUnconfirmedPercent() : 0.0f;
+
+		const char *pStateText;
+		ColorRGBA StateColor;
+		if(!HasRecent)
+		{
+			pStateText = TCLocalize("Link status: sampling...");
+			StateColor = ColorRGBA(0.7f, 0.7f, 0.7f, 1.0f);
+		}
+		else if(LossPct < 1.0f)
+		{
+			pStateText = TCLocalize("Link status: Good");
+			StateColor = ColorRGBA(0.5f, 1.0f, 0.5f, 1.0f);
+		}
+		else if(LossPct < 5.0f)
+		{
+			pStateText = TCLocalize("Link status: Jittery");
+			StateColor = ColorRGBA(1.0f, 0.85f, 0.4f, 1.0f);
+		}
+		else
+		{
+			pStateText = TCLocalize("Link status: Packet loss");
+			StateColor = ColorRGBA(1.0f, 0.45f, 0.45f, 1.0f);
+		}
+
+		CUIRect StatusRow;
+		char aBuf[128];
+
+		Column.HSplitTop(LineSize, &StatusRow, &Column);
+		TextRender()->TextColor(StateColor);
+		Ui()->DoLabel(&StatusRow, pStateText, FontSize, TEXTALIGN_ML);
+		TextRender()->TextColor(TextRender()->DefaultTextColor());
+
+		Column.HSplitTop(LineSize, &StatusRow, &Column);
+		if(HasRecent)
+			str_format(aBuf, sizeof(aBuf), TCLocalize("Upstream loss %.1f%%"), LossPct);
+		else
+			str_copy(aBuf, TCLocalize("Upstream loss: sampling..."));
+		Ui()->DoLabel(&StatusRow, aBuf, FontSize, TEXTALIGN_ML);
+
+		Column.HSplitTop(LineSize, &StatusRow, &Column);
+		if(HasLatency)
+			str_format(aBuf, sizeof(aBuf), TCLocalize("Latency %.0f ms  Jitter %.0f ms"), pProbe->AverageLatencyMs(), pProbe->JitterMs());
+		else
+			str_copy(aBuf, TCLocalize("Latency/Jitter: sampling..."));
+		Ui()->DoLabel(&StatusRow, aBuf, FontSize, TEXTALIGN_ML);
+
+		// 本次连接以来双发估算救回的包总数（断线清零），与灵动岛同源。
+		Column.HSplitTop(LineSize, &StatusRow, &Column);
+		const int64_t Rescued = Client() != nullptr ? Client()->UpstreamRescuedPackets() : 0;
+		if(Rescued > 0)
+			str_format(aBuf, sizeof(aBuf), TCLocalize("Duplicate-send rescue estimate: %lld"), (long long)Rescued);
+		else
+			str_copy(aBuf, TCLocalize("Duplicate-send rescue estimate: none yet"));
+		Ui()->DoLabel(&StatusRow, aBuf, FontSize, TEXTALIGN_ML);
+	}
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcRemoveAnti, TCLocalize("Remove prediction & antiping in freeze"), &g_Config.m_TcRemoveAnti, &Column, LineSize);
 	if(g_Config.m_TcRemoveAnti)
 	{
@@ -1187,6 +1252,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowProgress, TCLocalize("Show game clock"), &g_Config.m_TcIslandShowProgress, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowSongProgress, TCLocalize("Show song progress bar"), &g_Config.m_TcIslandShowSongProgress, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandLocalClock, TCLocalize("Show local computer time (HH:MM)"), &g_Config.m_TcIslandLocalClock, &Column, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandLinkStatus, TCLocalize("Show network status before the game clock"), &g_Config.m_TcIslandLinkStatus, &Column, LineSize);
 
 		// 灵动岛字体：独立于全局自定义字体；选"跟随全局"时 tc_island_font 留空
 		{

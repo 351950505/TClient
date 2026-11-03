@@ -136,6 +136,13 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	CLinkProbeTracker m_LinkProbeTracker;
 	int64_t m_NextUpstreamProbeTime = 0;
 	bool m_UpstreamProbeEnabled = false;
+	// 本次连接累计救回的包数（保留积分小数，仅展示时取整，断线清零）
+	double m_UpstreamRescuedPackets = 0.0;
+	int64_t m_UpstreamRateTime = 0;
+	int64_t m_UpstreamRatePackets = 0;
+
+	// [SNAPSHOT-GAP] 下行快照 tick 连续性（每个连接独立，避免主/假人两路 tick 互相干扰）
+	CSnapshotGapTracker m_aSnapshotGapTrackers[NUM_DUMMIES];
 
 	char m_aTimeoutCodes[NUM_DUMMIES][32] = {"", ""};
 	bool m_aDidPostConnect[NUM_DUMMIES] = {false, false};
@@ -303,6 +310,13 @@ public:
 	IEngineTextRender *TextRender() { return m_pTextRender; }
 	IUpdater *Updater() { return m_pUpdater; }
 	IHttp *Http() { return m_pHttp; }
+
+	// 只读访问：UI 只做展示，不允许改探针状态
+	const CLinkProbeTracker *LinkProbe() const override { return &m_LinkProbeTracker; }
+	// 最近 10 秒下行快照丢包率（%），无足够样本返回 -1
+	float DownlinkLossPercent() const override;
+	// 本次连接累计被复制救回的包数（估算），断线清零
+	int64_t UpstreamRescuedPackets() const override { return (int64_t)m_UpstreamRescuedPackets; }
 
 	CClient();
 

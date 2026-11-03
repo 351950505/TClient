@@ -875,3 +875,35 @@ Changing name to %s near finish
 Show a gear above players who have the settings menu open
 == 在開啟設定選單的玩家頭頂顯示齒輪
 
+Upstream loss %.1f%%
+== 上行丟包率 %.1f%%
+
+Upstream loss: sampling...
+== 上行丟包率: 取樣中
+
+Latency %.0f ms  Jitter %.0f ms
+== 延遲 %.0f ms  抖動 %.0f ms
+
+Latency/Jitter: sampling...
+== 延遲/抖動: 取樣中
+
+Link status: sampling...
+== 鏈路狀態: 取樣中
+
+Link status: Good
+== 鏈路狀態: 良好
+
+Link status: Jittery
+== 鏈路狀態: 抖動
+
+Link status: Packet loss
+== 鏈路狀態: 丟包
+
+Show network status before the game clock
+== 在遊戲時間前顯示網路狀態
+
+Duplicate-send rescue estimate: %lld
+== 雙發補救總數（估算）：%lld
+
+Duplicate-send rescue estimate: none yet
+== 雙發補救總數（估算）：暫無

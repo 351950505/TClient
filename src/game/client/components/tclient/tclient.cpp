@@ -980,6 +980,10 @@ void CTClient::ResetUpdateTasks()
 // 用私钥生成。验签不过 = 清单被篡改或来源不对，直接拒绝，不进入下载。
 bool CTClient::VerifyUpdateManifestSignature(const unsigned char *pManifest, size_t ManifestSize, const unsigned char *pSignature, size_t SignatureSize)
 {
+	// ed25519_verify always reads a full 64-byte signature; a short buffer
+	// would be an out-of-bounds read.
+	if(SignatureSize != 64)
+		return false;
 	return ed25519_verify(pSignature, pManifest, ManifestSize, s_aUpdateEd25519PublicKey) == 1;
 }
 
@@ -1095,10 +1099,11 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 	{
 		// 「版本不比当前新」不是错误：发布页的 latest 可能正好就是本机版本
 		// （刚更新完再检查一次）。这里显示"已是最新版本"，不要报成红色失败。
-		json_value_free(pJson);
 		m_UpdateState = EUpdateState::UP_TO_DATE;
 		SetUpdateStatus(TCLocalize("You are on the latest version"));
 		log_info("tclient-update", "latest release is %s, current is %s: up to date", pVersion, TCLIENT_APP_VERSION);
+		// pVersion points into pJson; free only after the log call.
+		json_value_free(pJson);
 		return;
 	}
 

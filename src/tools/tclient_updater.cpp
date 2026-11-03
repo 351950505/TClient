@@ -1846,6 +1846,7 @@ namespace
 
 			// Roll back everything that was already replaced.
 			g_Logger.Warn("rolling back %llu already installed files", (unsigned long long)Index);
+			bool RollbackComplete = true;
 			for(size_t Rollback = Index; Rollback > 0; Rollback--)
 			{
 				const SInstalledFile &Record = Installed[Rollback - 1];
@@ -1855,18 +1856,27 @@ namespace
 					if(MoveFileExW(LongPath(Record.m_BackupPath).c_str(), LongPath(Record.m_TargetPath).c_str(), MOVEFILE_REPLACE_EXISTING))
 						g_Logger.Info("restored '%s'", Utf8FromWide(Record.m_TargetPath).c_str());
 					else
+					{
+						RollbackComplete = false;
 						g_Logger.Error("could not restore '%s': %s", Utf8FromWide(Record.m_TargetPath).c_str(), FormatLastError(GetLastError()).c_str());
+					}
 				}
 				else
 				{
 					if(DeleteFileW(LongPath(Record.m_TargetPath).c_str()))
 						g_Logger.Info("removed newly created '%s'", Utf8FromWide(Record.m_TargetPath).c_str());
 					else
+					{
+						RollbackComplete = false;
 						g_Logger.Error("could not remove '%s': %s", Utf8FromWide(Record.m_TargetPath).c_str(), FormatLastError(GetLastError()).c_str());
+					}
 				}
 			}
 			RemoveTree(StagingDir, FileError);
-			g_Logger.Error("update failed, previous state restored");
+			if(RollbackComplete)
+				g_Logger.Error("update failed, previous state restored");
+			else
+				g_Logger.Error("update failed and the previous state could NOT be fully restored; see the errors above");
 			return EXIT_INSTALL_FAILED;
 		}
 		g_Logger.Info("installed %llu files", (unsigned long long)FileEntries.size());

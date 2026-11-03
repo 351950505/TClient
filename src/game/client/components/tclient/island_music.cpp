@@ -3351,8 +3351,10 @@ void CIslandMusic::OnRender()
 
 void CIslandMusic::OnShutdown()
 {
+#if TCLIENT_HAS_WINRT_MUSIC
 	if(m_pImpl)
 		m_pImpl->StopWorker();
+#endif
 #if defined(CONF_FAMILY_WINDOWS)
 	if(m_pImpl)
 		m_pImpl->CloseIslandMap();

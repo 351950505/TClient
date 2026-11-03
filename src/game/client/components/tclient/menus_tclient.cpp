@@ -1955,7 +1955,29 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 	RightView.VSplitMid(&Column3, &Column4, Margin);
 
 	// ======WAR ENTRIES======
-	static CWarEntry *s_pSelectedEntry = nullptr;
+	// Selection is stored by value (name/clan/type), not as a pointer: the
+	// entry vector is erased/relocated when entries are removed, so a cached
+	// pointer would dangle across frames.
+	static char s_aSelectedEntryName[MAX_NAME_LENGTH] = "";
+	static char s_aSelectedEntryClan[MAX_CLAN_LENGTH] = "";
+	static char s_aSelectedEntryType[MAX_WARLIST_TYPE_LENGTH] = "";
+	static bool s_HasSelectedEntry = false;
+
+	auto ResolveSelectedEntry = [&]() -> CWarEntry * {
+		if(!s_HasSelectedEntry)
+			return nullptr;
+		for(CWarEntry &Entry : GameClient()->m_WarList.m_vWarEntries)
+		{
+			if(str_comp(Entry.m_aName, s_aSelectedEntryName) == 0 &&
+				str_comp(Entry.m_aClan, s_aSelectedEntryClan) == 0 &&
+				Entry.m_pWarType && str_comp(Entry.m_pWarType->m_aWarName, s_aSelectedEntryType) == 0)
+				return &Entry;
+		}
+		return nullptr;
+	};
+	CWarEntry *pSelectedEntry = ResolveSelectedEntry();
+	if(!pSelectedEntry)
+		s_HasSelectedEntry = false;
 	// Resolve the selection anew each frame: groups may be removed while a popup is open.
 	static char s_aSelectedType[MAX_WARLIST_TYPE_LENGTH] = "none";
 	CWarType *pSelectedType = GameClient()->m_WarList.FindWarType(s_aSelectedType);
@@ -2002,11 +2024,15 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 		s_vItemIds.resize(MaxEntries);
 		s_vDeleteButtons.resize(MaxEntries);
 
+		// Remove the entry only after the list has been rendered. Erasing in
+		// the middle of the loop would invalidate every pointer into the range.
+		CWarEntry *pDeleteEntry = nullptr;
+
 		for(size_t i = 0; i < vpFilteredEntries.size(); i++)
 		{
 			CWarEntry *pEntry = vpFilteredEntries[i];
 
-			if(s_pSelectedEntry && pEntry == s_pSelectedEntry)
+			if(pSelectedEntry && pEntry == pSelectedEntry)
 				SelectedOldEntry = i;
 
 			const CListboxItem Item = s_EntriesListBox.DoNextItem(&s_vItemIds[i], SelectedOldEntry >= 0 && (size_t)SelectedOldEntry == i);
@@ -2021,7 +2047,7 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 			DeleteButton.VSplitRight(MarginExtraSmall, &DeleteButton, nullptr);
 
 			if(Ui()->DoButton_FontIcon(&s_vDeleteButtons[i], FontIcon::TRASH, 0, &DeleteButton, IGraphics::CORNER_ALL))
-				GameClient()->m_WarList.RemoveWarEntry(pEntry);
+				pDeleteEntry = pEntry;
 
 			bool IsClan = false;
 			char aBuf[32];
@@ -2064,15 +2090,20 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 			TextRender()->TextColor(TextRender()->DefaultTextColor());
 		}
 		const int NewSelectedEntry = s_EntriesListBox.DoEnd();
-		if(SelectedOldEntry != NewSelectedEntry || (SelectedOldEntry >= 0 && Ui()->HotItem() == &s_vItemIds[NewSelectedEntry] && Ui()->MouseButtonClicked(0)))
+		if(NewSelectedEntry >= 0 && (size_t)NewSelectedEntry < vpFilteredEntries.size() &&
+			(SelectedOldEntry != NewSelectedEntry || (SelectedOldEntry >= 0 && Ui()->HotItem() == &s_vItemIds[NewSelectedEntry] && Ui()->MouseButtonClicked(0))))
 		{
-			s_pSelectedEntry = vpFilteredEntries[NewSelectedEntry];
+			pSelectedEntry = vpFilteredEntries[NewSelectedEntry];
+			s_HasSelectedEntry = true;
+			str_copy(s_aSelectedEntryName, pSelectedEntry->m_aName);
+			str_copy(s_aSelectedEntryClan, pSelectedEntry->m_aClan);
+			str_copy(s_aSelectedEntryType, pSelectedEntry->m_pWarType ? pSelectedEntry->m_pWarType->m_aWarName : "");
 			if(!Ui()->LastMouseButton(1) && !Ui()->LastMouseButton(2))
 			{
-				str_copy(s_aEntryName, s_pSelectedEntry->m_aName);
-				str_copy(s_aEntryClan, s_pSelectedEntry->m_aClan);
-				str_copy(s_aEntryReason, s_pSelectedEntry->m_aReason);
-				if(str_comp(s_pSelectedEntry->m_aClan, "") != 0)
+				str_copy(s_aEntryName, pSelectedEntry->m_aName);
+				str_copy(s_aEntryClan, pSelectedEntry->m_aClan);
+				str_copy(s_aEntryReason, pSelectedEntry->m_aReason);
+				if(str_comp(pSelectedEntry->m_aClan, "") != 0)
 				{
 					s_IsName = false;
 					s_IsClan = true;
@@ -2082,8 +2113,28 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 					s_IsName = true;
 					s_IsClan = false;
 				}
-				pSelectedType = s_pSelectedEntry->m_pWarType;
+				pSelectedType = pSelectedEntry->m_pWarType;
 			}
+		}
+
+		if(pDeleteEntry)
+		{
+			const bool DeletedSelection = pSelectedEntry == pDeleteEntry;
+			GameClient()->m_WarList.RemoveWarEntry(pDeleteEntry);
+			if(DeletedSelection)
+			{
+				s_HasSelectedEntry = false;
+				s_aEntryName[0] = '\0';
+				s_aEntryClan[0] = '\0';
+				s_aEntryReason[0] = '\0';
+				s_IsName = true;
+				s_IsClan = false;
+			}
+			// erase() may relocate the remaining entries; never keep a pointer
+			// into the vector across it. Re-resolve from the stored identity.
+			pSelectedEntry = ResolveSelectedEntry();
+			if(!pSelectedEntry)
+				s_HasSelectedEntry = false;
 		}
 
 		Ui()->DoEditBox_Search(&s_EntriesFilterInput, &EntriesSearch, 14.0f, !Ui()->IsPopupOpen() && !GameClient()->m_GameConsole.IsActive());
@@ -2159,14 +2210,18 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 	Column2.HSplitTop(LineSize * 2.0f, &Button, &Column2);
 	Button.VSplitMid(&ButtonL, &ButtonR, MarginSmall);
 
-	if(DoButtonLineSize_Menu(&s_OverrideButton, TCLocalize("Override Entry"), 0, &ButtonL, LineSize) && s_pSelectedEntry)
+	if(DoButtonLineSize_Menu(&s_OverrideButton, TCLocalize("Override Entry"), 0, &ButtonL, LineSize) && pSelectedEntry)
 	{
-		if(s_pSelectedEntry && pSelectedType && (str_comp(s_aEntryName, "") != 0 || str_comp(s_aEntryClan, "") != 0))
+		if(pSelectedType && (str_comp(s_aEntryName, "") != 0 || str_comp(s_aEntryClan, "") != 0))
 		{
-			str_copy(s_pSelectedEntry->m_aName, s_aEntryName);
-			str_copy(s_pSelectedEntry->m_aClan, s_aEntryClan);
-			str_copy(s_pSelectedEntry->m_aReason, s_aEntryReason);
-			s_pSelectedEntry->m_pWarType = pSelectedType;
+			str_copy(pSelectedEntry->m_aName, s_aEntryName);
+			str_copy(pSelectedEntry->m_aClan, s_aEntryClan);
+			str_copy(pSelectedEntry->m_aReason, s_aEntryReason);
+			pSelectedEntry->m_pWarType = pSelectedType;
+			// Keep the value-based selection in sync with the edited entry.
+			str_copy(s_aSelectedEntryName, pSelectedEntry->m_aName);
+			str_copy(s_aSelectedEntryClan, pSelectedEntry->m_aClan);
+			str_copy(s_aSelectedEntryType, pSelectedEntry->m_pWarType->m_aWarName);
 		}
 	}
 	if(DoButtonLineSize_Menu(&s_AddButton, TCLocalize("Add Entry"), 0, &ButtonR, LineSize))

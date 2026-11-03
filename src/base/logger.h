@@ -5,6 +5,7 @@
 #include "log.h"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -203,6 +204,18 @@ std::unique_ptr<ILogger> log_logger_default();
  * @param file File to write to, must be opened for writing.
  */
 std::unique_ptr<ILogger> log_logger_file(IOHANDLE file);
+
+/**
+ * @ingroup Log
+ *
+ * Logger for writing logs to the given file, stopping after `MaxBytes` bytes
+ * have been written. The in-memory write queue is bounded, so a stalled disk
+ * cannot grow the process without limit.
+ *
+ * @param file File to write to, must be opened for writing.
+ * @param MaxBytes Maximum number of bytes to write, or 0 for no limit.
+ */
+std::unique_ptr<ILogger> log_logger_file_limited(IOHANDLE file, uint64_t MaxBytes);
 
 /**
  * @ingroup Log

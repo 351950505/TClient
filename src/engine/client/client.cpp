@@ -100,13 +100,74 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeEndPeriod(unsigned i
 #include <iterator>
 #include <limits>
 #include <stack>
+#include <string>
 #include <thread>
 #include <tuple>
+#include <vector>
 
 using namespace std::chrono_literals;
 
 static constexpr ColorRGBA CLIENT_NETWORK_PRINT_COLOR = ColorRGBA(0.7f, 1, 0.7f, 1.0f);
 static constexpr ColorRGBA CLIENT_NETWORK_PRINT_ERROR_COLOR = ColorRGBA(1.0f, 0.25f, 0.25f, 1.0f);
+
+// TClient automatic session logs: keep the newest files and cap each file so
+// an always-on log cannot fill the disk. Only auto-created logs are managed;
+// an explicitly configured logfile= is never rotated or deleted.
+static constexpr int TCLIENT_AUTO_LOG_MAX_FILES = 10;
+static constexpr uint64_t TCLIENT_AUTO_LOG_MAX_BYTES = 10ULL * 1024 * 1024;
+
+static bool IsAutoLogFilename(const char *pFilename)
+{
+	static const char PREFIX[] = "ddnet-log-";
+	static const char SUFFIX[] = ".log";
+	constexpr int TIMESTAMP_LEN = 19; // %Y-%m-%d_%H-%M-%S
+	const int Length = str_length(pFilename);
+	if(Length != (int)sizeof(PREFIX) - 1 + TIMESTAMP_LEN + (int)sizeof(SUFFIX) - 1)
+		return false;
+	if(!str_startswith(pFilename, PREFIX) || !str_endswith(pFilename, SUFFIX))
+		return false;
+	const char *pTimestamp = pFilename + sizeof(PREFIX) - 1;
+	for(int i = 0; i < TIMESTAMP_LEN; i++)
+	{
+		const bool IsSeparatorPosition = i == 4 || i == 7 || i == 10 || i == 13 || i == 16;
+		if(IsSeparatorPosition)
+		{
+			const char Expected = i == 10 ? '_' : '-';
+			if(pTimestamp[i] != Expected)
+				return false;
+		}
+		else if(pTimestamp[i] < '0' || pTimestamp[i] > '9')
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+static int AutoLogfileListCallback(const char *pFilename, int IsDir, int StorageType, void *pUser)
+{
+	if(IsDir || !IsAutoLogFilename(pFilename))
+		return 0;
+	static_cast<std::vector<std::string> *>(pUser)->emplace_back(pFilename);
+	return 0;
+}
+
+static void PruneAutoLogfiles(IStorage *pStorage, int MaxFiles)
+{
+	std::vector<std::string> vNames;
+	pStorage->ListDirectory(IStorage::TYPE_SAVE, "logs", AutoLogfileListCallback, &vNames);
+	// Names use a sortable timestamp, oldest first.
+	std::sort(vNames.begin(), vNames.end());
+	// Leave room for the file this launch is about to create.
+	while((int)vNames.size() >= MaxFiles)
+	{
+		char aPath[IO_MAX_PATH_LENGTH];
+		str_format(aPath, sizeof(aPath), "logs/%s", vNames.front().c_str());
+		if(!pStorage->RemoveFile(aPath, IStorage::TYPE_SAVE))
+			break; // e.g. still open by another client; do not spin
+		vNames.erase(vNames.begin());
+	}
+}
 
 CSnapshotDelta *CClient::SnapshotDelta()
 {
@@ -5417,7 +5478,7 @@ int main(int argc, const char **argv)
 		pSteam->ClearConnectAddress();
 	}
 
-	// TClient: default to a per-day session log so disconnects and crashes are
+	// TClient: default to a per-launch session log so disconnects and crashes are
 	// always diagnosable afterwards (the 2026-11-03 connection-drop investigation
 	// was blind because no client build wrote a console log). The auto-assigned
 	// path is cleared again below so it never becomes a sticky settings.cfg entry
@@ -5425,6 +5486,7 @@ int main(int argc, const char **argv)
 	bool AutoLogfile = false;
 	if(!g_Config.m_Logfile[0])
 	{
+		PruneAutoLogfiles(pStorage, TCLIENT_AUTO_LOG_MAX_FILES);
 		char aTimestamp[32];
 		str_timestamp(aTimestamp, sizeof(aTimestamp));
 		str_format(g_Config.m_Logfile, sizeof(g_Config.m_Logfile), "logs/ddnet-log-%s.log", aTimestamp);
@@ -5437,7 +5499,9 @@ int main(int argc, const char **argv)
 		IOHANDLE Logfile = pStorage->OpenFile(g_Config.m_Logfile, Mode, IStorage::TYPE_SAVE_OR_ABSOLUTE);
 		if(Logfile)
 		{
-			auto pFileLogger = log_logger_file(Logfile);
+			auto pFileLogger = AutoLogfile ?
+						   log_logger_file_limited(Logfile, TCLIENT_AUTO_LOG_MAX_BYTES) :
+						   log_logger_file(Logfile);
 			pFileLogger->SetFilter(CLogFilter{IConsole::ToLogLevelFilter(g_Config.m_Loglevel)});
 			pFutureFileLogger->Set(std::move(pFileLogger));
 		}

@@ -77,6 +77,19 @@ void aio_write_unlocked(ASYNCIO *aio, const void *buffer, unsigned size);
 void aio_write_newline_unlocked(ASYNCIO *aio);
 
 /**
+ * Returns the number of bytes that are currently queued for writing.
+ *
+ * The `ASYNCIO` struct must be locked using @link aio_lock @endlink first.
+ *
+ * @ingroup File-IO
+ *
+ * @param aio Handle to the file.
+ *
+ * @return Number of queued bytes.
+ */
+unsigned aio_pending_bytes(ASYNCIO *aio);
+
+/**
  * Checks whether errors have occurred during the asynchronous writing.
  *
  * Call this function regularly to see if there are errors. Call this

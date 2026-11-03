@@ -227,25 +227,96 @@ std::unique_ptr<ILogger> log_logger_default()
 
 class CLoggerAsync : public ILogger
 {
+	// Upper bound for the in-memory write queue. A stalled disk must not grow
+	// the process without limit; whole messages are dropped when the queue is
+	// full and the number of dropped messages is reported afterwards.
+	static constexpr unsigned MAX_QUEUED_BYTES = 1024 * 1024;
+	// Space reserved for the truncation/dropped-messages notices.
+	static constexpr unsigned NOTICE_RESERVE = 192;
+
 	ASYNCIO *m_pAio;
 	bool m_AnsiTruecolor;
 	bool m_Close;
+	uint64_t m_MaxBytes;
+	uint64_t m_BytesSubmitted;
+	unsigned m_DroppedMessages;
+	bool m_TruncationReported;
+
+	void WriteNotice(const char *pNotice)
+	{
+		const unsigned Length = str_length(pNotice);
+		aio_write_unlocked(m_pAio, pNotice, Length);
+		aio_write_newline_unlocked(m_pAio);
+		m_BytesSubmitted += Length + 1;
+	}
 
 public:
-	CLoggerAsync(IOHANDLE File, bool AnsiTruecolor, bool Close) :
+	CLoggerAsync(IOHANDLE File, bool AnsiTruecolor, bool Close, uint64_t MaxBytes = 0) :
 		m_pAio(aio_new(File)),
 		m_AnsiTruecolor(AnsiTruecolor),
-		m_Close(Close)
+		m_Close(Close),
+		m_MaxBytes(MaxBytes),
+		m_BytesSubmitted(0),
+		m_DroppedMessages(0),
+		m_TruncationReported(false)
 	{
 	}
 	void Log(const CLogMessage *pMessage) override
 	{
-		if(m_Filter.Filters(pMessage))
+		if(!m_pAio || m_Filter.Filters(pMessage))
 		{
 			return;
 		}
+
+		const bool Ansi = m_AnsiTruecolor && pMessage->m_HaveColor;
+		// Upper bound of one complete record including ANSI prefix, reset and newline.
+		const uint64_t Needed = (uint64_t)pMessage->m_LineLength + (Ansi ? 32 + 4 : 0) + 1;
+
 		aio_lock(m_pAio);
-		if(m_AnsiTruecolor && pMessage->m_HaveColor)
+
+		if(m_TruncationReported)
+		{
+			aio_unlock(m_pAio);
+			return;
+		}
+
+		// Stop appending once the configured file size is reached. The check
+		// happens before writing, so the file cannot grow past the limit by a
+		// whole record.
+		if(m_MaxBytes != 0 && m_BytesSubmitted + Needed + NOTICE_RESERVE > m_MaxBytes)
+		{
+			char aNotice[NOTICE_RESERVE];
+			str_format(aNotice, sizeof(aNotice),
+				"log file reached its %llu MiB size limit; further output is suppressed",
+				(unsigned long long)(m_MaxBytes / (1024 * 1024)));
+			if(aio_pending_bytes(m_pAio) + str_length(aNotice) + 1 < MAX_QUEUED_BYTES)
+				WriteNotice(aNotice);
+			m_TruncationReported = true;
+			aio_unlock(m_pAio);
+			return;
+		}
+
+		if(aio_pending_bytes(m_pAio) + (unsigned)Needed >= MAX_QUEUED_BYTES)
+		{
+			m_DroppedMessages++;
+			aio_unlock(m_pAio);
+			return;
+		}
+
+		if(m_DroppedMessages > 0)
+		{
+			char aNotice[NOTICE_RESERVE];
+			str_format(aNotice, sizeof(aNotice),
+				"%u log messages were dropped because the log file could not keep up",
+				m_DroppedMessages);
+			if(aio_pending_bytes(m_pAio) + str_length(aNotice) + 1 < MAX_QUEUED_BYTES)
+			{
+				WriteNotice(aNotice);
+				m_DroppedMessages = 0;
+			}
+		}
+
+		if(Ansi)
 		{
 			// https://en.wikipedia.org/w/index.php?title=ANSI_escape_code&oldid=1077146479#24-bit
 			char aAnsi[32];
@@ -255,18 +326,24 @@ public:
 				pMessage->m_Color.g,
 				pMessage->m_Color.b);
 			aio_write_unlocked(m_pAio, aAnsi, str_length(aAnsi));
+			m_BytesSubmitted += str_length(aAnsi);
 		}
 		aio_write_unlocked(m_pAio, pMessage->m_aLine, pMessage->m_LineLength);
-		if(m_AnsiTruecolor && pMessage->m_HaveColor)
+		m_BytesSubmitted += pMessage->m_LineLength;
+		if(Ansi)
 		{
 			const char aResetColor[] = "\x1b[0m";
 			aio_write_unlocked(m_pAio, aResetColor, str_length(aResetColor)); // reset
+			m_BytesSubmitted += str_length(aResetColor);
 		}
 		aio_write_newline_unlocked(m_pAio);
+		m_BytesSubmitted += 1;
 		aio_unlock(m_pAio);
 	}
 	~CLoggerAsync() override
 	{
+		if(!m_pAio)
+			return;
 		if(m_Close)
 		{
 			aio_close(m_pAio);
@@ -276,6 +353,8 @@ public:
 	}
 	void GlobalFinish() override
 	{
+		if(!m_pAio)
+			return;
 		if(m_Close)
 		{
 			aio_close(m_pAio);
@@ -287,6 +366,11 @@ public:
 std::unique_ptr<ILogger> log_logger_file(IOHANDLE logfile)
 {
 	return std::make_unique<CLoggerAsync>(logfile, false, true);
+}
+
+std::unique_ptr<ILogger> log_logger_file_limited(IOHANDLE logfile, uint64_t MaxBytes)
+{
+	return std::make_unique<CLoggerAsync>(logfile, false, true, MaxBytes);
 }
 
 #if defined(CONF_FAMILY_WINDOWS)

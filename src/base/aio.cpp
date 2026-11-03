@@ -197,6 +197,11 @@ void aio_lock(ASYNCIO *aio) ACQUIRE(aio->lock)
 	aio->lock.lock();
 }
 
+unsigned aio_pending_bytes(ASYNCIO *aio)
+{
+	return buffer_len(aio);
+}
+
 void aio_unlock(ASYNCIO *aio) RELEASE(aio->lock)
 {
 	aio->lock.unlock();

@@ -52,6 +52,20 @@ MACRO_CONFIG_INT(TcNameplatePingCircle, tc_nameplate_ping_circle, 0, 0, 1, CFGFL
 MACRO_CONFIG_INT(TcNameplateCountry, tc_nameplate_country, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Shows the country flag in the nameplate")
 MACRO_CONFIG_INT(TcNameplateSkins, tc_nameplate_skins, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Shows skin names in nameplates, good for finding missing skins")
 
+// Animated gradients for player text, skins and general text.
+MACRO_CONFIG_INT(TcGradientName, tc_gradient_name, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Animate player names with a gradient")
+MACRO_CONFIG_INT(TcGradientClan, tc_gradient_clan, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Animate player clan names with a gradient")
+MACRO_CONFIG_INT(TcGradientSkin, tc_gradient_skin, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Animate player skins with a gradient")
+MACRO_CONFIG_INT(TcGradientEverything, tc_gradient_everything, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Apply the gradient to text without an explicit color")
+MACRO_CONFIG_INT(TcGradientMode, tc_gradient_mode, 0, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Gradient mode (0 = skin, 1 = custom, 2 = rainbow)")
+MACRO_CONFIG_INT(TcGradientTarget, tc_gradient_target, 2, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Gradient target (0 = own players, 1 = other players, 2 = all players)")
+MACRO_CONFIG_INT(TcGradientAnimateSpeed, tc_gradient_animate_speed, 35, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Gradient animation speed (%)")
+MACRO_CONFIG_INT(TcGradientColorCount, tc_gradient_color_count, 2, 2, 4, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Number of custom gradient colors")
+MACRO_CONFIG_COL(TcGradientColor1, tc_gradient_color1, 0xFF0000FF, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_COLALPHA, "Custom gradient color 1")
+MACRO_CONFIG_COL(TcGradientColor2, tc_gradient_color2, 0xFFEBA6BF, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_COLALPHA, "Custom gradient color 2")
+MACRO_CONFIG_COL(TcGradientColor3, tc_gradient_color3, 0xFFD4BFA6, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_COLALPHA, "Custom gradient color 3")
+MACRO_CONFIG_COL(TcGradientColor4, tc_gradient_color4, 0xFFEBD99E, CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_COLALPHA, "Custom gradient color 4")
+
 MACRO_CONFIG_INT(TcFakeCtfFlags, tc_fake_ctf_flags, 0, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Shows fake CTF flags on people (0 = off, 1 = red, 2 = blue)")
 
 MACRO_CONFIG_INT(TcLimitMouseToScreen, tc_limit_mouse_to_screen, 0, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Limit mouse to screen boundaries")
@@ -387,6 +401,8 @@ MACRO_CONFIG_INT(MeMuteWhisper, me_mute_whisper, 0, 0, 1, CFGFLAG_CLIENT | CFGFL
 MACRO_CONFIG_INT(MeMuteSystemChat, me_mute_system_chat, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: hide system/server chat lines")
 MACRO_CONFIG_INT(MeMuteKillFeed, me_mute_kill_feed, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: hide kill feed messages")
 MACRO_CONFIG_INT(MeMuteFinishFeed, me_mute_finish_feed, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: hide race finish messages")
+// ME page: TClient 企鹅徽标（ddnet-custom-clients 皮肤颜色法，发送与显示一体）
+MACRO_CONFIG_INT(MeClientBadge, me_client_badge, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: show the TClient penguin next to TClient players on the scoreboard (also announces that you use TClient)")
 MACRO_CONFIG_INT(TcIslandOffsetX, tc_island_offset_x, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island horizontal offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandOffsetY, tc_island_offset_y, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island vertical offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandTransparent, tc_island_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode (no black capsule, outlined text)")
@@ -406,14 +422,16 @@ MACRO_CONFIG_INT(TcFontSize, tc_font_size, 100, 50, 200, CFGFLAG_CLIENT | CFGFLA
 MACRO_CONFIG_INT(TcUiScale, tc_ui_scale, 100, 50, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "User interface scale in percent (menus, popups, browser)")
 MACRO_CONFIG_INT(TcPingwheelVolume, tc_pingwheel_volume, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal sound volume (%)")
 MACRO_CONFIG_INT(TcPingwheelSoundRange, tc_pingwheel_sound_range, 600, 0, 10000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel sound audible range in world units (0 = global, no falloff)")
-MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel fallback channel (no relay): 1 = emoticons (visible to all, only TClient decodes), 0 = local only")
+MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "DEPRECATED: emoticon fallback channel removed, signals always use the relay channel")
 MACRO_CONFIG_INT(TcRelay, tc_relay, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal relay: send/receive pings via the TClient signal server (works while spectating, invisible to chat)")
 MACRO_CONFIG_INT(TcRelayP2p, tc_relay_p2p, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Relay P2P direct send (off = all pings go through the signal server so everyone with the client sees them)")
 MACRO_CONFIG_STR(TcRelayAddr, tc_relay_addr, 64, "8.163.48.23:8305", CFGFLAG_CLIENT | CFGFLAG_SAVE, "TClient signal server address (ip:port, udp)")
-MACRO_CONFIG_INT(TcPingwheelEmoteMs, tc_pingwheel_emote_ms, 100, 100, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Emoticon channel send interval in ms (must be >= server sv_emoticon_ms_delay, else frames get dropped)")
+MACRO_CONFIG_INT(TcPingwheelEmoteMs, tc_pingwheel_emote_ms, 100, 100, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "DEPRECATED: emoticon fallback channel removed")
 // 玩家状态标记：别人打开设置菜单时，在他头顶画一个齿轮。
 // 数据来自原版协议的 PLAYERFLAG_IN_MENU（服务器广播），对所有玩家生效，不依赖信令。
 MACRO_CONFIG_INT(TcShowSettingsGear, tc_show_settings_gear, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show a gear icon above players who have the settings menu open (uses the vanilla PLAYERFLAG_IN_MENU, works for all players)")
 MACRO_CONFIG_INT(TcTranslateRecentCount, tc_translate_recent_count, 5, 1, 16, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How many recent non-Chinese chat lines the translate-recent bind translates")
 MACRO_CONFIG_INT(TcScoreboardMedia, tc_scoreboard_media, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show music controls on the left of the scoreboard")
+// 控制台(F1)日志分类筛选掩码：SYSTEM|PLAYER|COMMAND|BINDS 位标志，15=全显
+MACRO_CONFIG_INT(TcConsoleFilterMask, tc_console_filter_mask, 15, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Local console log category filter mask (bit flags: 1=system 2=players 4=commands 8=binds)")
 MACRO_CONFIG_INT(TcProcessPriority, tc_process_priority, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Process priority class (0 = normal, 1 = above normal, 2 = high; keeps the game smooth when background apps spike the CPU; restart to apply)")

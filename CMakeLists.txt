@@ -2904,9 +2904,16 @@ if(CLIENT)
     components/tclient/bindwheel.cpp
     components/tclient/bindwheel.h
     components/tclient/colored_parts.h
+    components/tclient/client_badge.cpp
+    components/tclient/client_badge.h
+    components/tclient/console_log_filter.h
     components/tclient/custom_communities.cpp
     components/tclient/custom_communities.h
     components/tclient/data_version.h
+    components/tclient/gradient.cpp
+    components/tclient/gradient.h
+    components/tclient/gradient_math.cpp
+    components/tclient/gradient_math.h
     components/tclient/island_music.cpp
     components/tclient/island_music.h
     components/tclient/lyric_parser.cpp
@@ -3731,6 +3738,8 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     snapshot_test.cpp
     str_test.cpp
     swap_endian_test.cpp
+    tclient_console_filter_test.cpp
+    tclient_gradient_test.cpp
     teehistorian_test.cpp
     test.cpp
     test.h
@@ -3756,6 +3765,10 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     src/engine/client/sqlite.cpp
     src/game/client/components/censor.cpp
     src/game/client/components/censor.h
+    src/game/client/components/tclient/gradient_math.cpp
+    src/game/client/components/tclient/gradient_math.h
+    src/game/client/skin.cpp
+    src/game/client/skin.h
     # tidy-alphabetical-end
   )
 

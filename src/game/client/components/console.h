@@ -9,6 +9,7 @@
 #include <engine/shared/ringbuffer.h>
 
 #include <game/client/component.h>
+#include <game/client/components/tclient/console_log_filter.h>
 #include <game/client/lineinput.h>
 #include <game/client/ui.h>
 
@@ -33,6 +34,7 @@ class CGameConsole : public CComponent
 			float m_YOffset;
 			int m_LineCount;
 			ColorRGBA m_PrintColor;
+			uint8_t m_LogCategory; // TClient: 分类筛选（console_log_filter.h）
 			size_t m_Length;
 			char m_aText[1];
 		};
@@ -114,7 +116,11 @@ class CGameConsole : public CComponent
 		void ExecuteLine(const char *pLine);
 
 		bool OnInput(const IInput::CEvent &Event);
-		void PrintLine(const char *pLine, int Len, ColorRGBA PrintColor) REQUIRES(!m_BacklogPendingLock);
+		void PrintLine(const char *pLine, int Len, ColorRGBA PrintColor, int LogCategory = TC_CONSOLE_LOG_CATEGORY_SYSTEM) REQUIRES(!m_BacklogPendingLock);
+		// TClient: 控制台日志分类筛选（全部/玩家/系统/命令/绑定）
+		static constexpr int LOG_FILTER_BUTTON_COUNT = 5;
+		int m_LogFilterMask = TC_CONSOLE_LOG_CATEGORY_ALL;
+		void SetLogFilterMask(int Mask);
 		int GetLinesToScroll(int Direction, int LinesToScroll);
 		void ScrollToCenter(int StartLine, int EndLine);
 		void Dump() REQUIRES(!m_BacklogPendingLock);
@@ -168,6 +174,8 @@ class CGameConsole : public CComponent
 	bool m_ButtonPressed = false;
 
 	bool DoButton(const CUIRect &Rect, const char *pIcon, vec2 MousePosition, bool Released);
+	// TClient: 文字版顶栏按钮（与 DoButton 同一套按压状态机，避免触发文本选择）
+	bool DoFilterButton(const CUIRect &Rect, const char *pText, bool Active, vec2 MousePosition, bool Released);
 
 	static constexpr ColorRGBA ms_SearchHighlightColor = ColorRGBA(1.0f, 0.0f, 0.0f, 1.0f);
 	static constexpr ColorRGBA ms_SearchSelectedColor = ColorRGBA(1.0f, 1.0f, 0.0f, 1.0f);
@@ -186,6 +194,7 @@ class CGameConsole : public CComponent
 	static void ConConsolePageTop(IConsole::IResult *pResult, void *pUserData);
 	static void ConConsolePageBottom(IConsole::IResult *pResult, void *pUserData);
 	static void ConchainConsoleOutputLevel(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
+	static void ConchainTcConsoleFilterMask(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData); // TClient
 
 public:
 	enum
@@ -199,7 +208,7 @@ public:
 	~CGameConsole() override;
 	int Sizeof() const override { return sizeof(*this); }
 
-	void PrintLine(int Type, const char *pLine);
+	void PrintLine(int Type, const char *pLine, int LogCategory = TC_CONSOLE_LOG_CATEGORY_SYSTEM);
 	void RequireUsername(bool UsernameReq);
 
 	void OnStateChange(int NewState, int OldState) override;

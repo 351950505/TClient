@@ -20,6 +20,7 @@
 
 #include <game/client/animstate.h>
 #include <game/client/components/scoreboard.h>
+#include <game/client/components/tclient/gradient.h>
 #include <game/client/gameclient.h>
 #include <game/client/prediction/entities/character.h>
 #include <game/layers.h>
@@ -194,6 +195,18 @@ void CHud::RenderScoreHud()
 
 		const float ScoreSingleBoxHeight = 18.0f;
 
+		const auto RenderGradientPlayerName = [&](int ClientId, const char *pName, vec2 Position, float FontSize) {
+			if(ClientId < 0 || ClientId >= MAX_CLIENTS || !g_Config.m_TcGradientName || !CTClientGradient::AppliesTo(ClientId, GameClient()))
+				return false;
+			CTextCursor Cursor;
+			Cursor.SetPosition(Position);
+			Cursor.m_FontSize = FontSize;
+			const float Phase = CTClientGradient::AnimatePhase(Client()->GlobalTime());
+			Cursor.m_vColorSplits = CTClientGradient::BuildAnimatedTextSplits(pName, ClientId, GameClient(), Phase);
+			TextRender()->TextEx(&Cursor, pName);
+			return true;
+		};
+
 		bool ForceScoreInfoInit = !m_aScoreInfo[0].m_Initialized || !m_aScoreInfo[1].m_Initialized;
 		m_aScoreInfo[0].m_Initialized = m_aScoreInfo[1].m_Initialized = true;
 
@@ -277,23 +290,28 @@ void CHud::RenderScoreHud()
 						char aNameBuf[MAX_NAME_LENGTH];
 						GameClient()->StreamerName(Id, aNameBuf, sizeof(aNameBuf));
 						const char *pName = aNameBuf;
-						if(str_comp(pName, m_aScoreInfo[t].m_aPlayerNameText) != 0 || RecreateRect)
+						const float NameWidth = TextRender()->TextWidth(8.0f, pName, -1, -1.0f);
+						const vec2 NamePosition(std::min(m_Width - NameWidth - 1.0f, m_Width - ScoreWidthMax - ImageSize - 2 * Split), StartY + (t + 1) * 20.0f - 2.0f);
+						if(RenderGradientPlayerName(Id, pName, NamePosition, 8.0f))
 						{
 							str_copy(m_aScoreInfo[t].m_aPlayerNameText, pName);
-
-							float w = TextRender()->TextWidth(8.0f, pName, -1, -1.0f);
-
-							CTextCursor Cursor;
-							Cursor.SetPosition(vec2(std::min(m_Width - w - 1.0f, m_Width - ScoreWidthMax - ImageSize - 2 * Split), StartY + (t + 1) * 20.0f - 2.0f));
-							Cursor.m_FontSize = 8.0f;
-							TextRender()->RecreateTextContainer(m_aScoreInfo[t].m_OptionalNameTextContainerIndex, &Cursor, pName);
 						}
-
-						if(m_aScoreInfo[t].m_OptionalNameTextContainerIndex.Valid())
+						else
 						{
-							ColorRGBA TColor(1.f, 1.f, 1.f, 1.f);
-							ColorRGBA TOutlineColor(0.f, 0.f, 0.f, 0.3f);
-							TextRender()->RenderTextContainer(m_aScoreInfo[t].m_OptionalNameTextContainerIndex, TColor, TOutlineColor);
+							if(str_comp(pName, m_aScoreInfo[t].m_aPlayerNameText) != 0 || RecreateRect)
+							{
+								str_copy(m_aScoreInfo[t].m_aPlayerNameText, pName);
+								CTextCursor Cursor;
+								Cursor.SetPosition(NamePosition);
+								Cursor.m_FontSize = 8.0f;
+								TextRender()->RecreateTextContainer(m_aScoreInfo[t].m_OptionalNameTextContainerIndex, &Cursor, pName);
+							}
+							if(m_aScoreInfo[t].m_OptionalNameTextContainerIndex.Valid())
+							{
+								const ColorRGBA TColor(1.f, 1.f, 1.f, 1.f);
+								const ColorRGBA TOutlineColor(0.f, 0.f, 0.f, 0.3f);
+								TextRender()->RenderTextContainer(m_aScoreInfo[t].m_OptionalNameTextContainerIndex, TColor, TOutlineColor);
+							}
 						}
 
 						// draw tee of the flag holder
@@ -462,21 +480,27 @@ void CHud::RenderScoreHud()
 						char aNameBuf[MAX_NAME_LENGTH];
 						GameClient()->StreamerName(Id, aNameBuf, sizeof(aNameBuf));
 						const char *pName = aNameBuf;
-						if(RecreateRect)
+						const vec2 NamePosition(std::min(m_Width - TextRender()->TextWidth(8.0f, pName) - 1.0f, m_Width - ScoreWidthMax - ImageSize - 2 * Split - PosSize), StartY + (t + 1) * 20.0f - 2.0f);
+						if(RenderGradientPlayerName(Id, pName, NamePosition, 8.0f))
 						{
 							str_copy(m_aScoreInfo[t].m_aPlayerNameText, pName);
-
-							CTextCursor Cursor;
-							Cursor.SetPosition(vec2(std::min(m_Width - TextRender()->TextWidth(8.0f, pName) - 1.0f, m_Width - ScoreWidthMax - ImageSize - 2 * Split - PosSize), StartY + (t + 1) * 20.0f - 2.0f));
-							Cursor.m_FontSize = 8.0f;
-							TextRender()->RecreateTextContainer(m_aScoreInfo[t].m_OptionalNameTextContainerIndex, &Cursor, pName);
 						}
-
-						if(m_aScoreInfo[t].m_OptionalNameTextContainerIndex.Valid())
+						else
 						{
-							ColorRGBA TColor(1.f, 1.f, 1.f, 1.f);
-							ColorRGBA TOutlineColor(0.f, 0.f, 0.f, 0.3f);
-							TextRender()->RenderTextContainer(m_aScoreInfo[t].m_OptionalNameTextContainerIndex, TColor, TOutlineColor);
+							if(RecreateRect)
+							{
+								str_copy(m_aScoreInfo[t].m_aPlayerNameText, pName);
+								CTextCursor Cursor;
+								Cursor.SetPosition(NamePosition);
+								Cursor.m_FontSize = 8.0f;
+								TextRender()->RecreateTextContainer(m_aScoreInfo[t].m_OptionalNameTextContainerIndex, &Cursor, pName);
+							}
+							if(m_aScoreInfo[t].m_OptionalNameTextContainerIndex.Valid())
+							{
+								const ColorRGBA TColor(1.f, 1.f, 1.f, 1.f);
+								const ColorRGBA TOutlineColor(0.f, 0.f, 0.f, 0.3f);
+								TextRender()->RenderTextContainer(m_aScoreInfo[t].m_OptionalNameTextContainerIndex, TColor, TOutlineColor);
+							}
 						}
 
 						// draw tee

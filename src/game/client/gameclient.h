@@ -71,6 +71,8 @@
 #include "components/tclient/bindchat.h"
 #include "components/tclient/bindwheel.h"
 #include "components/tclient/custom_communities.h"
+#include "components/tclient/client_badge.h"
+#include "components/tclient/gradient.h"
 #include "components/tclient/mod.h"
 #include "components/tclient/moving_tiles.h"
 #include "components/tclient/mumble.h"
@@ -239,6 +241,8 @@ public:
 	CPlayerStatus m_PlayerStatus; // TClient
 	CBgDraw m_BgDraw;
 	CTClient m_TClient;
+	CClientBadge m_ClientBadge; // TClient: 记分板企鹅徽标（ddnet-custom-clients 皮肤颜色法）
+	CTClientGradient m_Gradient;
 	CTrails m_Trails;
 	CTranslate m_Translate;
 	CPet m_Pet;

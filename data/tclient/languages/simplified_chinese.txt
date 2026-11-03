@@ -1171,12 +1171,6 @@ Quick zoom
 Sound audible range (0 = whole map)
 == 音效可听距离（0 = 全图可听）
 
-Send signals via emoticons (server needs low emoticon delay)
-== 用表情发送信号（间隔需不低于服务器表情冷却）
-
-Emoticon interval (>= server emoticon delay)
-== 表情发送间隔（毫秒，不低于服务器表情冷却）
-
 Translate recent chat
 == 一键翻译最近聊天
 
@@ -1189,8 +1183,8 @@ How many recent messages
 Pinging too fast, %.0f s until you can ping again
 == 信号发送过于频繁，还剩 %.0f 秒才能再次发送
 
-Max %d signals per 10 s, sending blocked for %.0f s
-== 10 秒内最多发送 %d 个信号，已限制发送 %.0f 秒
+Max %d signals per %d s, sending blocked for %.0f s
+== %d 秒内最多发送 %d 个信号，超限禁发 %.0f 秒
 
 Capsule top color
 == 胶囊渐变起点色
@@ -1569,3 +1563,90 @@ Duplicate-send rescue estimate: %lld
 
 Duplicate-send rescue estimate: none yet
 == 双发补救总数（估算）：暂无
+
+Gradient
+== 渐变
+
+Gradient settings
+== 渐变设置
+
+Nickname gradient
+== 昵称渐变
+
+Clan gradient
+== 战队渐变
+
+Skin gradient
+== 皮肤渐变
+
+All text gradient
+== 全部文字渐变
+
+Animation speed
+== 动画速度
+
+Color mode
+== 颜色模式
+
+Skin colors
+== 皮肤配色
+
+Custom
+== 自定义
+
+Apply to
+== 应用到
+
+All
+== 全部
+
+Color count
+== 颜色数量
+
+Color 1
+== 颜色 1
+
+Color 2
+== 颜色 2
+
+Color 3
+== 颜色 3
+
+Color 4
+== 颜色 4
+
+Reset gradient settings
+== 重置渐变设置
+
+Preview
+== 预览
+
+Gradient nickname preview
+== 渐变昵称预览
+
+Gradient clan preview
+== 渐变战队预览
+
+All text preview
+== 全部文字预览
+
+Player target only affects nicknames, clans and skins. All text gradient is global.
+== 玩家范围只作用于昵称、战队名和皮肤；全部文字渐变为全局效果。
+
+All logs
+== 全部
+
+Client badge
+== 客户端标识
+
+Show a penguin next to TClient players on the scoreboard (also announces that you use TClient)
+== 在记分板上给 TClient 玩家名字前显示企鹅标识（同时向同服玩家广播你使用 TClient）
+
+System
+== 系统
+
+Commands
+== 命令
+
+Binds
+== 绑定

@@ -167,6 +167,8 @@ public:
 	void SetPosition(vec2 Position);
 };
 
+using FTextColorSplitCallback = void (*)(CTextCursor *pCursor, const char *pText, int Length, void *pUserData);
+
 struct STextContainerUsages
 {
 	int m_Dummy = 0;
@@ -204,6 +206,7 @@ public:
 
 	virtual void SetRenderFlags(unsigned Flags) = 0;
 	virtual unsigned GetRenderFlags() const = 0;
+	virtual void SetTextColorSplitCallback(FTextColorSplitCallback pfnCallback, void *pUserData) = 0;
 
 	ColorRGBA DefaultTextColor() const { return ColorRGBA(1, 1, 1, 1); }
 	ColorRGBA DefaultTextOutlineColor() const { return ColorRGBA(0, 0, 0, 0.3f); }

@@ -148,6 +148,8 @@ void CGameClient::OnConsoleInit()
 					      &m_Translate, // TClient
 					      &m_Ghost,
 					      &m_TClient, // TClient (Must be before chat and players)
+					      &m_ClientBadge, // TClient: 记分板企鹅徽标（必须注册才能拿到接口）
+					      &m_Gradient, // TClient: animated text and skin gradients
 					      &m_Players,
 					      &m_MovingTilesBackground, // TClient
 					      &m_MapLayersForeground,
@@ -1889,6 +1891,8 @@ void CGameClient::OnNewSnapshot(bool DummySwapped)
 					pClient->m_UseCustomColor = pInfo->m_UseCustomColor;
 					pClient->m_ColorBody = pInfo->m_ColorBody;
 					pClient->m_ColorFeet = pInfo->m_ColorFeet;
+					// TClient: ddnet-custom-clients 皮肤颜色法——检测 alpha 字节对并剥掉
+					m_ClientBadge.DetectAndStrip(ClientId, pClient->m_ColorBody, pClient->m_ColorFeet);
 				}
 			}
 			else if(Item.m_Type == NETOBJTYPE_PLAYERINFO)
@@ -3479,6 +3483,7 @@ void CGameClient::CClientData::Reset()
 	m_UseCustomColor = 0;
 	m_ColorBody = 0;
 	m_ColorFeet = 0;
+	m_pGameClient->m_ClientBadge.Clear(m_ClientId); // TClient: 玩家离开清企鹅徽标标记
 
 	m_aName[0] = '\0';
 	m_aClan[0] = '\0';
@@ -3709,6 +3714,9 @@ void CGameClient::SendInfo(bool Start)
 		Msg.m_UseCustomColor = g_Config.m_ClPlayerUseCustomColor;
 		Msg.m_ColorBody = g_Config.m_ClPlayerColorBody;
 		Msg.m_ColorFeet = g_Config.m_ClPlayerColorFeet;
+		// TClient: ddnet-custom-clients 皮肤颜色法——alpha 字节承载客户端标识
+		if(g_Config.m_MeClientBadge)
+			TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
 		CMsgPacker Packer(&Msg);
 		Msg.Pack(&Packer);
 		Client()->SendMsg(IClient::CONN_MAIN, &Packer, MSGFLAG_VITAL | MSGFLAG_FLUSH);
@@ -3724,6 +3732,9 @@ void CGameClient::SendInfo(bool Start)
 		Msg.m_UseCustomColor = g_Config.m_ClPlayerUseCustomColor;
 		Msg.m_ColorBody = g_Config.m_ClPlayerColorBody;
 		Msg.m_ColorFeet = g_Config.m_ClPlayerColorFeet;
+		// TClient: ddnet-custom-clients 皮肤颜色法——alpha 字节承载客户端标识
+		if(g_Config.m_MeClientBadge)
+			TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
 		CMsgPacker Packer(&Msg);
 		Msg.Pack(&Packer);
 		Client()->SendMsg(IClient::CONN_MAIN, &Packer, MSGFLAG_VITAL);
@@ -3751,6 +3762,9 @@ void CGameClient::SendDummyInfo(bool Start)
 		Msg.m_UseCustomColor = g_Config.m_ClDummyUseCustomColor;
 		Msg.m_ColorBody = g_Config.m_ClDummyColorBody;
 		Msg.m_ColorFeet = g_Config.m_ClDummyColorFeet;
+		// TClient: ddnet-custom-clients 皮肤颜色法——alpha 字节承载客户端标识
+		if(g_Config.m_MeClientBadge)
+			TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
 		CMsgPacker Packer(&Msg);
 		Msg.Pack(&Packer);
 		Client()->SendMsg(IClient::CONN_DUMMY, &Packer, MSGFLAG_VITAL);
@@ -3766,6 +3780,9 @@ void CGameClient::SendDummyInfo(bool Start)
 		Msg.m_UseCustomColor = g_Config.m_ClDummyUseCustomColor;
 		Msg.m_ColorBody = g_Config.m_ClDummyColorBody;
 		Msg.m_ColorFeet = g_Config.m_ClDummyColorFeet;
+		// TClient: ddnet-custom-clients 皮肤颜色法——alpha 字节承载客户端标识
+		if(g_Config.m_MeClientBadge)
+			TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
 		CMsgPacker Packer(&Msg);
 		Msg.Pack(&Packer);
 		Client()->SendMsg(IClient::CONN_DUMMY, &Packer, MSGFLAG_VITAL);

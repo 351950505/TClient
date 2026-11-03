@@ -106,9 +106,9 @@ class CScoreboard : public CComponent
 	CCachedText m_HeadlineClan;
 	CCachedText m_HeadlinePing;
 
+public:
 	void ResetTexts();
 
-public:
 	CScoreboard();
 	int Sizeof() const override { return sizeof(*this); }
 	void OnConsoleInit() override;

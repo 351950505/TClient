@@ -1,13 +1,11 @@
 /* TClient: LoL 式地图信号轮盘。按住键出轮盘，选信号在准星世界坐标插地图标记。
-   发送通道（Ping() 内按可用性路由，信令优先）：
-   - 信令广播（首选，tc_relay）：经 TClient 信令服务转发给同服 TClient 玩家，
-     旁观/死亡也能发，游戏服聊天与表情零占用，原版玩家全程无感知。
-   - 表情通道（fallback，tc_pingwheel_emote）：帧头+9 个表情承载 signal+坐标，
-     间隔 tc_pingwheel_emote_ms（默认 60ms，需 >= 服务器 sv_emoticon_ms_delay，
-     否则第 2 个起被个人冷却丢弃），全服广播；帧发完后对比自己收到的回显数，
-     不足则提示被服务器冷却丢弃。对所有人可见（表情气泡+音效），只有 TClient 知道语义。
+   发送通道（全部走信令，表情发送通道已按用户要求移除）：
+   - 信令广播（tc_relay）：经 TClient 信令服务转发给同服 TClient 玩家，
+     旁观/死亡也能发，游戏服聊天与表情零占用，原版玩家全程无感知；
+     内部 P2P 直连优先，未打通的成员走信令中转；信令不可用则仅本地显示。
    - 聊天发送已移除；聊天接收兼容旧格式（⟨P:id:x:y:名⟩ 与 ⟨B:...），
      收到后同样产出地图标记与聊天图标行。
+   - 表情接收保留：兼容旧版本客户端发出的表情帧（只收不发）。
    0.6 协议下客户端不能直连、服务器只广播白名单消息，服务端零改动。
    图标：可放 data/tclient/pings/signal0.png ~ signal7.png（0=危险…7=等等）自定义，
    未提供则用内置绘制样式。注意：Riot 版权素材请勿打进公开分发包。 */
@@ -78,26 +76,18 @@ private:
 	static void EncodeBinary(int Signal, int X, int Y, char (&aBuf)[24]);
 	static bool DecodeBinary(const char *pMessage, int *pSignal, int *pX, int *pY);
 
-	// 表情通道：帧头 + 9 个 4bit 表情承载 signal(3)|x(16)|y(16)（左移 1 位补 36bit）。
-	// 每个表情间隔 tc_pingwheel_emote_ms 毫秒（必须 >= 服务器 sv_emoticon_ms_delay，
-	// 否则第 2 个起被个人冷却直接丢弃）。帧发完后对比自己的回显数检测丢失。
-	std::vector<int> m_vEmoteQueue; // 待发表情序列
-	float m_LastEmoteSendTime = -1e9f;
+	// 表情接收（兼容旧版本客户端的表情帧，只收不发）：
+	// 帧头 + 9 个 4bit 表情承载 signal(3)|x(16)|y(16)（左移 1 位补 36bit）。
 	int m_EmoteRecvCount = -1;          // -1 = 等帧头
 	uint64_t m_EmoteRecvPayload = 0;
 	float m_EmoteRecvStart = -1e9f;
-	int m_EmoteFrameSent = 0;           // 当前帧已发送数（10）
-	int m_EmoteEchoSeen = 0;            // 帧发送前的自回显计数基准
-	int m_EmoteEchoTotal = 0;           // 自回显累计计数
-	float m_EmoteFrameDoneTime = -1e9f; // 帧发完时刻（丢失检测用）
-	void EmotePing(int Signal, int X, int Y);
-	void PumpEmoteQueue();
 
-	// 发送限速：滑动窗口内最多 PING_RATE_COUNT 次，超限后禁发 PING_RATE_BAN 秒。
+	// 发送限速：滑动窗口 PING_RATE_WINDOW 秒内最多 PING_RATE_COUNT 次，
+	// 超限后禁发 PING_RATE_BAN 秒。
 	// 客户端侧统一做（P2P 直连不经过信令服务器，服务端限速管不到）。
-	static constexpr int PING_RATE_COUNT = 10;
-	static constexpr float PING_RATE_WINDOW = 10.0f;
-	static constexpr float PING_RATE_BAN = 30.0f;
+	static constexpr int PING_RATE_COUNT = 5;
+	static constexpr float PING_RATE_WINDOW = 5.0f;
+	static constexpr float PING_RATE_BAN = 60.0f;
 	std::vector<float> m_vPingTimes; // 窗口内已发送时刻
 	float m_PingBanUntil = -1e9f;    // 禁发截止时刻
 	bool PingRateLimited();          // true = 本次被拦（已 ECHO 提示）

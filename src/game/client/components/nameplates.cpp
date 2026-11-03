@@ -11,6 +11,7 @@
 #include <generated/client_data.h>
 
 #include <game/client/animstate.h>
+#include <game/client/components/tclient/gradient.h>
 #include <game/client/gameclient.h>
 #include <game/client/prediction/entities/character.h>
 
@@ -88,6 +89,7 @@ protected:
 	STextContainerIndex m_TextContainerIndex;
 	virtual bool UpdateNeeded(CGameClient &This, const CNamePlateData &Data) = 0;
 	virtual void UpdateText(CGameClient &This, const CNamePlateData &Data) = 0;
+	virtual bool SoftUpdate() const { return false; }
 	ColorRGBA m_Color = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
 	CNamePlatePartText(CGameClient &This) :
 		CNamePlatePart(This)
@@ -112,7 +114,8 @@ public:
 			// Create text at standard zoom
 			CScreenRect ScreenRect = This.Graphics()->GetScreen();
 			This.Graphics()->MapScreenToInterface(This.m_Camera.m_Center.x, This.m_Camera.m_Center.y);
-			This.TextRender()->DeleteTextContainer(m_TextContainerIndex);
+			if(!SoftUpdate())
+				This.TextRender()->DeleteTextContainer(m_TextContainerIndex);
 			UpdateText(This, Data);
 			This.Graphics()->MapScreen(ScreenRect);
 		}
@@ -344,6 +347,8 @@ class CNamePlatePartName : public CNamePlatePartText
 private:
 	char m_aText[std::max((size_t)MAX_NAME_LENGTH, (size_t)protocol7::MAX_NAME_ARRAY_SIZE)] = "";
 	float m_FontSize = -INFINITY;
+	bool m_Gradient = false;
+	int m_LastPhaseBucket = -1;
 
 protected:
 	bool UpdateNeeded(CGameClient &This, const CNamePlateData &Data) override
@@ -352,26 +357,69 @@ protected:
 		if(!m_Visible)
 			return false;
 		m_Color = Data.m_Color;
-		// TClient
-		if(g_Config.m_TcWarList)
+		const auto &WarData = This.m_WarList.GetWarData(Data.m_ClientId);
+		const bool HasWarColor = g_Config.m_TcWarList && (WarData.m_WarName || WarData.m_WarClan);
+		if(HasWarColor)
 		{
-			if(This.m_WarList.GetWarData(Data.m_ClientId).m_WarName)
+			if(WarData.m_WarName)
 				m_Color = This.m_WarList.GetNameplateColor(Data.m_ClientId).WithAlpha(Data.m_Color.a);
-			else if(This.m_WarList.GetWarData(Data.m_ClientId).m_WarClan)
+			else
 				m_Color = This.m_WarList.GetClanColor(Data.m_ClientId).WithAlpha(Data.m_Color.a);
 		}
-		return m_FontSize != Data.m_FontSize || str_comp(m_aText, Data.m_aName) != 0;
+
+		bool NeedsUpdate = m_FontSize != Data.m_FontSize || str_comp(m_aText, Data.m_aName) != 0;
+		const bool UseGradient = !HasWarColor && g_Config.m_TcGradientName && (!Data.m_InGame || CTClientGradient::AppliesTo(Data.m_ClientId, &This));
+		const int PhaseBucket = UseGradient ? CTClientGradient::PhaseBucket(CTClientGradient::AnimatePhase(This.Client()->GlobalTime())) : -1;
+		if(m_Gradient != UseGradient || m_LastPhaseBucket != PhaseBucket)
+			NeedsUpdate = true;
+		m_Gradient = UseGradient;
+		return NeedsUpdate;
 	}
+
+	bool SoftUpdate() const override { return m_Gradient; }
+
 	void UpdateText(CGameClient &This, const CNamePlateData &Data) override
 	{
 		m_FontSize = Data.m_FontSize;
 		str_copy(m_aText, Data.m_aName);
 		CTextCursor Cursor;
 		Cursor.m_FontSize = m_FontSize;
-		This.TextRender()->CreateOrAppendTextContainer(m_TextContainerIndex, &Cursor, m_aText);
+		if(m_Gradient)
+		{
+			const float Phase = CTClientGradient::AnimatePhase(This.Client()->GlobalTime());
+			m_LastPhaseBucket = CTClientGradient::PhaseBucket(Phase);
+			Cursor.m_vColorSplits = CTClientGradient::BuildAnimatedTextSplits(m_aText, Data.m_ClientId, &This, Phase);
+			const unsigned OldFlags = This.TextRender()->GetRenderFlags();
+			This.TextRender()->SetRenderFlags(OldFlags | TEXT_RENDER_FLAG_ONE_TIME_USE);
+			if(m_TextContainerIndex.Valid())
+				This.TextRender()->RecreateTextContainerSoft(m_TextContainerIndex, &Cursor, m_aText);
+			else
+				This.TextRender()->CreateOrAppendTextContainer(m_TextContainerIndex, &Cursor, m_aText);
+			This.TextRender()->SetRenderFlags(OldFlags);
+		}
+		else
+		{
+			m_LastPhaseBucket = -1;
+			This.TextRender()->CreateOrAppendTextContainer(m_TextContainerIndex, &Cursor, m_aText);
+		}
 	}
 
 public:
+	void Reset(CGameClient &This) override
+	{
+		CNamePlatePartText::Reset(This);
+		m_LastPhaseBucket = -1;
+	}
+
+	void Render(CGameClient &This, vec2 Pos) const override
+	{
+		if(!m_TextContainerIndex.Valid())
+			return;
+		const ColorRGBA Color = m_Gradient ? ColorRGBA(1.0f, 1.0f, 1.0f, m_Color.a) : m_Color;
+		const ColorRGBA OutlineColor(0.0f, 0.0f, 0.0f, 0.5f * m_Color.a);
+		This.TextRender()->RenderTextContainer(m_TextContainerIndex, Color, OutlineColor, Pos.x - Size().x / 2.0f, Pos.y - Size().y / 2.0f);
+	}
+
 	CNamePlatePartName(CGameClient &This) :
 		CNamePlatePartText(This) {}
 };
@@ -381,6 +429,8 @@ class CNamePlatePartClan : public CNamePlatePartText
 private:
 	char m_aText[std::max((size_t)MAX_CLAN_LENGTH, (size_t)protocol7::MAX_CLAN_ARRAY_SIZE)] = "";
 	float m_FontSize = -INFINITY;
+	bool m_Gradient = false;
+	int m_LastPhaseBucket = -1;
 
 protected:
 	bool UpdateNeeded(CGameClient &This, const CNamePlateData &Data) override
@@ -389,21 +439,63 @@ protected:
 		if(!m_Visible && Data.m_aClan[0] != '\0')
 			return false;
 		m_Color = Data.m_Color;
-		// TClient
-		if(This.m_WarList.GetWarData(Data.m_ClientId).m_WarClan)
+		const bool HasWarColor = g_Config.m_TcWarList && This.m_WarList.GetWarData(Data.m_ClientId).m_WarClan;
+		if(HasWarColor)
 			m_Color = This.m_WarList.GetClanColor(Data.m_ClientId).WithAlpha(Data.m_Color.a);
-		return m_FontSize != Data.m_FontSizeClan || str_comp(m_aText, Data.m_aClan) != 0;
+
+		bool NeedsUpdate = m_FontSize != Data.m_FontSizeClan || str_comp(m_aText, Data.m_aClan) != 0;
+		const bool UseGradient = !HasWarColor && g_Config.m_TcGradientClan && (!Data.m_InGame || CTClientGradient::AppliesTo(Data.m_ClientId, &This));
+		const int PhaseBucket = UseGradient ? CTClientGradient::PhaseBucket(CTClientGradient::AnimatePhase(This.Client()->GlobalTime())) : -1;
+		if(m_Gradient != UseGradient || m_LastPhaseBucket != PhaseBucket)
+			NeedsUpdate = true;
+		m_Gradient = UseGradient;
+		return NeedsUpdate;
 	}
+
+	bool SoftUpdate() const override { return m_Gradient; }
+
 	void UpdateText(CGameClient &This, const CNamePlateData &Data) override
 	{
 		m_FontSize = Data.m_FontSizeClan;
 		str_copy(m_aText, Data.m_aClan);
 		CTextCursor Cursor;
 		Cursor.m_FontSize = m_FontSize;
-		This.TextRender()->CreateOrAppendTextContainer(m_TextContainerIndex, &Cursor, m_aText);
+		if(m_Gradient)
+		{
+			const float Phase = CTClientGradient::AnimatePhase(This.Client()->GlobalTime());
+			m_LastPhaseBucket = CTClientGradient::PhaseBucket(Phase);
+			Cursor.m_vColorSplits = CTClientGradient::BuildAnimatedTextSplits(m_aText, Data.m_ClientId, &This, Phase);
+			const unsigned OldFlags = This.TextRender()->GetRenderFlags();
+			This.TextRender()->SetRenderFlags(OldFlags | TEXT_RENDER_FLAG_ONE_TIME_USE);
+			if(m_TextContainerIndex.Valid())
+				This.TextRender()->RecreateTextContainerSoft(m_TextContainerIndex, &Cursor, m_aText);
+			else
+				This.TextRender()->CreateOrAppendTextContainer(m_TextContainerIndex, &Cursor, m_aText);
+			This.TextRender()->SetRenderFlags(OldFlags);
+		}
+		else
+		{
+			m_LastPhaseBucket = -1;
+			This.TextRender()->CreateOrAppendTextContainer(m_TextContainerIndex, &Cursor, m_aText);
+		}
 	}
 
 public:
+	void Reset(CGameClient &This) override
+	{
+		CNamePlatePartText::Reset(This);
+		m_LastPhaseBucket = -1;
+	}
+
+	void Render(CGameClient &This, vec2 Pos) const override
+	{
+		if(!m_TextContainerIndex.Valid())
+			return;
+		const ColorRGBA Color = m_Gradient ? ColorRGBA(1.0f, 1.0f, 1.0f, m_Color.a) : m_Color;
+		const ColorRGBA OutlineColor(0.0f, 0.0f, 0.0f, 0.5f * m_Color.a);
+		This.TextRender()->RenderTextContainer(m_TextContainerIndex, Color, OutlineColor, Pos.x - Size().x / 2.0f, Pos.y - Size().y / 2.0f);
+	}
+
 	CNamePlatePartClan(CGameClient &This) :
 		CNamePlatePartText(This) {}
 };

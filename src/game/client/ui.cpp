@@ -16,6 +16,7 @@
 #include <engine/keys.h>
 #include <engine/shared/config.h>
 
+#include <game/client/components/tclient/gradient.h>
 #include <game/localization.h>
 
 #include <limits>
@@ -54,6 +55,7 @@ void CUIElement::SUIElementRect::Reset()
 	m_TextOutlineColor = ColorRGBA(-1, -1, -1, -1);
 	m_QuadColor = ColorRGBA(-1, -1, -1, -1);
 	m_ReadCursorGlyphCount = -1;
+	m_GradientPhaseBucket = -1;
 }
 
 void CUIElement::SUIElementRect::Draw(const CUIRect *pRect, ColorRGBA Color, int Corners, float Rounding)
@@ -842,6 +844,8 @@ void CUi::DoLabel(CUIElement::SUIElementRect &RectEl, const CUIRect *pRect, cons
 		Cursor.m_FontSize = Size;
 		Cursor.m_Flags |= Flags;
 	}
+	if(!LabelProps.m_vColorSplits.empty())
+		Cursor.m_vColorSplits = LabelProps.m_vColorSplits;
 	Cursor.m_LineWidth = LabelProps.m_MaxWidth;
 
 	RectEl.m_TextColor = TextRender()->GetTextColor();
@@ -859,11 +863,18 @@ void CUi::DoLabelStreamed(CUIElement::SUIElementRect &RectEl, const CUIRect *pRe
 	const int ReadCursorGlyphCount = pReadCursor == nullptr ? -1 : pReadCursor->m_GlyphCount;
 	bool NeedsRecreate = false;
 	bool ColorChanged = RectEl.m_TextColor != TextRender()->GetTextColor() || RectEl.m_TextOutlineColor != TextRender()->GetTextOutlineColor();
+	const bool HasExplicitColorSplits = !LabelProps.m_vColorSplits.empty() || (pReadCursor != nullptr && !pReadCursor->m_vColorSplits.empty());
+	// 空标签不参与逐桶重建，避免每帧空转。
+	int GradientPhaseBucket = -1;
+	if(g_Config.m_TcGradientEverything && pText[0] != '\0' && StrLen != 0 && !HasExplicitColorSplits)
+		GradientPhaseBucket = CTClientGradient::PhaseBucket(CTClientGradient::AnimatePhase(Client()->GlobalTime()));
+	if(RectEl.m_GradientPhaseBucket != GradientPhaseBucket)
+		NeedsRecreate = true;
 	if((!RectEl.m_UITextContainer.Valid() && pText[0] != '\0' && StrLen != 0) || RectEl.m_Width != pRect->w || RectEl.m_Height != pRect->h || ColorChanged || RectEl.m_ReadCursorGlyphCount != ReadCursorGlyphCount)
 	{
 		NeedsRecreate = true;
 	}
-	else
+	else if(!NeedsRecreate)
 	{
 		if(StrLen <= -1)
 		{
@@ -878,6 +889,7 @@ void CUi::DoLabelStreamed(CUIElement::SUIElementRect &RectEl, const CUIRect *pRe
 	}
 	RectEl.m_X = pRect->x;
 	RectEl.m_Y = pRect->y;
+	RectEl.m_GradientPhaseBucket = GradientPhaseBucket;
 	if(NeedsRecreate)
 	{
 		TextRender()->DeleteTextContainer(RectEl.m_UITextContainer);
@@ -1637,14 +1649,16 @@ void CUi::RenderProgressBar(CUIRect ProgressBar, float Progress)
 
 void CCachedText::Update(ITextRender *pTextRender, const char *pText, float FontSize, float LineWidth, int CursorFlags)
 {
-	if(m_FontSize == FontSize && m_LineWidth == LineWidth && m_CursorFlags == CursorFlags && m_Text == pText)
+	if(m_FontSize == FontSize && m_LineWidth == LineWidth && m_CursorFlags == CursorFlags && m_Text == pText && !m_Colored)
 		return;
 
 	// The render flags of a text container are fixed when it is created and depend on the
 	// line width, so only text and font size changes can reuse the existing container and
 	// upload the new quads into its buffer instead of allocating a new one.
-	const bool ReuseContainer = m_TextContainerIndex.Valid() && m_LineWidth == LineWidth && m_CursorFlags == CursorFlags;
+	const bool ReuseContainer = m_TextContainerIndex.Valid() && m_LineWidth == LineWidth && m_CursorFlags == CursorFlags && !m_Colored;
 
+	m_Colored = false;
+	m_ColorBucket = -1;
 	m_Text = pText;
 	m_FontSize = FontSize;
 	m_LineWidth = LineWidth;
@@ -1662,6 +1676,40 @@ void CCachedText::Update(ITextRender *pTextRender, const char *pText, float Font
 		pTextRender->RecreateTextContainerSoft(m_TextContainerIndex, &Cursor, m_Text.c_str());
 	else
 		pTextRender->RecreateTextContainer(m_TextContainerIndex, &Cursor, m_Text.c_str());
+	pTextRender->TextColor(OldColor);
+
+	m_BoundingBox = Cursor.BoundingBox();
+	m_MaxCharacterHeight = Cursor.m_MaxCharacterHeight;
+}
+
+void CCachedText::UpdateColored(ITextRender *pTextRender, const char *pText, float FontSize, const std::vector<STextColorSplit> &vColorSplits, int ColorBucket, float LineWidth, int CursorFlags)
+{
+	if(m_FontSize == FontSize && m_LineWidth == LineWidth && m_CursorFlags == CursorFlags && m_Text == pText && m_Colored && m_ColorBucket == ColorBucket)
+		return;
+
+	const bool ReuseContainer = m_TextContainerIndex.Valid() && m_LineWidth == LineWidth && m_CursorFlags == CursorFlags;
+	m_Text = pText;
+	m_FontSize = FontSize;
+	m_LineWidth = LineWidth;
+	m_CursorFlags = CursorFlags;
+	m_Colored = true;
+	m_ColorBucket = ColorBucket;
+
+	CTextCursor Cursor;
+	Cursor.m_FontSize = FontSize;
+	Cursor.m_LineWidth = LineWidth;
+	Cursor.m_Flags = CursorFlags;
+	Cursor.m_vColorSplits = vColorSplits;
+
+	const ColorRGBA OldColor = pTextRender->GetTextColor();
+	const unsigned OldFlags = pTextRender->GetRenderFlags();
+	pTextRender->TextColor(pTextRender->DefaultTextColor());
+	pTextRender->SetRenderFlags(OldFlags | TEXT_RENDER_FLAG_ONE_TIME_USE);
+	if(ReuseContainer)
+		pTextRender->RecreateTextContainerSoft(m_TextContainerIndex, &Cursor, m_Text.c_str());
+	else
+		pTextRender->RecreateTextContainer(m_TextContainerIndex, &Cursor, m_Text.c_str());
+	pTextRender->SetRenderFlags(OldFlags);
 	pTextRender->TextColor(OldColor);
 
 	m_BoundingBox = Cursor.BoundingBox();
@@ -1686,6 +1734,8 @@ void CCachedText::Reset(ITextRender *pTextRender)
 	m_CursorFlags = 0;
 	m_BoundingBox = {0.0f, 0.0f, 0.0f, 0.0f};
 	m_MaxCharacterHeight = 0.0f;
+	m_Colored = false;
+	m_ColorBucket = -1;
 }
 
 void CUi::RenderTime(CUIRect TimeRect, float FontSize, int Seconds, bool NotFinished, int Millis, bool TrueMilliseconds, CCachedText &SecondsText, CCachedText &MillisText, ColorRGBA Color) const

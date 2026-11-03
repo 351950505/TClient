@@ -995,6 +995,8 @@ class CTextRender : public IEngineTextRender
 	std::vector<SFontLanguageVariant> m_vVariants;
 
 	unsigned m_RenderFlags;
+	FTextColorSplitCallback m_pfnTextColorSplitCallback;
+	void *m_pTextColorSplitCallbackUserData;
 
 	ColorRGBA m_Color;
 	ColorRGBA m_OutlineColor;
@@ -1122,6 +1124,12 @@ class CTextRender : public IEngineTextRender
 		return m_RenderFlags;
 	}
 
+	void SetTextColorSplitCallback(FTextColorSplitCallback pfnCallback, void *pUserData) override
+	{
+		m_pfnTextColorSplitCallback = pfnCallback;
+		m_pTextColorSplitCallbackUserData = pUserData;
+	}
+
 public:
 	CTextRender()
 	{
@@ -1137,6 +1145,8 @@ public:
 		m_FTLibrary = nullptr;
 
 		m_RenderFlags = 0;
+		m_pfnTextColorSplitCallback = nullptr;
+		m_pTextColorSplitCallbackUserData = nullptr;
 		m_CursorRenderTime = time_get_nanoseconds();
 	}
 
@@ -1651,6 +1661,9 @@ public:
 			Length = str_length(pText);
 		else
 			Length = std::min(Length, str_length(pText));
+
+		if(m_pfnTextColorSplitCallback != nullptr && pCursor->m_vColorSplits.empty())
+			m_pfnTextColorSplitCallback(pCursor, pText, Length, m_pTextColorSplitCallbackUserData);
 
 		const char *pCurrent = pText;
 		const char *pEnd = pCurrent + Length;

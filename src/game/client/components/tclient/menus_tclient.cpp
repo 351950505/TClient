@@ -48,6 +48,7 @@ enum
 	TCLIENT_TAB_INFO,
 	TCLIENT_TAB_STATUSBAR,
 	TCLIENT_TAB_ASSETS,
+	TCLIENT_TAB_GRADIENT,
 	NUMBER_OF_TCLIENT_TABS
 };
 
@@ -451,7 +452,8 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 		"Ping",
 		TCLocalize("Info"),
 		TCLocalize("Statusbar"),
-		TCLocalize("Assets")};
+		TCLocalize("Assets"),
+		TCLocalize("Gradient")};
 
 	for(int Tab = 0; Tab < NUMBER_OF_TCLIENT_TABS; ++Tab)
 	{
@@ -483,6 +485,167 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 		RenderSettingsTClientStatusBar(MainView);
 	if(s_CurCustomTab == TCLIENT_TAB_ASSETS)
 		RenderSettingsTClientAssets(MainView);
+	if(s_CurCustomTab == TCLIENT_TAB_GRADIENT)
+		RenderSettingsTClientGradient(MainView);
+}
+
+void CMenus::RenderSettingsTClientGradient(CUIRect MainView)
+{
+	CUIRect LeftView, RightView, Button, Label;
+	MainView.Margin(Margin, &MainView);
+	MainView.VSplitMid(&LeftView, &RightView, MarginBetweenViews);
+
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Gradient settings"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcGradientName, TCLocalize("Nickname gradient"), &g_Config.m_TcGradientName, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcGradientClan, TCLocalize("Clan gradient"), &g_Config.m_TcGradientClan, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcGradientSkin, TCLocalize("Skin gradient"), &g_Config.m_TcGradientSkin, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcGradientEverything, TCLocalize("All text gradient"), &g_Config.m_TcGradientEverything, &LeftView, LineSize);
+
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	LeftView.HSplitTop(LineSize, &Button, &LeftView);
+	Ui()->DoScrollbarOption(&g_Config.m_TcGradientAnimateSpeed, &g_Config.m_TcGradientAnimateSpeed, &Button, TCLocalize("Animation speed"), 1, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+
+	{
+		static std::vector<CButtonContainer> s_vModeButtons = {{}, {}, {}};
+		int Value = g_Config.m_TcGradientMode;
+		if(DoLine_RadioMenu(LeftView, TCLocalize("Color mode"), s_vModeButtons,
+			   {TCLocalize("Skin colors"), TCLocalize("Custom"), TCLocalize("Rainbow")},
+			   {0, 1, 2}, Value))
+			g_Config.m_TcGradientMode = Value;
+	}
+
+	{
+		static std::vector<CButtonContainer> s_vTargetButtons = {{}, {}, {}};
+		int Value = g_Config.m_TcGradientTarget;
+		if(DoLine_RadioMenu(LeftView, TCLocalize("Apply to"), s_vTargetButtons,
+			   {TCLocalize("Own"), TCLocalize("Others"), TCLocalize("All")},
+			   {0, 1, 2}, Value))
+			g_Config.m_TcGradientTarget = Value;
+	}
+
+	if(g_Config.m_TcGradientMode == (int)ETClientGradientMode::CUSTOM)
+	{
+		static std::vector<CButtonContainer> s_vColorCountButtons = {{}, {}, {}};
+		int Value = g_Config.m_TcGradientColorCount;
+		if(DoLine_RadioMenu(LeftView, TCLocalize("Color count"), s_vColorCountButtons,
+			   {"2", "3", "4"}, {2, 3, 4}, Value))
+			g_Config.m_TcGradientColorCount = Value;
+
+		static CButtonContainer s_aColorResetButtons[4];
+		unsigned *apColors[] = {
+			&g_Config.m_TcGradientColor1,
+			&g_Config.m_TcGradientColor2,
+			&g_Config.m_TcGradientColor3,
+			&g_Config.m_TcGradientColor4};
+		const unsigned aDefaults[] = {
+			DefaultConfig::TcGradientColor1,
+			DefaultConfig::TcGradientColor2,
+			DefaultConfig::TcGradientColor3,
+			DefaultConfig::TcGradientColor4};
+		const char *apLabels[] = {
+			TCLocalize("Color 1"),
+			TCLocalize("Color 2"),
+			TCLocalize("Color 3"),
+			TCLocalize("Color 4")};
+		for(int i = 0; i < g_Config.m_TcGradientColorCount; ++i)
+		{
+			DoLine_ColorPicker(&s_aColorResetButtons[i], ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView,
+				apLabels[i], apColors[i], color_cast<ColorRGBA>(ColorHSLA(aDefaults[i], true)), false, nullptr, true);
+		}
+	}
+
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	LeftView.HSplitTop(LineSize, &Button, &LeftView);
+	static CButtonContainer s_ResetGradientButton;
+	if(DoButton_Menu(&s_ResetGradientButton, TCLocalize("Reset gradient settings"), 0, &Button))
+	{
+		g_Config.m_TcGradientName = DefaultConfig::TcGradientName;
+		g_Config.m_TcGradientClan = DefaultConfig::TcGradientClan;
+		g_Config.m_TcGradientSkin = DefaultConfig::TcGradientSkin;
+		g_Config.m_TcGradientEverything = DefaultConfig::TcGradientEverything;
+		g_Config.m_TcGradientMode = DefaultConfig::TcGradientMode;
+		g_Config.m_TcGradientTarget = DefaultConfig::TcGradientTarget;
+		g_Config.m_TcGradientAnimateSpeed = DefaultConfig::TcGradientAnimateSpeed;
+		g_Config.m_TcGradientColorCount = DefaultConfig::TcGradientColorCount;
+		g_Config.m_TcGradientColor1 = DefaultConfig::TcGradientColor1;
+		g_Config.m_TcGradientColor2 = DefaultConfig::TcGradientColor2;
+		g_Config.m_TcGradientColor3 = DefaultConfig::TcGradientColor3;
+		g_Config.m_TcGradientColor4 = DefaultConfig::TcGradientColor4;
+	}
+
+	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
+	Ui()->DoLabel(&Label, TCLocalize("Preview"), HeadlineFontSize, TEXTALIGN_ML);
+	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
+	RightView.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f), IGraphics::CORNER_ALL, 10.0f);
+	RightView.Margin(Margin, &RightView);
+
+	const int ClientId = GameClient()->m_Snap.m_LocalClientId;
+	const float Phase = CTClientGradient::AnimatePhase(Client()->GlobalTime());
+	CTeeRenderInfo PreviewInfo;
+	if(ClientId >= 0 && ClientId < MAX_CLIENTS)
+	{
+		PreviewInfo = GameClient()->m_aClients[ClientId].m_RenderInfo;
+	}
+	else
+	{
+		const CSkin *pSkin = GameClient()->m_Skins.Find("default");
+		PreviewInfo.Apply(pSkin);
+		PreviewInfo.ApplyColors(false, 0, 0);
+	}
+
+	// 皮肤模式取基础肤色（渐变组件缓存了未动画前的原色），避免预览被本帧渐变污染。
+	ColorRGBA SkinBody;
+	ColorRGBA SkinFeet;
+	CTClientGradient::GetSkinToneColors(ClientId, GameClient(), SkinBody, SkinFeet);
+
+	const auto PreviewSplits = [&](const char *pText) {
+		if(g_Config.m_TcGradientMode == (int)ETClientGradientMode::SKIN)
+			return CTClientGradient::BuildAnimatedColorSplits(pText, SkinBody, SkinFeet, Phase);
+		return CTClientGradient::BuildAnimatedTextSplits(pText, ClientId, GameClient(), Phase);
+	};
+	const auto RenderPreviewText = [&](CUIRect &View, const char *pText, bool Enabled, float Size) {
+		CUIRect Row;
+		View.HSplitTop(Size + MarginSmall, &Row, &View);
+		CTextCursor Cursor;
+		Cursor.SetPosition(vec2(Row.x + (Row.w - TextRender()->TextWidth(Size, pText)) / 2.0f, Row.y));
+		Cursor.m_FontSize = Size;
+		if(Enabled)
+			Cursor.m_vColorSplits = PreviewSplits(pText);
+		TextRender()->TextEx(&Cursor, pText);
+	};
+
+	RenderPreviewText(RightView, TCLocalize("Gradient nickname preview"), g_Config.m_TcGradientName != 0, 20.0f);
+	RenderPreviewText(RightView, TCLocalize("Gradient clan preview"), g_Config.m_TcGradientClan != 0, 14.0f);
+	RenderPreviewText(RightView, TCLocalize("All text preview"), g_Config.m_TcGradientEverything != 0, 12.0f);
+
+	if(g_Config.m_TcGradientSkin)
+	{
+		ColorRGBA Body;
+		ColorRGBA Feet;
+		CTClientGradient::GetAnimatedEndpointColors(ClientId, GameClient(), Phase, Body, Feet);
+		PreviewInfo.m_ColorBody = Body;
+		PreviewInfo.m_ColorFeet = Feet;
+		PreviewInfo.m_CustomColoredSkin = true;
+		CTClientGradient::ApplySixupColors(PreviewInfo, Body, Feet);
+	}
+
+	PreviewInfo.m_Size = 96.0f;
+	const CAnimState *pIdleState = CAnimState::GetIdle();
+	vec2 OffsetToMid;
+	CRenderTools::GetRenderTeeOffsetToRenderedTee(pIdleState, &PreviewInfo, OffsetToMid);
+	const vec2 TeePosition(RightView.x + RightView.w / 2.0f, RightView.y + 70.0f + OffsetToMid.y);
+	const bool WhiteFeet = g_Config.m_TcWhiteFeet != 0;
+	g_Config.m_TcWhiteFeet = 0;
+	RenderTools()->RenderTee(pIdleState, &PreviewInfo, EMOTE_NORMAL, vec2(1.0f, 0.0f), TeePosition);
+	g_Config.m_TcWhiteFeet = WhiteFeet ? 1 : 0;
+
+	CUIRect Note = RightView;
+	Note.y = TeePosition.y + 60.0f;
+	Note.h = 70.0f;
+	Ui()->DoLabel(&Note, TCLocalize("Player target only affects nicknames, clans and skins. All text gradient is global."), 12.0f, TEXTALIGN_TC);
 }
 
 void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
@@ -2532,9 +2695,6 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelVolume, &g_Config.m_TcPingwheelVolume, &Button, TCLocalize("Signal sound volume"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 	View.HSplitTop(LineSize, &Button, &View);
 	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelSoundRange, &g_Config.m_TcPingwheelSoundRange, &Button, TCLocalize("Sound audible range (0 = whole map)"), 0, 5000, &CUi::ms_LinearScrollbarScale, 0, "");
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPingwheelEmote, TCLocalize("Send signals via emoticons (server needs low emoticon delay)"), &g_Config.m_TcPingwheelEmote, &View, LineSize);
-	View.HSplitTop(LineSize, &Button, &View);
-	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelEmoteMs, &g_Config.m_TcPingwheelEmoteMs, &Button, TCLocalize("Emoticon interval (>= server emoticon delay)"), 100, 3000, &CUi::ms_LinearScrollbarScale, 0, "ms");
 	View.HSplitTop(MarginSmall * 4, nullptr, &View);
 
 	// 只调顺序：8 行 = 预览 + 名称 + 序号 + 上/下
@@ -2966,7 +3126,8 @@ void CMenus::RenderSettingsTClientInfo(CUIRect MainView)
 		"Ping",
 		TCLocalize("Info"),
 		TCLocalize("Statusbar"),
-		TCLocalize("Assets")};
+		TCLocalize("Assets"),
+		TCLocalize("Gradient")};
 	static int s_aShowTabs[NUMBER_OF_TCLIENT_TABS] = {};
 	static bool s_ShowTabsInit = false;
 	if(!s_ShowTabsInit)
@@ -3870,6 +4031,13 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcSpectatorFriendsFirst, TCLocalize("Show friends as a separate group in the spectator selector"), &g_Config.m_TcSpectatorFriendsFirst, &LeftView, LineSize);
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("Friends are listed first with their own group title, then everyone else."), EditBoxFontSize, TEXTALIGN_TL);
+
+	// TClient 企鹅徽标：记分板识别同服 TClient 玩家（ddnet-custom-clients 皮肤颜色法）
+	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Client badge"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeClientBadge, TCLocalize("Show a penguin next to TClient players on the scoreboard (also announces that you use TClient)"), &g_Config.m_MeClientBadge, &LeftView, LineSize);
 
 	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
 	Ui()->DoLabel(&Label, TCLocalize("Message muting"), HeadlineFontSize, TEXTALIGN_ML);

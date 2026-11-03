@@ -67,7 +67,8 @@ void CConsoleLogger::Log(const CLogMessage *pMessage)
 	const CLockScope LockScope(m_ConsoleMutex);
 	if(m_pConsole)
 	{
-		m_pConsole->m_LocalConsole.PrintLine(pMessage->m_aLine, pMessage->m_LineLength, Color);
+		// TClient: 写 backlog 时按结构化 system 名分类，渲染期只按类别过滤
+		m_pConsole->m_LocalConsole.PrintLine(pMessage->m_aLine, pMessage->m_LineLength, Color, TcClassifyConsoleLogSystem(pMessage->m_aSystem));
 	}
 }
 
@@ -437,7 +438,7 @@ void CGameConsole::CInstance::ExecuteLine(const char *pLine)
 		// print out the user's commands before they get run
 		char aBuf[IConsole::CMDLINE_LENGTH + 3];
 		str_format(aBuf, sizeof(aBuf), "> %s", pLine);
-		m_pGameConsole->PrintLine(m_Type, aBuf);
+		m_pGameConsole->PrintLine(m_Type, aBuf, TC_CONSOLE_LOG_CATEGORY_COMMAND); // TClient: 归入命令类
 	}
 
 	if(m_Type == CGameConsole::CONSOLETYPE_LOCAL)
@@ -764,7 +765,7 @@ bool CGameConsole::CInstance::OnInput(const IInput::CEvent &Event)
 	return Handled;
 }
 
-void CGameConsole::CInstance::PrintLine(const char *pLine, int Len, ColorRGBA PrintColor)
+void CGameConsole::CInstance::PrintLine(const char *pLine, int Len, ColorRGBA PrintColor, int LogCategory)
 {
 	// We must ensure that no log messages are printed while owning
 	// m_BacklogPendingLock or this will result in a dead lock.
@@ -772,9 +773,25 @@ void CGameConsole::CInstance::PrintLine(const char *pLine, int Len, ColorRGBA Pr
 	CBacklogEntry *pEntry = m_BacklogPending.Allocate(sizeof(CBacklogEntry) + Len);
 	pEntry->m_YOffset = -1.0f;
 	pEntry->m_PrintColor = PrintColor;
+	pEntry->m_LogCategory = static_cast<uint8_t>(LogCategory); // TClient
 	pEntry->m_Length = Len;
 	pEntry->m_LineCount = -1;
 	str_copy(pEntry->m_aText, pLine, Len + 1);
+}
+
+// TClient: 控制台日志分类筛选
+void CGameConsole::CInstance::SetLogFilterMask(int Mask)
+{
+	m_LogFilterMask = TcNormalizeConsoleLogFilterMask(Mask);
+	// 类别切换后视口锚点失义：回到最新一页并清掉选区与搜索状态
+	m_BacklogCurLine = 0;
+	m_BacklogLastActiveLine = -1;
+	m_HasSelection = false;
+	if(m_Searching)
+		SetSearching(false);
+	ClearSearch();
+	if(m_Type == CONSOLETYPE_LOCAL)
+		g_Config.m_TcConsoleFilterMask = m_LogFilterMask;
 }
 
 int CGameConsole::CInstance::GetLinesToScroll(int Direction, int LinesToScroll)
@@ -1158,6 +1175,28 @@ bool CGameConsole::DoButton(const CUIRect &Rect, const char *pIcon, vec2 MousePo
 	return m_ConsoleState == CONSOLE_OPEN && Released && PressedInside && MouseInside;
 }
 
+// TClient: 顶栏文字按钮，复用 DoButton 的按压状态机（控制台打开时 Ui 逻辑被禁用，
+// 不能走 DoButtonLogic），并抑制按下时的文本选择。
+bool CGameConsole::DoFilterButton(const CUIRect &Rect, const char *pText, bool Active, vec2 MousePosition, bool Released)
+{
+	const bool PressedInside = Rect.Inside(m_ButtonPressPosition);
+	const bool MouseInside = Rect.Inside(MousePosition);
+	const bool Pressed = CurrentConsole()->m_MouseIsPress && PressedInside;
+	if(Pressed)
+		m_ButtonPressed = true;
+
+	const float ColorMul = Pressed ? Ui()->ButtonColorMulActive() : (MouseInside ? Ui()->ButtonColorMulHot() : Ui()->ButtonColorMulDefault());
+	ColorRGBA Color = Active ? ColorRGBA(0.6f, 0.6f, 0.6f, 1.0f) : ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
+	Color.a *= 0.5f * ColorMul;
+	Rect.Draw(Color, IGraphics::CORNER_B, 4.0f);
+
+	CUIRect LabelRect = Rect;
+	LabelRect.HMargin(2.0f, &LabelRect);
+	Ui()->DoLabel(&LabelRect, pText, FONT_SIZE, TEXTALIGN_MC);
+
+	return m_ConsoleState == CONSOLE_OPEN && Released && PressedInside && MouseInside;
+}
+
 void CGameConsole::OnRender()
 {
 	CUIRect Screen = *Ui()->Screen();
@@ -1302,6 +1341,38 @@ void CGameConsole::OnRender()
 		ButtonBar.VSplitRight(RowHeight, &ButtonBar, &Button);
 		if(DoButton(Button, FontIcon::XMARK, ButtonMousePosition, ButtonReleased))
 			Toggle(m_ConsoleType);
+
+		// TClient: 本地控制台顶栏左侧的日志分类筛选标签（全部/玩家/系统/命令/绑定）
+		if(pConsole->m_Type == CONSOLETYPE_LOCAL)
+		{
+			// 「全部」不能用 "All"：主词典已有普通 All→全体，AddString 的查重会连
+			// 带 context 的条目一起跳过，导致翻译永远不生效。
+			const char *apFilterLabels[CInstance::LOG_FILTER_BUTTON_COUNT] = {
+				TCLocalize("All logs"),
+				TCLocalize("Players"),
+				TCLocalize("System"),
+				TCLocalize("Commands"),
+				TCLocalize("Binds")};
+			CUIRect FilterBar = ButtonBar;
+			FilterBar.VSplitLeft(4.0f, nullptr, &FilterBar);
+			CUIRect FilterStrip = FilterBar;
+			float StripWidth = 0.0f;
+			for(int i = 0; i < CInstance::LOG_FILTER_BUTTON_COUNT; i++)
+				StripWidth += TextRender()->TextWidth(FONT_SIZE, apFilterLabels[i]) + 16.0f;
+			FilterStrip.w = std::min(FilterStrip.w, StripWidth);
+			FilterStrip.Draw(ColorRGBA(0.12f, 0.12f, 0.12f, 0.9f), IGraphics::CORNER_B, 4.0f);
+			for(int i = 0; i < CInstance::LOG_FILTER_BUTTON_COUNT; i++)
+			{
+				const int Category = TcConsoleLogFilterButtonCategory(i);
+				const float ButtonWidth = TextRender()->TextWidth(FONT_SIZE, apFilterLabels[i]) + 12.0f;
+				CUIRect FilterButton;
+				FilterBar.VSplitLeft(ButtonWidth, &FilterButton, &FilterBar);
+				FilterBar.VSplitLeft(4.0f, nullptr, &FilterBar);
+				const bool Active = TcConsoleLogFilterButtonActive(pConsole->m_LogFilterMask, Category);
+				if(DoFilterButton(FilterButton, apFilterLabels[i], Active, ButtonMousePosition, ButtonReleased))
+					pConsole->SetLogFilterMask(TcConsoleLogFilterSelectCategory(pConsole->m_LogFilterMask, Category));
+			}
+		}
 
 		const float ScaledLineHeight = LineHeight / ScreenSize.y;
 		if(absolute(m_TouchState.m_ScrollAmount.y) >= ScaledLineHeight)
@@ -1498,6 +1569,12 @@ void CGameConsole::OnRender()
 				pEntry = pConsole->m_Backlog.Prev(pEntry);
 				continue;
 			}
+			// TClient: 不命中所选分类的条目直接折叠（不加 OffsetY，后续条目上移补位）
+			if(!TcConsoleLogCategoryPassesFilter(pEntry->m_LogCategory, pConsole->m_LogFilterMask))
+			{
+				pEntry = pConsole->m_Backlog.Prev(pEntry);
+				continue;
+			}
 			TextRender()->TextColor(pEntry->m_PrintColor);
 
 			if(First)
@@ -1628,11 +1705,8 @@ void CGameConsole::OnRender()
 
 		TextRender()->TextColor(TextRender()->DefaultTextColor());
 
-		// render current lines and status (locked, following)
-		char aBuf[128];
-		str_format(aBuf, sizeof(aBuf), Localize("Lines %d - %d (%s)"), pConsole->m_BacklogCurLine + 1, pConsole->m_BacklogCurLine + pConsole->m_LinesRendered, pConsole->m_BacklogCurLine != 0 ? Localize("Locked") : Localize("Following"));
-		TextRender()->Text(10.0f, FONT_SIZE / 2.f, FONT_SIZE, aBuf);
-
+		// TClient: 顶栏左侧给日志分类筛选标签，右上角是版本信息，原"行数 x - y (跟随/锁定)"
+		// 状态行放哪都和它们打架，按用户要求直接去掉。
 		if(m_ConsoleType == CONSOLETYPE_REMOTE && (Client()->ReceivingRconCommands() || Client()->ReceivingMaplist()))
 		{
 			const float Percentage = Client()->ReceivingRconCommands() ? Client()->GotRconCommandsPercentage() : Client()->GotMaplistPercentage();
@@ -1652,6 +1726,7 @@ void CGameConsole::OnRender()
 		}
 
 		// render version
+		char aBuf[128];
 		str_copy(aBuf, "v" GAME_VERSION " on " CONF_PLATFORM_STRING " " CONF_ARCH_STRING);
 		TextRender()->Text(ButtonBar.x + ButtonBar.w - TextRender()->TextWidth(FONT_SIZE, aBuf) - 10.0f, FONT_SIZE / 2.f, FONT_SIZE, aBuf);
 
@@ -1676,6 +1751,11 @@ bool CGameConsole::OnInput(const IInput::CEvent &Event)
 	if(Event.m_Key == KEY_ESCAPE && (Event.m_Flags & IInput::FLAG_PRESS) && !CurrentConsole()->m_Searching)
 	{
 		Toggle(m_ConsoleType);
+	}
+	// TClient: Alt+1..5 切换本地控制台的日志分类筛选
+	else if(GameClient()->Input()->AltIsPressed() && (Event.m_Flags & IInput::FLAG_PRESS) && Event.m_Key >= KEY_1 && Event.m_Key <= KEY_5 && CurrentConsole()->m_Type == CONSOLETYPE_LOCAL)
+	{
+		CurrentConsole()->SetLogFilterMask( TcConsoleLogFilterSelectCategory(CurrentConsole()->m_LogFilterMask, TcConsoleLogFilterButtonCategory(Event.m_Key - KEY_1)));
 	}
 	else if(!CurrentConsole()->OnInput(Event))
 	{
@@ -1793,6 +1873,17 @@ void CGameConsole::ConchainConsoleOutputLevel(IConsole::IResult *pResult, void *
 	}
 }
 
+// TClient: 控制台里直接改 tc_console_filter_mask 也实时生效
+void CGameConsole::ConchainTcConsoleFilterMask(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData)
+{
+	CGameConsole *pSelf = (CGameConsole *)pUserData;
+	pfnCallback(pResult, pCallbackUserData);
+	if(pResult->NumArguments())
+	{
+		pSelf->m_LocalConsole.SetLogFilterMask(g_Config.m_TcConsoleFilterMask);
+	}
+}
+
 void CGameConsole::RequireUsername(bool UsernameReq)
 {
 	if((m_RemoteConsole.m_UsernameReq = UsernameReq))
@@ -1802,12 +1893,12 @@ void CGameConsole::RequireUsername(bool UsernameReq)
 	}
 }
 
-void CGameConsole::PrintLine(int Type, const char *pLine)
+void CGameConsole::PrintLine(int Type, const char *pLine, int LogCategory)
 {
 	if(Type == CONSOLETYPE_LOCAL)
-		m_LocalConsole.PrintLine(pLine, str_length(pLine), TextRender()->DefaultTextColor());
+		m_LocalConsole.PrintLine(pLine, str_length(pLine), TextRender()->DefaultTextColor(), LogCategory);
 	else if(Type == CONSOLETYPE_REMOTE)
-		m_RemoteConsole.PrintLine(pLine, str_length(pLine), TextRender()->DefaultTextColor());
+		m_RemoteConsole.PrintLine(pLine, str_length(pLine), TextRender()->DefaultTextColor(), LogCategory);
 }
 
 void CGameConsole::OnConsoleInit()
@@ -1815,6 +1906,9 @@ void CGameConsole::OnConsoleInit()
 	// init console instances
 	m_LocalConsole.Init(this);
 	m_RemoteConsole.Init(this);
+
+	// TClient: 恢复本地控制台上次的日志分类筛选
+	m_LocalConsole.m_LogFilterMask = TcNormalizeConsoleLogFilterMask(g_Config.m_TcConsoleFilterMask);
 
 	m_pConsole = Kernel()->RequestInterface<IConsole>();
 
@@ -1833,6 +1927,7 @@ void CGameConsole::OnConsoleInit()
 	Console()->Register("console_page_top", "", CFGFLAG_CLIENT, ConConsolePageTop, this, "Last page in console");
 	Console()->Register("console_page_bottom", "", CFGFLAG_CLIENT, ConConsolePageBottom, this, "First page in console");
 	Console()->Chain("console_output_level", ConchainConsoleOutputLevel, this);
+	Console()->Chain("tc_console_filter_mask", ConchainTcConsoleFilterMask, this); // TClient
 }
 
 void CGameConsole::OnInit()

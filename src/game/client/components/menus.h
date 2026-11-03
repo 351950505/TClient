@@ -882,6 +882,7 @@ private:
 	void RenderSettingsTClientInfo(CUIRect MainView);
 	void RenderSettingsTClientStatusBar(CUIRect MainView);
 	void RenderSettingsTClientAssets(CUIRect MainView);
+	void RenderSettingsTClientGradient(CUIRect MainView);
 	void RenderSettingsTClientPing(CUIRect MainView);
 	void RenderSettingsTClientProfiles(CUIRect MainView);
 	void RenderSettingsTClientConfigs(CUIRect MainView);

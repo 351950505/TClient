@@ -79,60 +79,7 @@ bool CPingWheel::DecodeBinary(const char *pMessage, int *pSignal, int *pX, int *
 	return true;
 }
 
-// ---- 表情通道 ----
-
-void CPingWheel::EmotePing(int Signal, int X, int Y)
-{
-	uint64_t Payload = ((uint64_t)(Signal & 7) << 32) |
-		((uint64_t)(uint32_t)(std::clamp(X, -32768, 32767) + 32768) << 16) |
-		(uint64_t)(uint32_t)(std::clamp(Y, -32768, 32767) + 32768);
-	Payload <<= 1; // 35bit → 36bit（9 个 4bit 表情）
-	m_vEmoteQueue.clear();
-	m_vEmoteQueue.push_back(EMOTICON_OOP); // 帧头
-	for(int i = 8; i >= 0; i--)
-		m_vEmoteQueue.push_back((int)((Payload >> (4 * i)) & 0xF));
-	m_EmoteRecvCount = -1; // 重置接收（自己的表情会被服务器广播回来，接收端按 cid 过滤）
-	// 丢失检测基准：记下发帧前的自回显计数
-	m_EmoteFrameSent = 10;
-	m_EmoteEchoSeen = m_EmoteEchoTotal;
-	m_EmoteFrameDoneTime = -1e9f;
-}
-
-void CPingWheel::PumpEmoteQueue()
-{
-	if(m_vEmoteQueue.empty())
-	{
-		// 帧发完 3 秒后对比自回显数：少于发送数 = 表情被服务器冷却丢弃
-		if(m_EmoteFrameDoneTime > 0 && Client()->LocalTime() - m_EmoteFrameDoneTime > 3.0f)
-		{
-			m_EmoteFrameDoneTime = -1e9f;
-			const int Echoed = m_EmoteEchoTotal - m_EmoteEchoSeen;
-			if(Echoed < m_EmoteFrameSent)
-			{
-				char aBuf[192];
-				str_format(aBuf, sizeof(aBuf), "表情信号只发出 %d/%d 个：服务器表情冷却过长。请在设置里调大表情间隔，或关闭表情通道改用队伍聊天", Echoed, m_EmoteFrameSent);
-				GameClient()->m_Chat.Echo(aBuf);
-			}
-		}
-		return;
-	}
-	if(!GameClient()->m_Snap.m_pLocalCharacter)
-	{
-		// 表情需要活体（服务器丢弃无角色的表情），死亡就放弃残帧
-		m_vEmoteQueue.clear();
-		return;
-	}
-	const float Now = Client()->LocalTime();
-	if(Now - m_LastEmoteSendTime < g_Config.m_TcPingwheelEmoteMs / 1000.0f)
-		return;
-	m_LastEmoteSendTime = Now;
-	CNetMsg_Cl_Emoticon Msg;
-	Msg.m_Emoticon = m_vEmoteQueue.front();
-	m_vEmoteQueue.erase(m_vEmoteQueue.begin());
-	if(m_vEmoteQueue.empty())
-		m_EmoteFrameDoneTime = Now; // 本帧发完，进入丢失检测窗口
-	Client()->SendPackMsgActive(&Msg, MSGFLAG_VITAL);
-}
+// ---- 表情接收（兼容旧版本客户端，只收不发） ----
 
 static void PingWheelParseLayout(const char *p, int *pOut) // pOut 至少 NUM_SIGNALS；非法/缺项回退恒等顺序
 {
@@ -212,9 +159,7 @@ void CPingWheel::OnReset()
 	m_WasActive = false;
 	m_Active = false;
 	m_SelectedSignal = -1;
-	m_vEmoteQueue.clear();
 	m_EmoteRecvCount = -1;
-	m_EmoteFrameDoneTime = -1e9f;
 	m_vPingTimes.clear();
 	m_PingBanUntil = -1e9f;
 	m_LastRateEchoTime = -1e9f;
@@ -408,7 +353,7 @@ bool CPingWheel::PingRateLimited()
 		m_PingBanUntil = Now + PING_RATE_BAN;
 		m_vPingTimes.clear();
 		char aBuf[96];
-		str_format(aBuf, sizeof(aBuf), TCLocalize("Max %d signals per 10 s, sending blocked for %.0f s"), PING_RATE_COUNT, PING_RATE_BAN);
+		str_format(aBuf, sizeof(aBuf), TCLocalize("Max %d signals per %d s, sending blocked for %.0f s"), PING_RATE_COUNT, (int)PING_RATE_WINDOW, PING_RATE_BAN);
 		GameClient()->m_Chat.Echo(aBuf);
 		m_LastRateEchoTime = Now;
 		return true;
@@ -426,30 +371,18 @@ void CPingWheel::Ping(int Signal, vec2 WorldPos)
 	if(PingRateLimited())
 		return;
 
-	const bool Alive = GameClient()->m_Snap.m_pLocalCharacter != nullptr;
 	char aBuf[24];
 	EncodeBinary(Signal, (int)std::round(WorldPos.x), (int)std::round(WorldPos.y), aBuf);
 
-	// 通道优先级：
-	//   活着  → 表情通道（若开）：对在场玩家可见但有活体要求；表情关闭才用信令
-	//   旁观  → 信令通道：P2P 直连优先（ServerRelay 内部自动做），打不通走中转
-	const bool UseEmote = Alive && g_Config.m_TcPingwheelEmote;
-	const bool UseRelay = g_Config.m_TcRelay && GameClient()->m_RelayClient.Available();
-	if(UseEmote)
+	// 全部走信令通道（表情发送通道已移除）：P2P 直连优先（ServerRelay 内部自动做），
+	// 打不通走中转；旁观/死亡也能发，不占用游戏服的聊天与表情，原版玩家无感知。
+	if(g_Config.m_TcRelay && GameClient()->m_RelayClient.Available())
 	{
-		// 帧头+9 个表情全服广播，间隔 tc_pingwheel_emote_ms（默认 60ms，
-		// 必须 ≥ 服务器表情冷却）。对所有人可见但只有 TClient 知道语义。
-		EmotePing(Signal, (int)std::round(WorldPos.x), (int)std::round(WorldPos.y));
-	}
-	else if(UseRelay)
-	{
-		// 信令：旁观/死亡也能发，不占用游戏服的聊天与表情，原版玩家无感知。
-		// 内部 P2P 直连优先，未打通的成员走信令中转。
 		GameClient()->m_RelayClient.Broadcast(aBuf);
 	}
 	else
 	{
-		GameClient()->m_Chat.Echo(Alive ? "信令未连接且表情通道已关闭，信号仅本地显示" : "旁观/死亡状态：信令暂未连接（自动重试中），信号仅本地显示");
+		GameClient()->m_Chat.Echo("信令未连接（自动重试中），信号仅本地显示");
 		AddMarker(Signal, WorldPos);
 		PlaySignalSound(Signal, WorldPos);
 		return;
@@ -502,13 +435,10 @@ void CPingWheel::OnMessage(int MsgType, void *pRawMsg)
 	if(MsgType == NETMSGTYPE_SV_EMOTICON && g_Config.m_TcPingwheel)
 	{
 		CNetMsg_Sv_Emoticon *pMsg = (CNetMsg_Sv_Emoticon *)pRawMsg;
-		// 自回显：丢失检测计数后跳过（发送时已本地出标记）
+		// 本机表情只可能是手动表情（表情发送通道已移除），不参与 ping 帧解码
 		if(Client()->State() != IClient::STATE_DEMOPLAYBACK &&
 			pMsg->m_ClientId == GameClient()->m_Snap.m_LocalClientId)
-		{
-			m_EmoteEchoTotal++;
 			return;
-		}
 
 		const float Now = Client()->LocalTime();
 		if(m_EmoteRecvCount >= 0 && Now - m_EmoteRecvStart <= 1.5f)
@@ -682,8 +612,6 @@ void CPingWheel::OnRender()
 	TryLoadSounds();
 	RenderMarkers();
 	RenderSpecCursor();
-	PumpEmoteQueue();
-
 
 	static const auto QuadEaseInOut = [](float t) -> float {
 		if(t == 0.0f)

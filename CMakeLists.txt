@@ -2772,6 +2772,7 @@ if(CLIENT)
     serverbrowser_ping_cache.cpp
     serverbrowser_ping_cache.h
     sixup_translate_system.cpp
+    jitter_buffer.h
     smooth_time.cpp
     smooth_time.h
     sound.cpp
@@ -3740,6 +3741,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     swap_endian_test.cpp
     tclient_console_filter_test.cpp
     tclient_gradient_test.cpp
+    tclient_jitter_buffer_test.cpp
     teehistorian_test.cpp
     test.cpp
     test.h

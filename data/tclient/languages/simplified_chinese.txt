@@ -195,6 +195,12 @@ Negative stability buffer (for Gores)
 Uncertainty duration
 == 不确定性持续时间
 
+Adaptive snapshot interpolation buffer (anti network jitter)
+== 自适应快照插值缓冲（对抗网络抖动）
+
+Maximum buffer delay
+== 最大缓冲延迟
+
 Other
 == 其他
 

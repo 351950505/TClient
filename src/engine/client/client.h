@@ -218,6 +218,11 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	CSnapshotStorage::CHolder *m_aapSnapshots[NUM_DUMMIES][NUM_SNAPSHOT_TYPES];
 
 	int m_aReceivedSnapshots[NUM_DUMMIES] = {0, 0};
+	// TClient: 自适应快照插值缓冲（抖动统计与当前生效缓冲）
+	int64_t m_aJitterLastArrival[NUM_DUMMIES] = {0};
+	int m_aJitterIntervals[64][NUM_DUMMIES] = {{0}};
+	int m_aJitterIntervalCount[NUM_DUMMIES] = {0};
+	int m_aJitterBufferMs[NUM_DUMMIES] = {0};
 	char m_aaSnapshotIncomingData[NUM_DUMMIES][CSnapshot::MAX_SIZE];
 	int m_aSnapshotIncomingDataSize[NUM_DUMMIES] = {0, 0};
 

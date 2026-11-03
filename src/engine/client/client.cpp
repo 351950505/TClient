@@ -3,6 +3,8 @@
 
 #include "client.h"
 
+#include "jitter_buffer.h"
+
 #include "demoedit.h"
 #include "friends.h"
 #include "serverbrowser.h"
@@ -2458,6 +2460,30 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 					// apply snapshot, cycle pointers
 					m_aReceivedSnapshots[Conn]++;
 
+					// TClient: 自适应快照插值缓冲——统计到达间隔并平滑逼近目标缓冲
+					{
+						const int64_t ArriveNow = time_get();
+						if(m_aJitterLastArrival[Conn] != 0)
+						{
+							const int IntervalMs = (int)((ArriveNow - m_aJitterLastArrival[Conn]) * 1000 / time_freq());
+							if(IntervalMs >= TcJitterBuffer::MIN_INTERVAL_MS && IntervalMs <= TcJitterBuffer::MAX_INTERVAL_MS)
+							{
+								int &Count = m_aJitterIntervalCount[Conn];
+								m_aJitterIntervals[Conn][Count % 64] = IntervalMs;
+								Count++;
+							}
+							else
+							{
+								m_aJitterIntervalCount[Conn] = 0; // 断线/尖峰：重置统计
+							}
+						}
+						m_aJitterLastArrival[Conn] = ArriveNow;
+						const int Samples = std::min(m_aJitterIntervalCount[Conn], 64);
+						const int Target = TcJitterBuffer::TargetMs(m_aJitterIntervals[Conn], Samples, g_Config.m_TcJitterBufferMax);
+						int &Cur = m_aJitterBufferMs[Conn];
+						Cur += Target > Cur ? 1 : (Target < Cur ? -1 : 0); // 每个快照最多动 1ms，避免缓冲本身成为抖动源
+					}
+
 					// TClient
 					if(!m_aExecuteOnJoinDone[Conn] && m_aReceivedSnapshots[Conn] > g_Config.m_TcExecuteOnJoinDelay)
 					{
@@ -2476,6 +2502,9 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 							m_PredictedTime.SetAdjustSpeed(CSmoothTime::ADJUSTDIRECTION_UP, 1000.0f);
 							m_PredictedTime.UpdateMargin(PredictionMargin() * time_freq() / 1000);
 						}
+						m_aJitterLastArrival[Conn] = 0;
+						m_aJitterIntervalCount[Conn] = 0;
+						m_aJitterBufferMs[Conn] = 0;
 						m_aGameTime[Conn].Init((GameTick - 1) * time_freq() / GameTickSpeed());
 						m_aapSnapshots[Conn][SNAP_PREV] = m_aSnapshotStorage[Conn].m_pFirst;
 						m_aapSnapshots[Conn][SNAP_CURRENT] = m_aSnapshotStorage[Conn].m_pLast;
@@ -2506,9 +2535,12 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 					if(m_aReceivedSnapshots[Conn] > 2)
 					{
 						int64_t Now = m_aGameTime[Conn].Get(time_get());
-						int64_t TickStart = GameTick * time_freq() / GameTickSpeed();
+						// TClient: 自适应插值缓冲——时钟目标后挪 BufferMs，用固定滞后换平滑（仅 0.6 时钟路径）
+						const int64_t Buffer = (g_Config.m_TcJitterBuffer && !IsSixup()) ? (int64_t)m_aJitterBufferMs[Conn] : 0;
+						const int64_t Target = (GameTick - 1) * time_freq() / GameTickSpeed() - Buffer * time_freq() / 1000;
+						int64_t TickStart = GameTick * time_freq() / GameTickSpeed() - Buffer * time_freq() / 1000;
 						int64_t TimeLeft = (TickStart - Now) * 1000 / time_freq();
-						m_aGameTime[Conn].Update(&m_aGametimeMarginGraphs[Conn], (GameTick - 1) * time_freq() / GameTickSpeed(), TimeLeft, CSmoothTime::ADJUSTDIRECTION_DOWN);
+						m_aGameTime[Conn].Update(&m_aGametimeMarginGraphs[Conn], Target, TimeLeft, CSmoothTime::ADJUSTDIRECTION_DOWN);
 					}
 
 					if(m_aReceivedSnapshots[Conn] > GameTickSpeed() && !m_aDidPostConnect[Conn])

@@ -1137,6 +1137,12 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAntiPingNegativeBuffer, TCLocalize("Remember instability for longer"), &g_Config.m_TcAntiPingNegativeBuffer, &Column, LineSize);
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_TcAntiPingUncertaintyScale, &g_Config.m_TcAntiPingUncertaintyScale, &Button, TCLocalize("Uncertainty duration"), 50, 400, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "%");
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcJitterBuffer, TCLocalize("Adaptive snapshot interpolation buffer (anti network jitter)"), &g_Config.m_TcJitterBuffer, &Column, LineSize);
+	if(g_Config.m_TcJitterBuffer)
+	{
+		Column.HSplitTop(LineSize, &Button, &Column);
+		Ui()->DoScrollbarOption(&g_Config.m_TcJitterBufferMax, &g_Config.m_TcJitterBufferMax, &Button, TCLocalize("Maximum buffer delay"), 10, 100, &CUi::ms_LinearScrollbarScale, 0, "ms");
+	}
 	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
 
 	// ***** Execute on join ***** //

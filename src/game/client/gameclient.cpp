@@ -3715,8 +3715,8 @@ void CGameClient::SendInfo(bool Start)
 		Msg.m_ColorBody = g_Config.m_ClPlayerColorBody;
 		Msg.m_ColorFeet = g_Config.m_ClPlayerColorFeet;
 		// TClient: ddnet-custom-clients 皮肤颜色法——alpha 字节承载客户端标识
-		if(g_Config.m_MeClientBadge)
-			TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
+		// 身份始终广播，me_client_badge 只控制自己是否显示徽标
+		TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
 		CMsgPacker Packer(&Msg);
 		Msg.Pack(&Packer);
 		Client()->SendMsg(IClient::CONN_MAIN, &Packer, MSGFLAG_VITAL | MSGFLAG_FLUSH);
@@ -3733,8 +3733,8 @@ void CGameClient::SendInfo(bool Start)
 		Msg.m_ColorBody = g_Config.m_ClPlayerColorBody;
 		Msg.m_ColorFeet = g_Config.m_ClPlayerColorFeet;
 		// TClient: ddnet-custom-clients 皮肤颜色法——alpha 字节承载客户端标识
-		if(g_Config.m_MeClientBadge)
-			TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
+		// 身份始终广播，me_client_badge 只控制自己是否显示徽标
+		TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
 		CMsgPacker Packer(&Msg);
 		Msg.Pack(&Packer);
 		Client()->SendMsg(IClient::CONN_MAIN, &Packer, MSGFLAG_VITAL);
@@ -3763,8 +3763,8 @@ void CGameClient::SendDummyInfo(bool Start)
 		Msg.m_ColorBody = g_Config.m_ClDummyColorBody;
 		Msg.m_ColorFeet = g_Config.m_ClDummyColorFeet;
 		// TClient: ddnet-custom-clients 皮肤颜色法——alpha 字节承载客户端标识
-		if(g_Config.m_MeClientBadge)
-			TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
+		// 身份始终广播，me_client_badge 只控制自己是否显示徽标
+		TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
 		CMsgPacker Packer(&Msg);
 		Msg.Pack(&Packer);
 		Client()->SendMsg(IClient::CONN_DUMMY, &Packer, MSGFLAG_VITAL);
@@ -3781,8 +3781,8 @@ void CGameClient::SendDummyInfo(bool Start)
 		Msg.m_ColorBody = g_Config.m_ClDummyColorBody;
 		Msg.m_ColorFeet = g_Config.m_ClDummyColorFeet;
 		// TClient: ddnet-custom-clients 皮肤颜色法——alpha 字节承载客户端标识
-		if(g_Config.m_MeClientBadge)
-			TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
+		// 身份始终广播，me_client_badge 只控制自己是否显示徽标
+		TcBadgeInsertColors(Msg.m_ColorBody, Msg.m_ColorFeet);
 		CMsgPacker Packer(&Msg);
 		Msg.Pack(&Packer);
 		Client()->SendMsg(IClient::CONN_DUMMY, &Packer, MSGFLAG_VITAL);

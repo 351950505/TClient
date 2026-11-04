@@ -514,7 +514,7 @@ void CTClient::AirRescue()
 		return;
 	if(GameClient()->m_Snap.m_aCharacters[ClientId].m_HasExtendedDisplayInfo && (GameClient()->m_Snap.m_aCharacters[ClientId].m_ExtendedData.m_Flags & CHARACTERFLAG_PRACTICE_MODE) == 0)
 	{
-		GameClient()->Echo("You are not in practice");
+		GameClient()->Echo(TCLocalize("You are not in practice"));
 		return;
 	}
 
@@ -550,7 +550,7 @@ void CTClient::AirRescue()
 		return;
 	}
 
-	GameClient()->Echo("No safe position found");
+	GameClient()->Echo(TCLocalize("No safe position found"));
 }
 
 void CTClient::ConAirRescue(IConsole::IResult *pResult, void *pUserData)
@@ -1724,11 +1724,11 @@ void CTClient::RenderMiniVoteHud()
 	char aKey[64];
 	GameClient()->m_Binds.GetKey("vote yes", aKey, sizeof(aKey));
 	TextRender()->TextColor(GameClient()->m_Voting.TakenChoice() == 1 ? ColorRGBA(0.2f, 0.9f, 0.2f, 0.85f) : TextRender()->DefaultTextColor());
-	Ui()->DoLabel(&LeftColumn, aKey[0] == '\0' ? "yes" : aKey, 0.5f, TEXTALIGN_ML);
+	Ui()->DoLabel(&LeftColumn, aKey[0] == '\0' ? TCLocalize("yes") : aKey, 0.5f, TEXTALIGN_ML);
 
 	GameClient()->m_Binds.GetKey("vote no", aKey, sizeof(aKey));
 	TextRender()->TextColor(GameClient()->m_Voting.TakenChoice() == -1 ? ColorRGBA(0.95f, 0.25f, 0.25f, 0.85f) : TextRender()->DefaultTextColor());
-	Ui()->DoLabel(&RightColumn, aKey[0] == '\0' ? "no" : aKey, 0.5f, TEXTALIGN_MR);
+	Ui()->DoLabel(&RightColumn, aKey[0] == '\0' ? TCLocalize("no") : aKey, 0.5f, TEXTALIGN_MR);
 
 	TextRender()->TextColor(TextRender()->DefaultTextColor());
 }

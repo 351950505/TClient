@@ -1402,7 +1402,7 @@ void CTranslate::TranslateRecent()
 		Queued++;
 	}
 	if(Queued == 0)
-		GameClient()->m_Chat.Echo("No untranslated non-Chinese messages found");
+		GameClient()->m_Chat.Echo(TCLocalize("No untranslated non-Chinese messages found"));
 }
 
 void CTranslate::OnConsoleInit()
@@ -1416,13 +1416,13 @@ void CTranslate::Translate(int Id, bool ShowProgress)
 {
 	if(Id < 0 || Id >= (int)std::size(GameClient()->m_aClients))
 	{
-		GameClient()->m_Chat.Echo("Not a valid ID");
+		GameClient()->m_Chat.Echo(TCLocalize("Not a valid ID"));
 		return;
 	}
 	const auto &Player = GameClient()->m_aClients[Id];
 	if(!Player.m_Active)
 	{
-		GameClient()->m_Chat.Echo("ID not connected");
+		GameClient()->m_Chat.Echo(TCLocalize("ID not connected"));
 		return;
 	}
 	Translate(Player.m_aName, ShowProgress);
@@ -1465,7 +1465,7 @@ void CTranslate::Translate(const char *pName, bool ShowProgress)
 	}
 	if(!pLineBest || pLineBest->m_aText[0] == '\0')
 	{
-		GameClient()->m_Chat.Echo("No message to translate");
+		GameClient()->m_Chat.Echo(TCLocalize("No message to translate"));
 		return;
 	}
 
@@ -1487,7 +1487,7 @@ void CTranslate::Translate(CChat::CLine &Line, bool ShowProgress)
 	Job.m_pBackend = CreateTranslateBackend(*Http(), Job.m_pLine->m_aText, g_Config.m_TcTranslateTarget);
 	if(!Job.m_pBackend)
 	{
-		GameClient()->m_Chat.Echo("Invalid translate backend");
+		GameClient()->m_Chat.Echo(TCLocalize("Invalid translate backend"));
 		return;
 	}
 
@@ -1624,7 +1624,7 @@ bool CTranslate::ChatDoTranslateOutgoing(int Team, const char *pText)
 	Job.m_pBackend = CreateTranslateBackend(*Http(), pText, g_Config.m_TcTranslateOutgoingTarget);
 	if(!Job.m_pBackend)
 	{
-		GameClient()->m_Chat.Echo("Invalid translate backend");
+		GameClient()->m_Chat.Echo(TCLocalize("Invalid translate backend"));
 		return false;
 	}
 

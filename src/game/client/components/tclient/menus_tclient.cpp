@@ -908,16 +908,16 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 			Column.HSplitTop(LineSize, &Button, &Column);
 			DoSliderWithDividedValue(&g_Config.m_TcSalatikInputOffset, &g_Config.m_TcSalatikInputOffset, &Button, TCLocalize("Prediction offset"), 0, 1000, 100, " ticks");
 			Column.HSplitTop(LineSize, &Button, &Column);
-			DoSliderWithScaledValue(&g_Config.m_TcSalatikInputSmoothing, &g_Config.m_TcSalatikInputSmoothing, &Button, TCLocalize("平滑强度"), 0, 100, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "%");
+			DoSliderWithScaledValue(&g_Config.m_TcSalatikInputSmoothing, &g_Config.m_TcSalatikInputSmoothing, &Button, TCLocalize("Smoothing strength"), 0, 100, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "%");
 			static std::vector<const char *> s_vInterpolationNames;
-			s_vInterpolationNames = {TCLocalize("线性"), TCLocalize("三次"), TCLocalize("平滑")};
+			s_vInterpolationNames = {TCLocalize("Linear"), TCLocalize("Cubic"), TCLocalize("Smooth")};
 			static CUi::SDropDownState s_InterpolationDropDownState;
 			static CScrollRegion s_InterpolationDropDownScrollRegion;
 			s_InterpolationDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_InterpolationDropDownScrollRegion;
 			CUIRect InterpolationDropDownRect;
 			Column.HSplitTop(LineSize, &InterpolationDropDownRect, &Column);
 			InterpolationDropDownRect.VSplitLeft(120.0f, &Label, &InterpolationDropDownRect);
-			Ui()->DoLabel(&Label, TCLocalize("插值"), FontSize, TEXTALIGN_ML);
+			Ui()->DoLabel(&Label, TCLocalize("Interpolation"), FontSize, TEXTALIGN_ML);
 			// 下拉索引 0/1/2 对应 alpha 的插值模式 1/2/3。
 			const int InterpolationSelectedOld = std::clamp(g_Config.m_TcSalatikInputInterpolation, 1, 3) - 1;
 			const int InterpolationSelectedNew = Ui()->DoDropDown(&InterpolationDropDownRect, InterpolationSelectedOld, s_vInterpolationNames.data(), s_vInterpolationNames.size(), s_InterpolationDropDownState);
@@ -940,16 +940,16 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 			Column.HSplitTop(LineSize, &Button, &Column);
 			DoSliderWithDividedValue(&g_Config.m_TcBestInput, &g_Config.m_TcBestInput, &Button, TCLocalize("Prediction offset"), 0, 1000, 100, " ticks");
 			Column.HSplitTop(LineSize, &Button, &Column);
-			DoSliderWithScaledValue(&g_Config.m_TcBestInputSmoothing, &g_Config.m_TcBestInputSmoothing, &Button, TCLocalize("平滑强度"), 0, 100, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "%");
+			DoSliderWithScaledValue(&g_Config.m_TcBestInputSmoothing, &g_Config.m_TcBestInputSmoothing, &Button, TCLocalize("Smoothing strength"), 0, 100, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "%");
 			static std::vector<const char *> s_vBestInterpolationNames;
-			s_vBestInterpolationNames = {TCLocalize("线性"), TCLocalize("三次"), TCLocalize("平滑")};
+			s_vBestInterpolationNames = {TCLocalize("Linear"), TCLocalize("Cubic"), TCLocalize("Smooth")};
 			static CUi::SDropDownState s_BestInterpolationDropDownState;
 			static CScrollRegion s_BestInterpolationScrollRegion;
 			s_BestInterpolationDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_BestInterpolationScrollRegion;
 			CUIRect BestInterpolationDropDownRect;
 			Column.HSplitTop(LineSize, &BestInterpolationDropDownRect, &Column);
 			BestInterpolationDropDownRect.VSplitLeft(120.0f, &Label, &BestInterpolationDropDownRect);
-			Ui()->DoLabel(&Label, TCLocalize("插值"), FontSize, TEXTALIGN_ML);
+			Ui()->DoLabel(&Label, TCLocalize("Interpolation"), FontSize, TEXTALIGN_ML);
 			const int BestInterpolationSelectedOld = std::clamp(g_Config.m_TcBestInputInterpolation, 1, 3) - 1;
 			const int BestInterpolationSelectedNew = Ui()->DoDropDown(&BestInterpolationDropDownRect, BestInterpolationSelectedOld, s_vBestInterpolationNames.data(), s_vBestInterpolationNames.size(), s_BestInterpolationDropDownState);
 			if(BestInterpolationSelectedNew >= 0 && BestInterpolationSelectedNew < (int)s_vBestInterpolationNames.size())
@@ -989,7 +989,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 			if(g_Config.m_TcAncientInputOthers)
 			{
 				Column.HSplitTop(LineSize, &Button, &Column);
-				DoSliderWithScaledValue(&g_Config.m_TcAncientInputOthersAmount, &g_Config.m_TcAncientInputOthersAmount, &Button, TCLocalize("其他玩家预测量"), 0, 40, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
+				DoSliderWithScaledValue(&g_Config.m_TcAncientInputOthersAmount, &g_Config.m_TcAncientInputOthersAmount, &Button, TCLocalize("Others prediction amount"), 0, 40, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
 			}
 			break;
 		case 7: DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFInputOthers, TCLocalize("f input others"), &g_Config.m_TcFInputOthers, &Column, LineSize); break;
@@ -1218,7 +1218,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	{
 		MutedReply.HSplitTop(MarginExtraSmall, nullptr, &MutedReply);
 		static CLineInput s_MutedReply(g_Config.m_TcAutoReplyMutedMessage, sizeof(g_Config.m_TcAutoReplyMutedMessage));
-		s_MutedReply.SetEmptyText("I have muted you");
+		s_MutedReply.SetEmptyText(TCLocalize("I have muted you"));
 		Ui()->DoEditBox(&s_MutedReply, &MutedReply, EditBoxFontSize);
 	}
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
@@ -1230,7 +1230,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	{
 		MinimizedReply.HSplitTop(MarginExtraSmall, nullptr, &MinimizedReply);
 		static CLineInput s_MinimizedReply(g_Config.m_TcAutoReplyMinimizedMessage, sizeof(g_Config.m_TcAutoReplyMinimizedMessage));
-		s_MinimizedReply.SetEmptyText("I am not tabbed in");
+		s_MinimizedReply.SetEmptyText(TCLocalize("I am not tabbed in"));
 		Ui()->DoEditBox(&s_MinimizedReply, &MinimizedReply, EditBoxFontSize);
 	}
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
@@ -1274,9 +1274,9 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWarListIndicatorColors, TCLocalize("Use warlist colors instead of regular colors"), &g_Config.m_TcWarListIndicatorColors, &Column, LineSize);
 		char aBuf[128];
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWarListIndicatorAll, TCLocalize("Show all warlist groups"), &g_Config.m_TcWarListIndicatorAll, &Column, LineSize);
-		str_format(aBuf, sizeof(aBuf), "Show %s group", GameClient()->m_WarList.m_WarTypes.at(1)->m_aWarName);
+		str_format(aBuf, sizeof(aBuf), TCLocalize("Show %s group"), GameClient()->m_WarList.m_WarTypes.at(1)->m_aWarName);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWarListIndicatorEnemy, aBuf, &g_Config.m_TcWarListIndicatorEnemy, &Column, LineSize);
-		str_format(aBuf, sizeof(aBuf), "Show %s group", GameClient()->m_WarList.m_WarTypes.at(2)->m_aWarName);
+		str_format(aBuf, sizeof(aBuf), TCLocalize("Show %s group"), GameClient()->m_WarList.m_WarTypes.at(2)->m_aWarName);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWarListIndicatorTeam, aBuf, &g_Config.m_TcWarListIndicatorTeam, &Column, LineSize);
 	}
 	if(!g_Config.m_TcWarListIndicatorColors || !g_Config.m_TcWarListIndicator)
@@ -1521,7 +1521,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 				PresetRow.VSplitLeft(BtnW, &Btn, &PresetRow);
 				if(i < 3)
 					PresetRow.VSplitLeft(MarginSmall, nullptr, &PresetRow);
-				if(DoButton_Menu(&s_aIslandPresetIds[i], s_aPresets[i].m_pName, 0, &Btn))
+				if(DoButton_Menu(&s_aIslandPresetIds[i], TCLocalize(s_aPresets[i].m_pName), 0, &Btn))
 				{
 					g_Config.m_TcIslandColorTop = s_aPresets[i].m_Top;
 					g_Config.m_TcIslandColorBottom = s_aPresets[i].m_Bottom;
@@ -2566,7 +2566,7 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 	Column3.HSplitTop(MarginSmall, nullptr, &Column3);
 	Column3.HSplitTop(HeadlineFontSize + MarginSmall, &Button, &Column3);
 	s_TypeNameInput.SetBuffer(s_aTypeName, sizeof(s_aTypeName));
-	s_TypeNameInput.SetEmptyText("Group Name");
+	s_TypeNameInput.SetEmptyText(TCLocalize("Group Name"));
 	Ui()->DoEditBox(&s_TypeNameInput, &Button, 12.0f);
 	static CButtonContainer s_AddGroupButton, s_OverrideGroupButton, s_GroupColorPicker;
 
@@ -4043,7 +4043,9 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("Client badge"), HeadlineFontSize, TEXTALIGN_ML);
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeClientBadge, TCLocalize("Show a penguin next to TClient players on the scoreboard (also announces that you use TClient)"), &g_Config.m_MeClientBadge, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeClientBadge, TCLocalize("Show a penguin next to TClient players on the scoreboard"), &g_Config.m_MeClientBadge, &LeftView, LineSize);
+	LeftView.HSplitTop(LineSize, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("TClient identity is always broadcast so other TClient users can recognise you; this option only controls whether you see the penguin."), EditBoxFontSize, TEXTALIGN_TL);
 
 	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
 	Ui()->DoLabel(&Label, TCLocalize("Message muting"), HeadlineFontSize, TEXTALIGN_ML);

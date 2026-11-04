@@ -1656,3 +1656,151 @@ Commands
 
 Binds
 == 绑定
+Statusbar
+== 状态栏
+
+Endpoint override (optional):
+== 自定义接口地址（可选）：
+
+Order in the ping wheel. Icons and sounds live in data/tclient/pings/
+== 轮盘中的顺序。图标和声音文件位于 data/tclient/pings/
+
+Apply Changes
+== 应用更改
+
+Clear Changes
+== 清除更改
+
+Changes: %d
+== 更改：%d
+
+Compact List
+== 紧凑列表
+
+Only modified
+== 仅已修改
+
+No assets
+== 无素材
+
+Blend:
+== 混合：
+
+Configs
+== 配置文件
+
+Credits
+== 制作人员
+
+Show dummy position
+== 显示分身位置
+
+Show dummy speed
+== 显示分身速度
+
+Show dummy target angle
+== 显示分身目标角度
+
+TClient %s is available:
+== TClient %s 已可用：
+
+TClient Client updated!
+== TClient 客户端已更新！
+
+TClient %s is out!
+== TClient %s 已发布！
+
+[Important alert message]
+Tap to dismiss…
+== 点击关闭…
+
+Initializing layers
+== 正在初始化图层
+
+Fetching the update helper...
+== 正在获取更新助手…
+
+[translate]
+Translating your message failed, sending it untranslated: %s
+== 翻译你的消息失败，将以原文发送：%s
+
+I have muted you
+== 我已屏蔽你
+
+I am not tabbed in
+== 我当前不在游戏窗口
+
+Group Name
+== 分组名称
+
+Show %s group
+== 显示 %s 组
+
+Graphite
+== 石墨
+
+Abyss
+== 深渊
+
+Twilight
+== 暮光
+
+Aurora
+== 极光
+
+No untranslated non-Chinese messages found
+== 没有找到未翻译的非中文消息
+
+Not a valid ID
+== 无效的 ID
+
+ID not connected
+== 该 ID 未连接
+
+No message to translate
+== 没有可翻译的消息
+
+Invalid translate backend
+== 无效的翻译后端
+
+You are not in practice
+== 你不在练习模式
+
+No safe position found
+== 未找到安全位置
+
+Failed to load background drawing: file size unavailable or exceeds 16 MiB
+== 加载背景绘图失败：文件大小不可用或超过 16 MiB
+
+Failed to load background drawing: read exceeds 16 MiB
+== 加载背景绘图失败：读取超过 16 MiB
+
+yes
+== 是
+
+no
+== 否
+
+Smoothing strength
+== 平滑强度
+
+Linear
+== 线性
+
+Cubic
+== 三次
+
+Smooth
+== 平滑
+
+Interpolation
+== 插值
+
+Others prediction amount
+== 其他玩家预测量
+
+Show a penguin next to TClient players on the scoreboard
+== 在记分板上为 TClient 玩家显示企鹅图标
+
+TClient identity is always broadcast so other TClient users can recognise you; this option only controls whether you see the penguin.
+== TClient 身份始终对外广播，方便其他 TClient 用户认出你；此选项只控制你自己是否看到企鹅图标。

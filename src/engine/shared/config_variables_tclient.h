@@ -404,8 +404,9 @@ MACRO_CONFIG_INT(MeMuteFinishFeed, me_mute_finish_feed, 0, 0, 1, CFGFLAG_CLIENT 
 // 自适应快照插值缓冲：网络抖动时自动延长插值窗口（最多 max 毫秒）换平滑，平稳时自动收回
 MACRO_CONFIG_INT(TcJitterBuffer, tc_jitter_buffer, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Adaptive snapshot interpolation buffer: adds up to tc_jitter_buffer_max ms of extra delay when network jitter rises, to keep rendering smooth")
 MACRO_CONFIG_INT(TcJitterBufferMax, tc_jitter_buffer_max, 30, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Maximum extra delay in ms for the adaptive snapshot interpolation buffer")
-// ME page: TClient 企鹅徽标（ddnet-custom-clients 皮肤颜色法，发送与显示一体）
-MACRO_CONFIG_INT(MeClientBadge, me_client_badge, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: show the TClient penguin next to TClient players on the scoreboard (also announces that you use TClient)")
+// ME page: TClient 企鹅徽标（ddnet-custom-clients 皮肤颜色法）
+// 广播是客户端身份的一部分，始终发送；本开关只控制自己是否显示徽标。
+MACRO_CONFIG_INT(MeClientBadge, me_client_badge, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: show the TClient penguin next to TClient players on the scoreboard (TClient identity is always broadcast)")
 MACRO_CONFIG_INT(TcIslandOffsetX, tc_island_offset_x, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island horizontal offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandOffsetY, tc_island_offset_y, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island vertical offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandTransparent, tc_island_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode (no black capsule, outlined text)")

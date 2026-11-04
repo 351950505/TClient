@@ -426,7 +426,7 @@ bool CBgDraw::Load(const char *pFilename, bool Verbose)
 	if(FileSize < 0 || FileSize > BgDrawFile::MAX_FILE_SIZE)
 	{
 		io_close(Handle);
-		GameClient()->Echo("Failed to load background drawing: file size unavailable or exceeds 16 MiB");
+		GameClient()->Echo(TCLocalize("Failed to load background drawing: file size unavailable or exceeds 16 MiB"));
 		return false;
 	}
 	BgDrawFile::CLineReader Reader([Handle](char *pBuf, unsigned Size) {
@@ -454,7 +454,7 @@ bool CBgDraw::Load(const char *pFilename, bool Verbose)
 	io_close(Handle);
 	if(Reader.LimitExceeded())
 	{
-		GameClient()->Echo("Failed to load background drawing: read exceeds 16 MiB");
+		GameClient()->Echo(TCLocalize("Failed to load background drawing: read exceeds 16 MiB"));
 		return false;
 	}
 	MakeSpaceFor(Queue.size());

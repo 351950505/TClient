@@ -384,6 +384,7 @@ public:
 	int GetDataIndex() const override;
 	void Init() override;
 	void InitTileData() override;
+	bool DoRender(const CRenderLayerParams &Params) override;
 
 protected:
 	void RenderTileLayerNoTileBuffer(const ColorRGBA &Color, const CRenderLayerParams &Params) override;
@@ -393,5 +394,7 @@ protected:
 private:
 	CTuneTile *m_pTuneTiles;
 	mutable CTuneColorMapper m_TuneColorMapper;
+	bool m_ShowTuneZoneColors = false;
+	bool m_UseTuneColorTexture = false;
 };
 #endif

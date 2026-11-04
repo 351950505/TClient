@@ -1769,28 +1769,41 @@ CRenderLayerEntityTune::CRenderLayerEntityTune(int GroupId, int LayerId, int Fla
 
 IGraphics::CTextureHandle CRenderLayerEntityTune::GetTexture() const
 {
+	if(!g_Config.m_TcShowTuneZoneColors || !m_UseTuneColorTexture)
+		return CRenderLayerEntityBase::GetTexture();
 	return m_pMapImages->GetTuneColors();
 }
 
 void CRenderLayerEntityTune::GetTileData(unsigned char *pIndex, unsigned char *pFlags, int *pAngleRotate, unsigned int x, unsigned int y, int CurOverlay) const
 {
-	const unsigned char Number = m_pTuneTiles[y * m_pLayerTilemap->m_Width + x].m_Number;
-	unsigned char Index = 0;
-
-	if(Number != 0)
+	const CTuneTile &Tile = m_pTuneTiles[y * m_pLayerTilemap->m_Width + x];
+	*pIndex = Tile.m_Type;
+	if(g_Config.m_TcShowTuneZoneColors && m_UseTuneColorTexture)
 	{
 		// assign color index instead of tune number for higher color distance
-		Index = m_TuneColorMapper.TuneNumberToColorIndex(Number);
+		*pIndex = Tile.m_Type == TILE_TUNE ? m_TuneColorMapper.TuneNumberToColorIndex(Tile.m_Number) : 0;
 	}
-
-	*pIndex = Index;
 	*pFlags = 0;
 }
 
 void CRenderLayerEntityTune::Init()
 {
+	m_ShowTuneZoneColors = g_Config.m_TcShowTuneZoneColors != 0;
+	m_UseTuneColorTexture = Graphics()->IsTileBufferingEnabled() && Graphics()->HasTextureArraysSupport();
 	m_TuneColorMapper.Reset();
 	CRenderLayerTile::Init();
+}
+
+bool CRenderLayerEntityTune::DoRender(const CRenderLayerParams &Params)
+{
+	if(m_ShowTuneZoneColors != (g_Config.m_TcShowTuneZoneColors != 0))
+	{
+		m_ShowTuneZoneColors = g_Config.m_TcShowTuneZoneColors != 0;
+		m_TuneColorMapper.Reset();
+		CRenderLayerTile::Unload();
+		UploadTileData(m_VisualTiles, 0, false);
+	}
+	return CRenderLayerEntityBase::DoRender(Params);
 }
 
 int CRenderLayerEntityTune::GetDataIndex() const
@@ -1805,8 +1818,9 @@ void CRenderLayerEntityTune::InitTileData()
 
 void CRenderLayerEntityTune::RenderTileLayerNoTileBuffer(const ColorRGBA &Color, const CRenderLayerParams &Params)
 {
+	CTuneColorMapper *pTuneColorMapper = g_Config.m_TcShowTuneZoneColors ? &m_TuneColorMapper : nullptr;
 	Graphics()->BlendNone();
-	RenderMap()->RenderTunemap(m_pTuneTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_OPAQUE, &m_TuneColorMapper);
+	RenderMap()->RenderTunemap(m_pTuneTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_OPAQUE, pTuneColorMapper);
 	Graphics()->BlendNormal();
-	RenderMap()->RenderTunemap(m_pTuneTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_TRANSPARENT, &m_TuneColorMapper);
+	RenderMap()->RenderTunemap(m_pTuneTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_TRANSPARENT, pTuneColorMapper);
 }

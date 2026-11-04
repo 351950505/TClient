@@ -1804,3 +1804,12 @@ Show a penguin next to TClient players on the scoreboard
 
 TClient identity is always broadcast so other TClient users can recognise you; this option only controls whether you see the penguin.
 == TClient 身份始终对外广播，方便其他 TClient 用户认出你；此选项只控制你自己是否看到企鹅图标。
+
+Map Layers
+== 地图图层
+
+Show tune zone colors
+== 显示调谐区颜色
+
+When disabled, tune zones use your entity tiles without added colors.
+== 关闭后，调谐区使用你的实体贴图，不额外着色。

@@ -3584,9 +3584,19 @@ void CClient::InitInterfaces()
 	m_GhostLoader.Init();
 }
 
+#if defined(CONF_FAMILY_WINDOWS)
+// shell32 导出；声明内联以免引入整个 shobjidl.h（见 Run() 内的调用说明）。
+extern "C" __declspec(dllimport) HRESULT __stdcall SetCurrentProcessExplicitAppUserModelID(const wchar_t *AppID);
+#endif
+
 void CClient::Run()
 {
 #if defined(CONF_FAMILY_WINDOWS)
+	// 任务栏身份固定为客户端自己。更新器（boot helper）在启动健康确认期间
+	// 存活，游戏窗口恰好在该窗口期创建时会被 Windows 钉上启动者的任务栏
+	// 身份（显示为 TClientUpdater.boot.exe）并持续整个会话（2026-11-06 实测）。
+	// 显式 AUMID 让任务栏归属与启动方式无关。
+	SetCurrentProcessExplicitAppUserModelID(L"TClient.Client");
 	const SUpdaterReadyMarker UpdaterReadyMarker = TakeUpdaterReadyMarker();
 	bool UpdaterReadyMarkerPending = !UpdaterReadyMarker.m_Path.empty();
 #endif

@@ -1476,13 +1476,6 @@ void CTClient::UpdateInstallAndRestart()
 	char aPid[32];
 	str_format(aPid, sizeof(aPid), "%d", process_id());
 
-	const char *apArguments[] = {
-		"--pid", aPid,
-		"--zip", aZip,
-		"--sha256", m_UpdateRelease.m_aSha256,
-		"--target", aTarget,
-		"--restart", aExe,
-		"--log", aLog};
 #if defined(CONF_FAMILY_WINDOWS)
 	{
 		wchar_t aWideTarget[IO_MAX_PATH_LENGTH];
@@ -1494,12 +1487,33 @@ void CTClient::UpdateInstallAndRestart()
 	}
 #endif
 	log_info("tclient-update", "starting helper: %s (pid %s, target %s)", aHelper, aPid, aTarget);
-	const PROCESS Helper = process_execute(aHelper, EShellExecuteWindowState::BACKGROUND, apArguments, std::size(apArguments));
-	if(Helper == INVALID_PROCESS)
+	// 隐藏启动：helper 是控制台程序，ShellExecute 只能最小化（任务栏会一直挂着
+	// "TClientUpdater.boot.exe"，玩家以为更新器没关），用 CREATE_NO_WINDOW 让
+	// 更新过程完全无窗口；失败提示由 helper 自己的置顶 MessageBox 负责。
+	char aCmd[4096];
+	str_format(aCmd, sizeof(aCmd),
+		"\"%s\" --pid %s --zip \"%s\" --sha256 %s --target \"%s\" --restart \"%s\" --log \"%s\"",
+		aHelper, aPid, aZip, m_UpdateRelease.m_aSha256, aTarget, aExe, aLog);
+	wchar_t aWideHelper[IO_MAX_PATH_LENGTH];
+	wchar_t aWideCmd[std::size(aCmd)];
+	if(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, aHelper, -1, aWideHelper, (int)std::size(aWideHelper)) <= 0 ||
+		MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, aCmd, -1, aWideCmd, (int)std::size(aWideCmd)) <= 0)
 	{
 		UpdateFail(TCLocalize("Could not start the update helper"));
 		return;
 	}
+	STARTUPINFOW StartupInfo;
+	memset(&StartupInfo, 0, sizeof(StartupInfo));
+	StartupInfo.cb = sizeof(StartupInfo);
+	PROCESS_INFORMATION HelperProcess;
+	memset(&HelperProcess, 0, sizeof(HelperProcess));
+	if(!CreateProcessW(aWideHelper, aWideCmd, nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &StartupInfo, &HelperProcess))
+	{
+		UpdateFail(TCLocalize("Could not start the update helper"));
+		return;
+	}
+	CloseHandle(HelperProcess.hThread);
+	CloseHandle(HelperProcess.hProcess);
 	SetUpdateStatus(TCLocalize("Closing the client to install the update..."));
 	m_UpdateState = EUpdateState::IDLE;
 	Client()->Quit();

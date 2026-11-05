@@ -1,5 +1,8 @@
 #include "player_status.h"
 
+#include <algorithm>
+#include <vector>
+
 #include <engine/font_icons.h>
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
@@ -41,6 +44,7 @@ void CPlayerStatus::RenderGears()
 	const CScreenRect WorldRect = Graphics()->MapScreenToWorld(Center.x, Center.y, 100.0f, 100.0f, 100.0f, 0, 0, Graphics()->ScreenAspect(), GameClient()->m_Camera.m_Zoom);
 	const CScreenRect PrevRect = Graphics()->GetScreen();
 
+	std::vector<vec2> vGearPixels;
 	bool Any = false;
 	for(int i = 0; i < MAX_CLIENTS; i++)
 	{
@@ -58,20 +62,35 @@ void CPlayerStatus::RenderGears()
 			Graphics()->MapScreen(WorldRect);
 			Any = true;
 		}
-		// 半透明深色圆底 + 齿轮，任何地图背景下都看得清
+		// 半透明深色圆底（世界空间，随缩放跟随 tee）
 		Graphics()->TextureClear();
 		Graphics()->QuadsBegin();
 		Graphics()->SetColor(0.0f, 0.0f, 0.0f, 0.45f);
-		Graphics()->DrawCircle(Pos.x, Pos.y, 13.0f, 24);
+		Graphics()->DrawCircle(Pos.x, Pos.y, 13.0f, 32);
 		Graphics()->QuadsEnd();
 
-		const float Size = 20.0f;
+		// 齿轮投影到屏幕像素：字形按最终像素尺寸栅格化才是 1:1 渲染，
+		// 世界空间直接画会被变换拉伸出锯齿（2026-11-06 玩家反馈）。
+		const float Scale = Graphics()->ScreenHeight() / WorldRect.Height();
+		vGearPixels.push_back(vec2(
+			(Pos.x - WorldRect.m_TopLeft.x) * Graphics()->ScreenWidth() / WorldRect.Width(),
+			(Pos.y - WorldRect.m_TopLeft.y) * Scale));
+	}
+	if(Any)
+	{
+		// 齿轮在像素空间 1:1 渲染
+		Graphics()->MapScreen(CScreenRect(0.0f, 0.0f, (float)Graphics()->ScreenWidth(), (float)Graphics()->ScreenHeight()));
+		const float GearSize = std::clamp(20.0f * Graphics()->ScreenHeight() / WorldRect.Height(), 10.0f, 96.0f);
 		TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
-		const float Width = TextRender()->TextWidth(Size, FontIcon::GEAR, -1, -1.0f);
 		TextRender()->TextColor(1.0f, 0.85f, 0.35f, 1.0f);
-		TextRender()->Text(Pos.x - Width / 2.0f, Pos.y - Size / 2.0f, Size, FontIcon::GEAR, -1.0f);
+		for(const vec2 &Gear : vGearPixels)
+		{
+			const float Width = TextRender()->TextWidth(GearSize, FontIcon::GEAR, -1, -1.0f);
+			TextRender()->Text(Gear.x - Width / 2.0f, Gear.y - GearSize / 2.0f, GearSize, FontIcon::GEAR, -1.0f);
+		}
 		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 		TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+		Graphics()->MapScreen(WorldRect);
 	}
 	if(Any)
 		Graphics()->MapScreen(PrevRect);

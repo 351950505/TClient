@@ -1427,9 +1427,22 @@ namespace
 				if(hProcess == nullptr)
 				{
 					const DWORD LastError = GetLastError();
-					if(LastError != ERROR_INVALID_PARAMETER)
+					if(LastError == ERROR_INVALID_PARAMETER)
 					{
-						g_Logger.Error("could not identify candidate process pid=%lu: %s", (unsigned long)Entry.th32ProcessID, FormatLastError(LastError).c_str());
+						// Exited between the snapshot and the open call.
+					}
+					else if(LastError == ERROR_ACCESS_DENIED)
+					{
+						// Windows denies process introspection for processes running at a higher
+						// integrity level. Their install path cannot be verified, so they are not
+						// counted as target-owned: a same-named process from another installation
+						// must not block the update. If such a process really maps a file that this
+						// update has to replace, installing fails on that exact file and rolls back.
+						g_Logger.Warn("cannot verify candidate process pid=%lu name='%s': %s; assuming it does not belong to this installation", (unsigned long)Entry.th32ProcessID, Utf8FromWide(Entry.szExeFile).c_str(), FormatLastError(LastError).c_str());
+					}
+					else
+					{
+						g_Logger.Error("could not identify candidate process pid=%lu name='%s': %s", (unsigned long)Entry.th32ProcessID, Utf8FromWide(Entry.szExeFile).c_str(), FormatLastError(LastError).c_str());
 						Complete = false;
 					}
 					continue;
@@ -1445,8 +1458,15 @@ namespace
 					const DWORD LastError = GetLastError();
 					if(WaitForSingleObject(hProcess, 0) != WAIT_OBJECT_0)
 					{
-						g_Logger.Error("could not query candidate process pid=%lu: %s", (unsigned long)Entry.th32ProcessID, FormatLastError(LastError).c_str());
-						Complete = false;
+						if(LastError == ERROR_ACCESS_DENIED)
+						{
+							g_Logger.Warn("cannot verify candidate process pid=%lu name='%s': %s; assuming it does not belong to this installation", (unsigned long)Entry.th32ProcessID, Utf8FromWide(Entry.szExeFile).c_str(), FormatLastError(LastError).c_str());
+						}
+						else
+						{
+							g_Logger.Error("could not query candidate process pid=%lu name='%s': %s", (unsigned long)Entry.th32ProcessID, Utf8FromWide(Entry.szExeFile).c_str(), FormatLastError(LastError).c_str());
+							Complete = false;
+						}
 					}
 				}
 				CloseHandle(hProcess);
@@ -2525,7 +2545,7 @@ int wmain(int argc, wchar_t **argv)
 			else
 				Message = L"更新未完成。请查看日志中的原因后重试。";
 			Message += L"\n\n日志：" + LogPath + L"\n退出码：" + std::to_wstring(Result);
-			MessageBoxW(nullptr, Message.c_str(), L"TClient 更新失败", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+			MessageBoxW(nullptr, Message.c_str(), L"TClient 更新失败", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND | MB_TOPMOST);
 		}
 	}
 	return Result;

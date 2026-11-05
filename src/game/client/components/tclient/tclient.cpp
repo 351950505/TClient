@@ -1563,6 +1563,16 @@ void CTClient::ConUpdateCheck(IConsole::IResult *pResult, void *pUserData)
 void CTClient::OnShutdown()
 {
 	ResetUpdateTasks();
+#if defined(CONF_FAMILY_WINDOWS)
+	char aInstallDir[IO_MAX_PATH_LENGTH];
+	Storage()->GetBinaryPathAbsolute(CLIENT_EXEC PLAT_EXT, aInstallDir, sizeof(aInstallDir));
+	if(fs_parent_dir(aInstallDir) == 0)
+	{
+		wchar_t aWideInstallDir[IO_MAX_PATH_LENGTH];
+		if(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, aInstallDir, -1, aWideInstallDir, std::size(aWideInstallDir)) > 0)
+			StopOwnHelperProcesses(aWideInstallDir);
+	}
+#endif
 }
 
 void CTClient::SetForcedAspect()

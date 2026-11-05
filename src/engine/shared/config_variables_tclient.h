@@ -431,6 +431,7 @@ MACRO_CONFIG_INT(TcUiScale, tc_ui_scale, 100, 50, 200, CFGFLAG_CLIENT | CFGFLAG_
 MACRO_CONFIG_INT(TcPingwheelVolume, tc_pingwheel_volume, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal sound volume (%)")
 MACRO_CONFIG_INT(TcPingwheelSoundRange, tc_pingwheel_sound_range, 600, 0, 10000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel sound audible range in world units (0 = global, no falloff)")
 MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "DEPRECATED: emoticon fallback channel removed, signals always use the relay channel")
+MACRO_CONFIG_INT(TcUpdateAutoDownload, tc_update_auto_download, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically download a verified update after it is detected (installing still requires a manual click)")
 MACRO_CONFIG_INT(TcRelay, tc_relay, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal relay: send/receive pings via the TClient signal server (works while spectating, invisible to chat)")
 MACRO_CONFIG_INT(TcRelayP2p, tc_relay_p2p, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Relay P2P direct send (off = all pings go through the signal server so everyone with the client sees them)")
 MACRO_CONFIG_STR(TcRelayAddr, tc_relay_addr, 64, "8.163.48.23:8305", CFGFLAG_CLIENT | CFGFLAG_SAVE, "TClient signal server address (ip:port, udp)")

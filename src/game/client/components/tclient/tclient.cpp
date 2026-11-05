@@ -1026,9 +1026,9 @@ bool CTClient::VerifyUpdateManifestSignature(const unsigned char *pManifest, siz
 
 bool CTClient::UpdateShouldAutoCheck() const
 {
-	if(m_UpdateState == EUpdateState::CHECKING || m_UpdateState == EUpdateState::DOWNLOADING || m_UpdateState == EUpdateState::DOWNLOADED)
-		return false;
-	if(m_UpdateState == EUpdateState::AVAILABLE)
+	// 只挡"任务在飞"的状态。DOWNLOADED/AVAILABLE 也要继续周期检查：
+	// 攒着旧包等手动安装时新版本发布了，得能感知并自动换下最新包。
+	if(m_UpdateState == EUpdateState::CHECKING || m_UpdateState == EUpdateState::DOWNLOADING || m_UpdateState == EUpdateState::PROBING)
 		return false;
 	const int64_t Now = time_timestamp();
 	if(m_LastUpdateCheck == 0)
@@ -1137,6 +1137,14 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 	{
 		// 「版本不比当前新」不是错误：发布页的 latest 可能正好就是本机版本
 		// （刚更新完再检查一次）。这里显示"已是最新版本"，不要报成红色失败。
+		if(m_aUpdateDownloadedVersion[0] != '\0' && str_comp(pVersion, m_aUpdateDownloadedVersion) == 0)
+		{
+			// 该版本的包已经下载好、正等手动安装：保持可安装状态不被冲掉。
+			m_UpdateState = EUpdateState::DOWNLOADED;
+			SetUpdateStatus(TCLocalize("Update downloaded, ready to install"));
+			json_value_free(pJson);
+			return;
+		}
 		m_UpdateState = EUpdateState::UP_TO_DATE;
 		SetUpdateStatus(TCLocalize("You are on the latest version"));
 		log_info("tclient-update", "latest release is %s, current is %s: up to date", pVersion, TCLIENT_APP_VERSION);
@@ -1181,11 +1189,26 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
 
+	// 同版本的包已经完整下载过（等手动安装）：不重复下载，直接回到可安装
+	// 状态。DOWNLOADED 下自动检查仍会跑，这里兜住同版本的重复触发。
+	if(m_aUpdateDownloadedVersion[0] != '\0' && str_comp(m_UpdateRelease.m_aVersion, m_aUpdateDownloadedVersion) == 0)
+	{
+		m_UpdateState = EUpdateState::DOWNLOADED;
+		SetUpdateStatus(TCLocalize("Update downloaded, ready to install"));
+		log_info("tclient-update", "version %s is already downloaded; keeping the ready-to-install state", m_UpdateRelease.m_aVersion);
+		return;
+	}
+
 	m_UpdateState = EUpdateState::AVAILABLE;
 	char aStatus[128];
 	str_format(aStatus, sizeof(aStatus), TCLocalize("Version %s is available"), m_UpdateRelease.m_aVersion);
 	SetUpdateStatus(aStatus);
 	log_info("tclient-update", "update available: %s -> %s (%lld bytes)", TCLIENT_APP_VERSION, m_UpdateRelease.m_aVersion, (long long)m_UpdateRelease.m_Size);
+
+	// 自动下载（tc_update_auto_download，默认开）：检测到比已下载包更新的
+	// 版本时直接覆盖下载最新版；安装仍然只由玩家手动触发。
+	if(g_Config.m_TcUpdateAutoDownload)
+		UpdateStartDownload();
 }
 
 #if defined(CONF_FAMILY_WINDOWS)
@@ -1401,6 +1424,7 @@ void CTClient::FinishUpdateBootstrap()
 		return;
 	}
 	BootstrapHelperPending = true;
+	str_copy(m_aUpdateDownloadedVersion, m_UpdateRelease.m_aVersion);
 	m_UpdateState = EUpdateState::DOWNLOADED;
 	SetUpdateStatus(TCLocalize("Update downloaded, ready to install"));
 	log_info("tclient-update", "download verified: %s (%lld bytes), bootstrap helper ready", aPath, (long long)Length);
@@ -1413,6 +1437,7 @@ bool CTClient::UpdateHelperExists() const
 
 void CTClient::UpdateInstallAndRestart()
 {
+	m_UpdateInstallLaunched = true;
 	if(m_UpdateState != EUpdateState::DOWNLOADED)
 		return;
 #if !defined(CONF_FAMILY_WINDOWS)
@@ -1653,6 +1678,26 @@ void CTClient::ConUpdateCheck(IConsole::IResult *pResult, void *pUserData)
 
 void CTClient::OnShutdown()
 {
+#if defined(CONF_FAMILY_WINDOWS)
+	// 退出游戏时若已下载好新版本，问一次是否立即安装。只在 DOWNLOADED 状态
+	// 弹（检测到但没下载的不弹）；拒绝后记住版本号，要等下载了更新的版本
+	// 才会再问。ME 页手动安装进行中（BootstrapHelperPending）不重复打扰。
+	if(m_UpdateState == EUpdateState::DOWNLOADED && m_UpdateRelease.m_Valid &&
+		!m_UpdateInstallLaunched &&
+		str_comp(m_UpdateRelease.m_aVersion, m_aUpdateDeclinedVersion) != 0)
+	{
+		char aBody[192];
+		str_format(aBody, sizeof(aBody), TCLocalize("Update %s has been downloaded. Install it now?"), m_UpdateRelease.m_aVersion);
+		wchar_t aWideBody[256];
+		if(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, aBody, -1, aWideBody, (int)std::size(aWideBody)) > 0)
+		{
+			if(MessageBoxW(nullptr, aWideBody, L"TClient", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND) == IDYES)
+				UpdateInstallAndRestart();
+			else
+				str_copy(m_aUpdateDeclinedVersion, m_UpdateRelease.m_aVersion);
+		}
+	}
+#endif
 	ResetUpdateTasks();
 }
 

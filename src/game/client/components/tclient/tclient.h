@@ -108,6 +108,12 @@ private:
 	char m_aUpdateManifestSigUrl[512] = "";
 	char m_aUpdateHelperUrl[512] = "";
 	char m_aUpdateBootstrapPath[IO_MAX_PATH_LENGTH] = "";
+	// 已完整下载（zip+helper 验证通过）的版本；用于自动检查时跳过同版本重复
+	// 下载，以及退出弹窗的"同一版本只问一次"。
+	char m_aUpdateDownloadedVersion[32] = "";
+	char m_aUpdateDeclinedVersion[32] = "";
+	// ME 页或退出弹窗已经启动过安装流（helper 已在跑），OnShutdown 不再弹窗。
+	bool m_UpdateInstallLaunched = false;
 	bool BootstrapHelperPending = false;
 	int m_UpdateManifestSource = 0;
 	std::shared_ptr<IHttpRequest> m_pUpdateHelperTask = nullptr;

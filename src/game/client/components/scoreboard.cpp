@@ -779,8 +779,10 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 			// TClient: 分数列左侧的企鹅徽标（学 BestClient 摆位，行内垂直居中）
 			if(g_Config.m_MeClientBadge && pInfo->m_ClientId >= 0 && GameClient()->m_ClientBadge.IsTClientUser(pInfo->m_ClientId))
 			{
-				const float BadgeSize = FontSize * 1.0f;
-				GameClient()->m_ClientBadge.RenderBadge(vec2(ScoreOffset - BadgeSize + 6.0f, Row.y + (Row.h - BadgeSize) / 2.0f), BadgeSize, TextColor.a);
+				const float BadgeSize = FontSize * 1.75f; // 1.0 太小，玩家反馈看不清；1.5 仍偏小，定 1.75（2026-11-06）
+				// 右移并钳制在记分板框内（1.75 倍后左缘会戳出面板左框，2026-11-06 反馈）
+				const float BadgeX = std::max(Scoreboard.x + 2.0f, ScoreOffset - BadgeSize + 16.0f);
+				GameClient()->m_ClientBadge.RenderBadge(vec2(BadgeX, Row.y + (Row.h - BadgeSize) / 2.0f), BadgeSize, TextColor.a);
 			}
 
 			// CTF flag

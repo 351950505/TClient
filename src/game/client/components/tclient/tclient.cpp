@@ -58,14 +58,35 @@ static constexpr const char *TCLIENT_UPDATE_LATEST_URL = "https://github.com/351
 static constexpr const char *TCLIENT_UPDATE_RAW_BASE = "https://raw.githubusercontent.com/351950505/TClient/master/update/";
 // 自建 gh-proxy 加速（用户部署）：把 github.com 的原始地址拼在代理域名后即可，
 // 对国内网络友好；下载 zip / helper 也走它。
-static constexpr const char *TCLIENT_UPDATE_PROXY_BASE = "https://github.me2.dpdns.org/";
 static constexpr const char *TCLIENT_UPDATE_GH_BASE = "https://github.com/351950505/TClient/releases/latest/download/";
-// 候选清单源，按顺序尝试：加速代理 → github 直链 → raw 仓库
+// 候选清单源，按顺序尝试：ghfast 加速 → 自建优选镜像（fast1/fast2，同一优选
+// 边缘 104.17.147.66）→ github 直链 → raw 仓库。
 static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {
-	"https://github.me2.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
+	"https://ghfast.top/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
+	"https://fast1.me3.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
+	"https://fast2.me3.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://raw.githubusercontent.com/351950505/TClient/master/update/TClient-update-win64.json",
 };
+// 与清单源一一对应的同目录资产（签名/zip/helper）前缀："" = releases 直链，
+// nullptr = raw 仓库。清单验签只认内容不认来源，换镜像不改协议。
+static const char *const TCLIENT_UPDATE_SOURCE_SIBLING_BASES[] = {
+	"https://ghfast.top/",
+	"https://fast1.me3.dpdns.org/",
+	"https://fast2.me3.dpdns.org/",
+	"",
+	nullptr,
+};
+static_assert(std::size(TCLIENT_UPDATE_MANIFEST_SOURCES) == std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES));
+
+// 用资产前缀拼 releases 资源 URL；base 为 "" 时即直链。
+static void FormatUpdateAssetUrl(char *pBuf, int BufSize, const char *pBase, const char *pAsset)
+{
+	if(pBase[0] == '\0')
+		str_format(pBuf, BufSize, "%s%s", TCLIENT_UPDATE_GH_BASE, pAsset);
+	else
+		str_format(pBuf, BufSize, "%shttps://github.com/351950505/TClient/releases/latest/download/%s", pBase, pAsset);
+}
 static constexpr const char *TCLIENT_UPDATE_PRODUCT = "TClient";
 static constexpr const char *TCLIENT_UPDATE_CHANNEL = "stable";
 static constexpr const char *TCLIENT_UPDATE_PLATFORM = "win64";
@@ -1133,17 +1154,14 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 	m_UpdateRelease.m_HelperSize = JsonGetInt(HelperSize, -1);
 	str_format(m_UpdateRelease.m_aTag, sizeof(m_UpdateRelease.m_aTag), "v%s", pVersion);
 	str_copy(m_UpdateRelease.m_aVersion, pVersion);
-	// 大文件（zip/helper）：清单走代理源时同样走代理（用户自建 gh-proxy 加速），
-	// 否则回退 github releases 直链。raw 仓库放不下 61MB 包，不能用。
-	if(m_UpdateManifestSource == 0)
+	// 大文件（zip/helper）：跟随清单来源的同一加速前缀；raw 仓库放不下
+	// 61MB 包，用 releases 直链兜底。
 	{
-		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_ZIP_ASSET);
-		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_HELPER_ASSET);
-	}
-	else
-	{
-		str_format(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_ZIP_ASSET);
-		str_format(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_HELPER_ASSET);
+		const char *pSiblingBase = TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource];
+		if(pSiblingBase == nullptr)
+			pSiblingBase = "";
+		FormatUpdateAssetUrl(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), pSiblingBase, TCLIENT_UPDATE_ZIP_ASSET);
+		FormatUpdateAssetUrl(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), pSiblingBase, TCLIENT_UPDATE_HELPER_ASSET);
 	}
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
@@ -1438,12 +1456,11 @@ void CTClient::PollUpdateTasks()
 		if(!m_pUpdateManifestSigTask)
 		{
 			char aSigUrl[512];
-			if(m_UpdateManifestSource == 2)
+			const char *pSiblingBase = TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource];
+			if(pSiblingBase == nullptr)
 				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
-			else if(m_UpdateManifestSource == 0)
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
 			else
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
+				FormatUpdateAssetUrl(aSigUrl, (int)sizeof(aSigUrl), pSiblingBase, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
 			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
 			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
 			m_pUpdateManifestSigTask->MaxResponseSize(1024);

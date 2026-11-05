@@ -10,6 +10,7 @@
 #include <game/client/component.h>
 
 #include <deque>
+#include <vector>
 
 class CTClient : public CComponent
 {
@@ -24,6 +25,7 @@ public:
 		CHECKING,
 		UP_TO_DATE,
 		AVAILABLE,
+		PROBING,
 		DOWNLOADING,
 		DOWNLOADED,
 		FAILED,
@@ -111,6 +113,14 @@ private:
 	std::shared_ptr<IHttpRequest> m_pUpdateHelperTask = nullptr;
 	int m_UpdateDownloadAttempt = 0;
 	float m_UpdateRetryAt = -1.0f;
+
+	// 下载前对大文件候选源并发测速（TCLIENT_UPDATE_ZIP_PROXY_BASES），取实测
+	// 最快的来源；全部颗粒无收时回退 releases 直链。
+	std::vector<std::shared_ptr<IHttpRequest>> m_vpUpdateProbeTasks;
+	float m_UpdateProbeEndAt = -1.0f;
+	int m_UpdateProbeSource = -1;
+	void StartProbeTasks();
+	void FinishProbeTasks();
 
 	// 游戏内中键玩家菜单(2026-11-01):中键点玩家弹出「偷取皮肤 / 加入队伍」
 	int m_PlayerMenuCid = -1;

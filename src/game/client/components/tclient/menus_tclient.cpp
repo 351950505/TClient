@@ -4099,7 +4099,7 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 		Ui()->DoLabel(&Label, TC.UpdateStateText(), FontSize, TEXTALIGN_ML);
 
 		const CTClient::EUpdateState State = TC.GetUpdateState();
-		if(State == CTClient::EUpdateState::FAILED || State == CTClient::EUpdateState::CHECKING || State == CTClient::EUpdateState::DOWNLOADING || State == CTClient::EUpdateState::AVAILABLE || State == CTClient::EUpdateState::DOWNLOADED)
+		if(State == CTClient::EUpdateState::FAILED || State == CTClient::EUpdateState::CHECKING || State == CTClient::EUpdateState::DOWNLOADING || State == CTClient::EUpdateState::PROBING || State == CTClient::EUpdateState::AVAILABLE || State == CTClient::EUpdateState::DOWNLOADED)
 		{
 			RightView.HSplitTop(LineSize, &Label, &RightView);
 			Ui()->DoLabel(&Label, TC.UpdateStatusText(), EditBoxFontSize, TEXTALIGN_ML);
@@ -4133,7 +4133,7 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 			RightView.HSplitTop(LineSize + MarginExtraSmall, &InstallRect, &RightView);
 		}
 
-		if(DoButton_Menu(&s_CheckButton, TCLocalize("Check now"), 0, &CheckRect) && State != CTClient::EUpdateState::CHECKING && State != CTClient::EUpdateState::DOWNLOADING)
+		if(DoButton_Menu(&s_CheckButton, TCLocalize("Check now"), 0, &CheckRect) && State != CTClient::EUpdateState::CHECKING && State != CTClient::EUpdateState::PROBING && State != CTClient::EUpdateState::DOWNLOADING)
 			TC.UpdateCheck(true);
 		if(DoButton_Menu(&s_DownloadButton, TCLocalize("Download"), 0, &DownloadRect) && State == CTClient::EUpdateState::AVAILABLE)
 			TC.UpdateStartDownload();

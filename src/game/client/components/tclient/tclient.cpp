@@ -79,7 +79,16 @@ static const char *const TCLIENT_UPDATE_SOURCE_SIBLING_BASES[] = {
 };
 static_assert(std::size(TCLIENT_UPDATE_MANIFEST_SOURCES) == std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES));
 
-// 用资产前缀拼 releases 资源 URL；base 为 "" 时即直链。
+// 大文件（zip/helper）的下载候选：每个加速代理 + releases 直链。清单验签只认
+// 内容不认来源，所以这里可以和清单来源无关地测速挑最快（见 UpdateStartDownload）。
+static const char *const TCLIENT_UPDATE_ZIP_PROXY_BASES[] = {
+	"https://ghfast.top/",
+	"https://fast1.me3.dpdns.org/",
+	"https://fast2.me3.dpdns.org/",
+	"",
+};
+
+// 用大文件候选前缀拼 releases 资产 URL；base 为 "" 时即直链。
 static void FormatUpdateAssetUrl(char *pBuf, int BufSize, const char *pBase, const char *pAsset)
 {
 	if(pBase[0] == '\0')
@@ -976,6 +985,12 @@ void CTClient::ResetUpdateTasks()
 	m_UpdateRetryAt = -1.0f;
 	// 必须四个任务全清：残留的 sig/helper 任务会让下一次检查读到旧结果，
 	// 甚至在 abort 后仍被 Finish* 解引用（崩溃）。
+	for(auto &pTask : m_vpUpdateProbeTasks)
+	{
+		if(pTask)
+			pTask->Abort();
+	}
+	m_vpUpdateProbeTasks.clear();
 	if(m_pUpdateManifestTask)
 	{
 		m_pUpdateManifestTask->Abort();
@@ -1154,14 +1169,14 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 	m_UpdateRelease.m_HelperSize = JsonGetInt(HelperSize, -1);
 	str_format(m_UpdateRelease.m_aTag, sizeof(m_UpdateRelease.m_aTag), "v%s", pVersion);
 	str_copy(m_UpdateRelease.m_aVersion, pVersion);
-	// 大文件（zip/helper）：跟随清单来源的同一加速前缀；raw 仓库放不下
-	// 61MB 包，用 releases 直链兜底。
+	// 大文件（zip/helper）：先按清单来源给一个默认 URL（raw 仓库放不下 61MB 包，
+	// 用 releases 直链兜底）；实际下载前还会并发测速挑选最快的来源覆盖它。
 	{
-		const char *pSiblingBase = TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource];
-		if(pSiblingBase == nullptr)
-			pSiblingBase = "";
-		FormatUpdateAssetUrl(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), pSiblingBase, TCLIENT_UPDATE_ZIP_ASSET);
-		FormatUpdateAssetUrl(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), pSiblingBase, TCLIENT_UPDATE_HELPER_ASSET);
+		const char *pBase = TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource];
+		if(pBase == nullptr)
+			pBase = "";
+		FormatUpdateAssetUrl(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), pBase, TCLIENT_UPDATE_ZIP_ASSET);
+		FormatUpdateAssetUrl(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), pBase, TCLIENT_UPDATE_HELPER_ASSET);
 	}
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
@@ -1230,9 +1245,68 @@ void CTClient::UpdateStartDownload()
 		UpdateFail(TCLocalize("No verified update available"));
 		return;
 	}
-	if(m_UpdateState == EUpdateState::DOWNLOADING)
+	if(m_UpdateState == EUpdateState::DOWNLOADING || m_UpdateState == EUpdateState::PROBING)
 		return;
 	m_UpdateDownloadAttempt = 0;
+	// 大文件下载前先对候选源并发测速，挑实测最快的；~3 秒的探测换来稳定的
+	// 下载速度，避免清单源健康但文件线路已经劣化时用户干等。
+	m_UpdateState = EUpdateState::PROBING;
+	SetUpdateStatus(TCLocalize("Testing download sources to pick the fastest..."));
+	StartProbeTasks();
+}
+
+void CTClient::StartProbeTasks()
+{
+	ResetUpdateTasks();
+	m_vpUpdateProbeTasks.clear();
+	for(const char *pBase : TCLIENT_UPDATE_ZIP_PROXY_BASES)
+	{
+		char aUrl[512];
+		FormatUpdateAssetUrl(aUrl, (int)sizeof(aUrl), pBase, TCLIENT_UPDATE_ZIP_ASSET);
+		std::shared_ptr<IHttpRequest> pTask = HttpGet(aUrl);
+		// 探测只取窗口期内的实收字节：短超时、限内存，内容随后丢弃。
+		pTask->Timeout(CTimeout{8000, 0, 500, 3});
+		pTask->MaxResponseSize(4 * 1024 * 1024);
+		pTask->FailOnErrorStatus(true);
+		Http()->Run(pTask);
+		m_vpUpdateProbeTasks.push_back(std::move(pTask));
+	}
+	m_UpdateProbeEndAt = Client()->LocalTime() + 3.0f;
+}
+
+void CTClient::FinishProbeTasks()
+{
+	// 窗口期内实收字节最多者胜出；全部颗粒无收（代理 404/挂起）时回退直链。
+	int Best = -1;
+	double BestBytes = 0.0;
+	for(size_t i = 0; i < m_vpUpdateProbeTasks.size(); i++)
+	{
+		const std::shared_ptr<IHttpRequest> &pTask = m_vpUpdateProbeTasks[i];
+		if(!pTask || pTask->State() == EHttpState::ERROR || pTask->State() == EHttpState::ABORTED)
+			continue;
+		const double Bytes = pTask->Current();
+		if(Bytes > BestBytes)
+		{
+			BestBytes = Bytes;
+			Best = (int)i;
+		}
+	}
+	const char *pBase = TCLIENT_UPDATE_ZIP_PROXY_BASES[Best >= 0 ? Best : (int)std::size(TCLIENT_UPDATE_ZIP_PROXY_BASES) - 1];
+	for(auto &pTask : m_vpUpdateProbeTasks)
+	{
+		if(pTask)
+			pTask->Abort();
+	}
+	m_vpUpdateProbeTasks.clear();
+	m_UpdateProbeSource = Best;
+	FormatUpdateAssetUrl(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), pBase, TCLIENT_UPDATE_ZIP_ASSET);
+	FormatUpdateAssetUrl(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), pBase, TCLIENT_UPDATE_HELPER_ASSET);
+	if(Best >= 0)
+		log_info("tclient-update", "download source selected: index %d (%.0f KB/s in the probe window)", Best, BestBytes / 1024.0 / 3.0);
+	else
+		log_warn("tclient-update", "no download source answered the probe; falling back to the direct GitHub link");
+	m_UpdateState = EUpdateState::DOWNLOADING;
+	SetUpdateStatus(TCLocalize("Downloading update..."));
 	StartDownloadTask();
 }
 
@@ -1415,6 +1489,7 @@ const char *CTClient::UpdateStateText() const
 	case EUpdateState::CHECKING: return TCLocalize("Checking for updates...");
 	case EUpdateState::UP_TO_DATE: return TCLocalize("You are on the latest version");
 	case EUpdateState::AVAILABLE: return TCLocalize("An update is available");
+	case EUpdateState::PROBING: return TCLocalize("Testing download sources to pick the fastest...");
 	case EUpdateState::DOWNLOADING: return TCLocalize("Downloading update...");
 	case EUpdateState::DOWNLOADED: return TCLocalize("Update downloaded, ready to install");
 	case EUpdateState::FAILED: return TCLocalize("Update failed");
@@ -1431,6 +1506,22 @@ int CTClient::UpdateDownloadPercent() const
 
 void CTClient::PollUpdateTasks()
 {
+	// 测速窗口：全部候选提前完成或到时即评判，选中者进入正式下载。
+	if(m_UpdateState == EUpdateState::PROBING && !m_vpUpdateProbeTasks.empty())
+	{
+		bool AllDone = true;
+		for(const auto &pTask : m_vpUpdateProbeTasks)
+		{
+			if(pTask && !pTask->Done())
+			{
+				AllDone = false;
+				break;
+			}
+		}
+		if(AllDone || Client()->LocalTime() >= m_UpdateProbeEndAt)
+			FinishProbeTasks();
+		return;
+	}
 	// Keep the completed manifest while its signature is being retried, and
 	// use this same path for both the initial request and delayed retries.
 	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done() && !m_pUpdateManifestSigTask &&

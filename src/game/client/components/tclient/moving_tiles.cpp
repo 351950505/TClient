@@ -83,13 +83,16 @@ void CMovingTiles::OnMapLoad()
 		CMapItemGroup *pGroup = static_cast<CMapItemGroup *>(GameClient()->Map()->GetItem(GroupsStart + GroupIndex));
 		for(int LayerIndex = 0; LayerIndex < pGroup->m_NumLayers; LayerIndex++)
 		{
-			CMapItemLayer *pLayer = static_cast<CMapItemLayer *>(GameClient()->Map()->GetItem(LayersStart + pGroup->m_StartLayer + LayerIndex));
+			const int LayerItemIndex = LayersStart + pGroup->m_StartLayer + LayerIndex;
+			CMapItemLayer *pLayer = static_cast<CMapItemLayer *>(GameClient()->Map()->GetItem(LayerItemIndex));
 
-			if(pLayer->m_Type != LAYERTYPE_QUADS)
+			if(pLayer->m_Type != LAYERTYPE_QUADS || GameClient()->Map()->GetItemSize(LayerItemIndex) < (int)sizeof(CMapItemLayerQuads))
 				continue;
 
 			char aLayerName[30];
 			CMapItemLayerQuads *pTilemap = reinterpret_cast<CMapItemLayerQuads *>(pLayer);
+			if(pTilemap->m_Version < 2 || pTilemap->m_NumQuads <= 0)
+				continue;
 			QuadName(pTilemap->m_aName, std::size(pTilemap->m_aName), aLayerName, std::size(aLayerName));
 
 			for(size_t Names = 0; Names < std::size(ValidQuadNames); Names++)
@@ -103,7 +106,9 @@ void CMovingTiles::OnMapLoad()
 						continue;
 
 					// NumQuadLayers++;
-					CQuad *pQuads = (CQuad *)GameClient()->Map()->GetDataSwapped(pTilemap->m_Data);
+					CQuad *pQuads = static_cast<CQuad *>(GameClient()->Map()->GetDataSwapped(pTilemap->m_Data));
+					if(pQuads == nullptr || (size_t)pTilemap->m_NumQuads > (size_t)GameClient()->Map()->GetDataSize(pTilemap->m_Data) / sizeof(CQuad))
+						break;
 					for(int NumQuads = 0; NumQuads < pTilemap->m_NumQuads; NumQuads++)
 					{
 						CQuadData QuadData;

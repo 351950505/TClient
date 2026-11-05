@@ -907,3 +907,9 @@ Duplicate-send rescue estimate: %lld
 
 Duplicate-send rescue estimate: none yet
 == 雙發補救總數（估算）：暫無
+
+Water hammer highlight
+== 水域卡錘高亮
+
+Highlight frozen teammates holding hammer fire
+== 高亮凍結時持錘並按住開火的隊友

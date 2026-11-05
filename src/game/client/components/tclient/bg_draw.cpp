@@ -2,6 +2,7 @@
 
 #include <base/dbg.h>
 #include <base/io.h>
+#include <base/windows.h>
 
 #include <engine/client.h>
 #include <engine/external/spt.h>
@@ -18,6 +19,10 @@
 #include <array>
 #include <deque>
 #include <vector>
+
+#if defined(CONF_FAMILY_WINDOWS)
+#include <windows.h>
+#endif
 
 #define MAX_ITEMS_TO_LOAD 65536
 
@@ -323,6 +328,7 @@ void CBgDraw::ConBgDrawReset(IConsole::IResult *pResult, void *pUserData)
 {
 	CBgDraw *pThis = (CBgDraw *)pUserData;
 	pThis->Reset();
+	pThis->m_Persistence.m_Dirty = true;
 }
 
 void CBgDraw::ConBgDrawSave(IConsole::IResult *pResult, void *pUserData)
@@ -337,7 +343,7 @@ void CBgDraw::ConBgDrawLoad(IConsole::IResult *pResult, void *pUserData)
 	pThis->Load(pResult->GetString(0), true);
 }
 
-static IOHANDLE BgDrawOpenFile(CGameClient &This, const char *pFilename, int Flags)
+static std::string BgDrawFilename(CGameClient &This, const char *pFilename)
 {
 	char aFilename[IO_MAX_PATH_LENGTH];
 	if(pFilename && pFilename[0] != '\0')
@@ -354,63 +360,80 @@ static IOHANDLE BgDrawOpenFile(CGameClient &This, const char *pFilename, int Fla
 		sha256_str(Sha256, aSha256, sizeof(aSha256));
 		str_format(aFilename, sizeof(aFilename), "bgdraw/%s_%s.csv", This.Map()->BaseName(), aSha256);
 	}
-	dbg_assert(Flags == IOFLAG_WRITE || Flags == IOFLAG_READ, "Flags must be either read or write");
-	if(Flags == IOFLAG_WRITE)
-	{
-		// Create folder
-		if(!This.Storage()->CreateFolder("bgdraw", IStorage::TYPE_SAVE))
-			This.Echo(TCLocalize("Failed to create bgdraw folder", "bgdraw"));
-	}
-	return This.Storage()->OpenFile(aFilename, Flags, IStorage::TYPE_SAVE);
+	return aFilename;
 }
+
+class CBgDrawSaveFile
+{
+	IStorage *m_pStorage;
+	const char *m_pPath;
+	char m_aTempPath[IO_MAX_PATH_LENGTH];
+	IOHANDLE m_Handle = nullptr;
+
+public:
+	CBgDrawSaveFile(IStorage *pStorage, const char *pPath) :
+		m_pStorage(pStorage), m_pPath(pPath)
+	{
+		IStorage::FormatTmpPath(m_aTempPath, sizeof(m_aTempPath), pPath);
+	}
+	bool Open()
+	{
+		if(!m_pStorage->CreateFolder("bgdraw", IStorage::TYPE_SAVE))
+			return false;
+		m_Handle = m_pStorage->OpenFile(m_aTempPath, IOFLAG_WRITE, IStorage::TYPE_SAVE);
+		return m_Handle != nullptr;
+	}
+	unsigned Write(const char *pData, unsigned Length) { return io_write(m_Handle, pData, Length); }
+	bool WriteNewline() { return io_write_newline(m_Handle); }
+	bool Sync() { return io_sync(m_Handle) == 0; }
+	bool Close() { return io_close(m_Handle) == 0; }
+	bool Replace()
+	{
+#if defined(CONF_FAMILY_WINDOWS)
+		// fs_rename retries access-denied errors by deleting the destination.
+		// A failed drawing save must always leave the previous file intact.
+		char aTempPath[IO_MAX_PATH_LENGTH], aPath[IO_MAX_PATH_LENGTH];
+		m_pStorage->GetCompletePath(IStorage::TYPE_SAVE, m_aTempPath, aTempPath, sizeof(aTempPath));
+		m_pStorage->GetCompletePath(IStorage::TYPE_SAVE, m_pPath, aPath, sizeof(aPath));
+		return MoveFileExW(windows_utf8_to_wide(aTempPath).c_str(), windows_utf8_to_wide(aPath).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+		return m_pStorage->RenameFile(m_aTempPath, m_pPath, IStorage::TYPE_SAVE);
+#endif
+	}
+	void Cleanup() { m_pStorage->RemoveFile(m_aTempPath, IStorage::TYPE_SAVE); }
+};
 
 bool CBgDraw::Save(const char *pFilename, bool Verbose)
 {
-	if(m_pvItems->empty())
-	{
-		if(Verbose)
-			GameClient()->Echo(TCLocalize("No items to write", "bgdraw"));
-		return false;
-	}
-	if(!m_Dirty)
+	if(!m_Persistence.m_Dirty)
 	{
 		if(Verbose)
 			GameClient()->Echo(TCLocalize("No changes since last save", "bgdraw"));
 		return false;
 	}
-	m_Dirty = false;
-	IOHANDLE Handle = BgDrawOpenFile(*GameClient(), pFilename, IOFLAG_WRITE);
-	if(!Handle)
+	// The map may already have changed when a failed drawing is retried.
+	const std::string Path = pFilename && pFilename[0] ? BgDrawFilename(*GameClient(), pFilename) : m_Persistence.m_Path;
+	if(Path.empty())
 		return false;
-
-	auto WriteLine = [&Handle](const char *pLine) -> bool {
-		if(!io_write(Handle, pLine, str_length(pLine)))
-			return false;
-		if(!io_write_newline(Handle))
-			return false;
-		return true;
-	};
-
+	CBgDrawSaveFile File(Storage(), Path.c_str());
 	int Written = 0;
-	bool Success = true;
-	char aMsg[256];
-	for(const CBgDrawItem &Item : *m_pvItems)
-	{
-		if(!BgDrawFile::Write(WriteLine, Item.Data()))
+	const bool Success = BgDrawPersistence::Save(File, m_Persistence.m_Dirty, [&](auto WriteLine) {
+		for(const CBgDrawItem &Item : *m_pvItems)
 		{
-			str_format(aMsg, sizeof(aMsg), TCLocalize("Writing item %d failed", "bgdraw"), Written);
-			GameClient()->Echo(aMsg);
-			Success = false;
-			break;
+			if(!BgDrawFile::Write(WriteLine, Item.Data()))
+				return false;
+			++Written;
 		}
-		Written += 1;
-	}
-	if(Verbose || !Success)
+		return true;
+	});
+	if(!Success)
+		GameClient()->Echo(TCLocalize("Failed to save background drawing; unsaved changes retained", "bgdraw"));
+	else if(Verbose)
 	{
+		char aMsg[256];
 		str_format(aMsg, sizeof(aMsg), TCLocalize("Written %d items", "bgdraw"), Written);
 		GameClient()->Echo(aMsg);
 	}
-	io_close(Handle);
 	return Success;
 }
 
@@ -418,7 +441,10 @@ bool CBgDraw::Load(const char *pFilename, bool Verbose)
 {
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return false;
-	IOHANDLE Handle = BgDrawOpenFile(*GameClient(), pFilename, IOFLAG_READ);
+	const std::string Path = pFilename && pFilename[0] ? BgDrawFilename(*GameClient(), pFilename) : m_Persistence.m_Path;
+	if(Path.empty())
+		return false;
+	IOHANDLE Handle = Storage()->OpenFile(Path.c_str(), IOFLAG_READ, IStorage::TYPE_SAVE);
 	if(!Handle)
 		return false;
 
@@ -480,7 +506,7 @@ CBgDrawItem *CBgDraw::AddItem(T &&...Aargs)
 	if(g_Config.m_TcBgDrawMaxItems == 0)
 		return nullptr;
 	m_pvItems->emplace_back(std::forward<T>(Aargs)...);
-	m_Dirty = true;
+	m_Persistence.m_Dirty = true;
 	return &m_pvItems->back();
 }
 
@@ -529,7 +555,10 @@ void CBgDraw::OnRender()
 	if(m_NextAutoSave < 0)
 	{
 		if(g_Config.m_TcBgDrawAutoSaveLoad)
+		{
+			RetryPendingSaves();
 			Save(nullptr, false);
+		}
 		m_NextAutoSave = AUTO_SAVE_INTERVAL;
 	}
 
@@ -549,7 +578,7 @@ void CBgDraw::OnRender()
 				(*ActiveItem)->MoveTo(Pos);
 			else if(CBgDrawItem *pItem = AddItem(*GameClient(), Pos))
 				ActiveItem = pItem;
-			m_Dirty = true;
+			m_Persistence.m_Dirty = true;
 		}
 		else if(ActiveItem.has_value())
 		{
@@ -613,7 +642,7 @@ void CBgDraw::OnRender()
 				   ActiveItem = std::nullopt;
 		   return true;
 	   }))
-		m_Dirty = true;
+		m_Persistence.m_Dirty = true;
 	Graphics()->SetColor(ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f));
 }
 
@@ -625,34 +654,99 @@ void CBgDraw::Reset()
 	m_pvItems->clear();
 }
 
+void CBgDraw::SuspendDrawing()
+{
+	BgDrawPersistence::CDrawing Drawing;
+	if(m_Persistence.m_Dirty)
+	{
+		Drawing.reserve(m_pvItems->size());
+		for(const CBgDrawItem &Item : *m_pvItems)
+			Drawing.push_back(Item.Data());
+	}
+	// Retain data, not graphics containers, and keep its original map path.
+	m_Persistence.Suspend(std::move(Drawing));
+	Reset();
+}
+
+void CBgDraw::BeginDrawing()
+{
+	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+		return; // Normal map loading reaches ONLINE after OnMapLoad.
+	const std::string Path = BgDrawFilename(*GameClient(), nullptr);
+	if(m_Persistence.m_Path == Path)
+		return; // Demo playback enters its state before OnMapLoad.
+	if(!m_Persistence.m_Path.empty())
+	{
+		if(g_Config.m_TcBgDrawAutoSaveLoad)
+			Save(nullptr, false);
+		SuspendDrawing();
+	}
+	const auto Drawing = m_Persistence.Begin(Path);
+	if(Drawing)
+	{
+		for(const CBgDrawItemData &Data : *Drawing)
+			m_pvItems->emplace_back(*GameClient(), Data);
+	}
+	else if(g_Config.m_TcBgDrawAutoSaveLoad)
+	{
+		Load(nullptr, false);
+		m_Persistence.m_Dirty = false;
+	}
+	if(g_Config.m_TcBgDrawAutoSaveLoad)
+		RetryPendingSaves();
+	m_NextAutoSave = AUTO_SAVE_INTERVAL;
+}
+
+void CBgDraw::RetryPendingSaves()
+{
+	m_Persistence.Retry([&](const char *pPath, const BgDrawPersistence::CDrawing &Drawing) {
+		CBgDrawSaveFile File(Storage(), pPath);
+		bool Dirty = true;
+		return BgDrawPersistence::Save(File, Dirty, [&](auto WriteLine) {
+			for(const CBgDrawItemData &Data : Drawing)
+				if(!BgDrawFile::Write(WriteLine, Data))
+					return false;
+			return true;
+		});
+	});
+}
+
 void CBgDraw::OnMapLoad()
 {
+	// Capture identity while the map is valid. Pending data never borrows the
+	// identity of a later map, even if saving keeps failing across transitions.
+	BeginDrawing();
 }
 
 void CBgDraw::OnStateChange(int NewState, int OldState)
 {
 	if(OldState == IClient::STATE_ONLINE || OldState == IClient::STATE_DEMOPLAYBACK)
 	{
-		if(g_Config.m_TcBgDrawAutoSaveLoad > 0)
+		if(g_Config.m_TcBgDrawAutoSaveLoad)
+		{
+			RetryPendingSaves();
 			Save(nullptr, false);
+		}
+		SuspendDrawing();
 	}
-	Reset();
-	m_NextAutoSave = AUTO_SAVE_INTERVAL;
-	if(NewState == IClient::STATE_ONLINE || OldState == IClient::STATE_DEMOPLAYBACK)
-	{
-		if(g_Config.m_TcBgDrawAutoSaveLoad > 0)
-			Load(nullptr, false);
-	}
+	if(NewState == IClient::STATE_ONLINE || NewState == IClient::STATE_DEMOPLAYBACK)
+		BeginDrawing();
 }
 
 void CBgDraw::OnShutdown()
 {
-	Reset();
+	if(g_Config.m_TcBgDrawAutoSaveLoad)
+	{
+		RetryPendingSaves();
+		Save(nullptr, false);
+	}
+	SuspendDrawing();
 }
 
 CBgDraw::CBgDraw() :
 	m_pvItems(new std::list<CBgDrawItem>())
 {
+	Reset();
 }
 
 CBgDraw::~CBgDraw()

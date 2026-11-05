@@ -602,11 +602,10 @@ void CFutureLogger::Set(std::shared_ptr<ILogger> pLogger)
 	{
 		dbg_assert_failed("future logger has already been set and can only be set once");
 	}
-	m_pLogger = std::move(pLogger);
 
 	for(const auto &Pending : m_vPending)
 	{
-		m_pLogger->Log(&Pending);
+		pLogger->Log(&Pending);
 	}
 	m_vPending.clear();
 	m_vPending.shrink_to_fit();

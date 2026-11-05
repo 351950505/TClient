@@ -3,6 +3,7 @@
 
 #include "editor_action.h"
 
+#include <game/editor/editor_server_settings.h>
 #include <game/editor/mapitems/envelope.h>
 #include <game/editor/mapitems/layer_speedup.h>
 #include <game/editor/mapitems/layer_switch.h>
@@ -16,7 +17,9 @@
 #include <string>
 #include <vector>
 
+class CEditorImage;
 class CEditorMap;
+class CEditorSound;
 class IEditorEnvelopeReference;
 class CLayerGroup;
 
@@ -328,23 +331,56 @@ private:
 class CEditorActionAppendMap : public IEditorAction
 {
 public:
+	class CSelection
+	{
+	public:
+		explicit CSelection(const CEditorMap *pMap);
+		void Restore(CEditorMap *pMap) const;
+
+	private:
+		int m_Group;
+		std::vector<int> m_vLayers;
+		std::vector<int> m_vQuads;
+		int m_QuadPoints;
+		int m_QuadEnvelope;
+		int m_CurrentQuad;
+		int m_Envelope;
+		std::vector<std::pair<int, int>> m_vEnvelopePoints;
+		std::pair<int, int> m_TangentInPoint;
+		std::pair<int, int> m_TangentOutPoint;
+		int m_Image;
+		int m_Sound;
+		int m_SoundSource;
+	};
+
 	struct SPrevInfo
 	{
+		explicit SPrevInfo(const CEditorMap *pMap);
+
 		int m_Groups;
 		int m_Images;
 		int m_Sounds;
 		int m_Envelopes;
+		std::vector<CEditorMapSetting> m_vSettings;
+		CSelection m_Selection;
 	};
 
-	CEditorActionAppendMap(CEditorMap *pMap, const char *pMapName, const SPrevInfo &PrevInfo, std::vector<int> &vImageIndexMap);
+	CEditorActionAppendMap(CEditorMap *pMap, const char *pMapName, const SPrevInfo &PrevInfo, const std::vector<int> &vImageIndexMap);
 
 	void Undo() override;
 	void Redo() override;
 
 private:
-	char m_aMapName[IO_MAX_PATH_LENGTH];
 	SPrevInfo m_PrevInfo;
 	std::vector<int> m_vImageIndexMap;
+	// Keep the original objects alive, including their textures and sound samples.
+	// Subsequent history actions can retain references to these groups and layers.
+	std::vector<std::shared_ptr<CLayerGroup>> m_vpGroups;
+	std::vector<std::shared_ptr<CEditorImage>> m_vpImages;
+	std::vector<std::shared_ptr<CEditorSound>> m_vpSounds;
+	std::vector<std::shared_ptr<CEnvelope>> m_vpEnvelopes;
+	std::vector<CEditorMapSetting> m_vSettings;
+	CSelection m_Selection;
 };
 
 // --------------

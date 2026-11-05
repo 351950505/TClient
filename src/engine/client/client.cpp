@@ -107,6 +107,10 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeEndPeriod(unsigned i
 #include <tuple>
 #include <vector>
 
+#if defined(CONF_FAMILY_WINDOWS)
+#include <windows.h>
+#endif
+
 using namespace std::chrono_literals;
 
 static constexpr ColorRGBA CLIENT_NETWORK_PRINT_COLOR = ColorRGBA(0.7f, 1, 0.7f, 1.0f);
@@ -117,6 +121,83 @@ static constexpr ColorRGBA CLIENT_NETWORK_PRINT_ERROR_COLOR = ColorRGBA(1.0f, 0.
 // an explicitly configured logfile= is never rotated or deleted.
 static constexpr int TCLIENT_AUTO_LOG_MAX_FILES = 10;
 static constexpr uint64_t TCLIENT_AUTO_LOG_MAX_BYTES = 10ULL * 1024 * 1024;
+
+#if defined(CONF_FAMILY_WINDOWS)
+struct SUpdaterReadyMarker
+{
+	std::wstring m_Path;
+	std::wstring m_Token;
+};
+
+static std::wstring GetWideEnvironmentVariable(const wchar_t *pName)
+{
+	const DWORD Required = GetEnvironmentVariableW(pName, nullptr, 0);
+	if(Required == 0)
+		return std::wstring();
+	std::vector<wchar_t> Buffer(Required);
+	const DWORD Written = GetEnvironmentVariableW(pName, Buffer.data(), (DWORD)Buffer.size());
+	if(Written == 0 || Written >= Buffer.size())
+		return std::wstring();
+	return std::wstring(Buffer.data(), Written);
+}
+
+static SUpdaterReadyMarker TakeUpdaterReadyMarker()
+{
+	SUpdaterReadyMarker Marker;
+	Marker.m_Path = GetWideEnvironmentVariable(L"TCLIENT_UPDATER_READY_FILE");
+	Marker.m_Token = GetWideEnvironmentVariable(L"TCLIENT_UPDATER_READY_TOKEN");
+	const bool AnyValue = !Marker.m_Path.empty() || !Marker.m_Token.empty();
+	if(AnyValue)
+	{
+		// The handshake belongs only to this process. Clear it before any monitor/helper child can
+		// inherit it and accidentally impersonate the client readiness signal.
+		SetEnvironmentVariableW(L"TCLIENT_UPDATER_READY_FILE", nullptr);
+		SetEnvironmentVariableW(L"TCLIENT_UPDATER_READY_TOKEN", nullptr);
+		if(Marker.m_Path.empty() || Marker.m_Token.empty())
+		{
+			log_error("client", "incomplete updater startup health environment");
+			Marker = {};
+		}
+	}
+	return Marker;
+}
+
+static bool WriteUpdaterReadyMarker(const SUpdaterReadyMarker &Marker)
+{
+	const int TokenLength = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Marker.m_Token.c_str(), (int)Marker.m_Token.size(), nullptr, 0, nullptr, nullptr);
+	if(TokenLength <= 0)
+	{
+		log_error("client", "could not encode updater startup health token");
+		return false;
+	}
+	std::string Contents((size_t)TokenLength, '\0');
+	if(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Marker.m_Token.c_str(), (int)Marker.m_Token.size(), Contents.data(), TokenLength, nullptr, nullptr) != TokenLength)
+	{
+		log_error("client", "could not encode updater startup health token");
+		return false;
+	}
+	Contents.push_back('\n');
+
+	HANDLE hFile = CreateFileW(Marker.m_Path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+	if(hFile == INVALID_HANDLE_VALUE)
+	{
+		log_error("client", "could not create updater startup health marker (error %lu)", (unsigned long)GetLastError());
+		return false;
+	}
+	DWORD Written = 0;
+	const bool Success = WriteFile(hFile, Contents.data(), (DWORD)Contents.size(), &Written, nullptr) && Written == Contents.size() && FlushFileBuffers(hFile);
+	const DWORD WriteError = Success ? ERROR_SUCCESS : GetLastError();
+	CloseHandle(hFile);
+	if(!Success)
+	{
+		DeleteFileW(Marker.m_Path.c_str());
+		log_error("client", "could not flush updater startup health marker (error %lu)", (unsigned long)WriteError);
+		return false;
+	}
+	log_info("client", "reported updater startup health after first rendered frame");
+	return true;
+}
+#endif
 
 static bool IsAutoLogFilename(const char *pFilename)
 {
@@ -2424,6 +2505,7 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 					// add new
 					const int64_t SnapshotTime = time_get();
 					m_aSnapshotStorage[Conn].Add(GameTick, SnapshotTime, SnapSize, TmpBuffer3.AsSnapshot(), AltSnapSize, AltSnapBuffer.AsSnapshot());
+					GameClient()->OnSnapshotReceived(Conn, GameTick, AltSnapBuffer.AsSnapshot());
 					// [SNAPSHOT-GAP] only fully verified snapshots count, so CRC/unpack
 					// failures returned above never look like downstream packet loss.
 					m_aSnapshotGapTrackers[Conn].OnSnapshot(GameTick, SnapshotTime);
@@ -3504,6 +3586,11 @@ void CClient::InitInterfaces()
 
 void CClient::Run()
 {
+#if defined(CONF_FAMILY_WINDOWS)
+	const SUpdaterReadyMarker UpdaterReadyMarker = TakeUpdaterReadyMarker();
+	bool UpdaterReadyMarkerPending = !UpdaterReadyMarker.m_Path.empty();
+#endif
+
 	m_LocalStartTime = m_GlobalStartTime = time_get();
 	m_aSnapshotParts[0] = 0;
 	m_aSnapshotParts[1] = 0;
@@ -3820,6 +3907,17 @@ void CClient::Run()
 
 				Render();
 				m_pGraphics->Swap();
+#if defined(CONF_FAMILY_WINDOWS)
+				if(UpdaterReadyMarkerPending)
+				{
+					m_pGraphics->WaitForIdle();
+					// Submitting the next buffer checks the completed frame for backend errors.
+					m_pGraphics->Swap();
+					if(m_pGraphics->GetFatalError()[0] == '\0' && State() != IClient::STATE_QUITTING && State() != IClient::STATE_RESTARTING)
+						WriteUpdaterReadyMarker(UpdaterReadyMarker);
+					UpdaterReadyMarkerPending = false;
+				}
+#endif
 			}
 
 			// Wake up for the next update or frame, whichever comes first. While playing, also wake up for

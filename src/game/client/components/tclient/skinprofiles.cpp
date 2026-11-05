@@ -11,17 +11,6 @@ static void EscapeParam(char *pDst, const char *pSrc, int Size)
 	str_escape(&pDst, pSrc, pDst + Size);
 }
 
-CProfile::CProfile(int BodyColor, int FeetColor, int CountryFlag, int Emote, const char *pSkinName, const char *pName, const char *pClan)
-{
-	m_BodyColor = BodyColor;
-	m_FeetColor = FeetColor;
-	m_CountryFlag = CountryFlag;
-	m_Emote = Emote;
-	str_copy(m_SkinName, pSkinName);
-	str_copy(m_Name, pName);
-	str_copy(m_Clan, pClan);
-}
-
 void CSkinProfiles::OnConsoleInit()
 {
 	IConfigManager *pConfigManager = Kernel()->RequestInterface<IConfigManager>();
@@ -45,21 +34,7 @@ void CSkinProfiles::AddProfile(int BodyColor, int FeetColor, int CountryFlag, in
 
 void CSkinProfiles::ApplyProfile(int Dummy, const CProfile &Profile)
 {
-	if(g_Config.m_TcProfileSkin && strlen(Profile.m_SkinName) != 0)
-		str_copy(Dummy ? g_Config.m_ClDummySkin : g_Config.m_ClPlayerSkin, Profile.m_SkinName);
-	if(g_Config.m_TcProfileColors && Profile.m_BodyColor != -1 && Profile.m_FeetColor != -1)
-	{
-		(Dummy ? g_Config.m_ClDummyColorBody : g_Config.m_ClPlayerColorBody) = Profile.m_BodyColor;
-		(Dummy ? g_Config.m_ClDummyColorFeet : g_Config.m_ClPlayerColorFeet) = Profile.m_FeetColor;
-	}
-	if(g_Config.m_TcProfileEmote && Profile.m_Emote > 0 && Profile.m_Emote < NUM_EMOTES)
-		(Dummy ? g_Config.m_ClDummyDefaultEyes : g_Config.m_ClPlayerDefaultEyes) = Profile.m_Emote;
-	if(g_Config.m_TcProfileName && strlen(Profile.m_Name) != 0)
-		str_copy(Dummy ? g_Config.m_ClDummyName : g_Config.m_PlayerName, Profile.m_Name); // TODO m_ClPlayerName
-	if(g_Config.m_TcProfileClan && (strlen(Profile.m_Clan) != 0 || g_Config.m_TcProfileOverwriteClanWithEmpty))
-		str_copy(Dummy ? g_Config.m_ClDummyClan : g_Config.m_PlayerClan, Profile.m_Clan); // TODO m_ClPlayerClan
-	if(g_Config.m_TcProfileFlag && Profile.m_CountryFlag != -2)
-		(Dummy ? g_Config.m_ClDummyCountry : g_Config.m_PlayerCountry) = Profile.m_CountryFlag;
+	Profile.ApplyToConfig(Dummy, g_Config);
 	GameClient()->m_Skins.m_SkinList.ForceRefresh(); // Prevent segfault
 	if(Dummy)
 		GameClient()->SendDummyInfo(false);

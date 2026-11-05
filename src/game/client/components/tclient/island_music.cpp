@@ -107,6 +107,7 @@ public:
 
 	~CImpl()
 	{
+		ResetLyrics();
 #if TCLIENT_HAS_WINRT_MUSIC
 		StopWorker();
 #endif
@@ -1405,15 +1406,6 @@ public:
 	}
 
 	std::string m_ActiveKey;
-	// When lrclib has definitively missed a track we switch to NetEase and must
-	// NOT bounce back to lrclib on the next frame (the two use different key
-	// prefixes, which would otherwise abort each other forever). This records
-	// the lrclib key that has been handed over to NetEase.
-	std::string m_LrclibFailedKey;
-	// Gate for the NetEase-first fallback: when NetEase misses, we fire exactly
-	// one lrclib request per track (LOADING blocks re-entry until it resolves).
-	ELyricsState m_LrclibState = ELyricsState::IDLE;
-	std::string m_LrclibOwnedKey; // v1-cache key of the track lrclib is handling
 	ELyricsState m_LyricsState = ELyricsState::IDLE;
 	std::vector<SLyricLine> m_vLines;
 	std::map<std::string, SCacheEntry> m_Cache;
@@ -1424,10 +1416,53 @@ public:
 	{
 		if(m_pRequest)
 		{
+#if defined(CONF_FAMILY_WINDOWS)
+			auto It = m_NeteaseData.find(m_RequestKey);
+			if(It != m_NeteaseData.end())
+			{
+				It->second.m_TriedLrclib = false;
+				It->second.m_LyricState = ELyricsState::NOTFOUND;
+			}
+#endif
 			m_pRequest->Abort();
 			m_pRequest.reset();
 		}
 		m_RequestKey.clear();
+	}
+
+	void StoreLrclibResult(const std::string &Key, const SCacheEntry &Entry)
+	{
+		if(Key.empty())
+			return;
+		if(m_Cache.size() >= LYRICS_CACHE_MAX)
+			m_Cache.clear();
+		m_Cache[Key] = Entry;
+#if defined(CONF_FAMILY_WINDOWS)
+		auto It = m_NeteaseData.find(Key);
+		if(It != m_NeteaseData.end())
+		{
+			It->second.m_TriedLrclib = true;
+			It->second.m_LyricState = Entry.m_State;
+			It->second.m_vLines = Entry.m_vLines;
+		}
+#endif
+		if(Key == m_ActiveKey)
+		{
+			m_LyricsState = Entry.m_State;
+			m_vLines = Entry.m_vLines;
+		}
+	}
+
+	void ResetLyrics()
+	{
+		AbortRequest();
+#if defined(CONF_FAMILY_WINDOWS)
+		AbortNetease();
+#endif
+		m_ActiveKey.clear();
+		m_LyricsState = ELyricsState::IDLE;
+		m_vLines.clear();
+		ResetMediaClock();
 	}
 
 	// ---------------- lrclib lyrics (foreign tracks / SMTC) ----------------
@@ -1435,7 +1470,9 @@ public:
 	{
 		if(m_pHttp == nullptr)
 		{
-			m_LyricsState = ELyricsState::OFFLINE;
+			SCacheEntry Entry;
+			Entry.m_State = ELyricsState::OFFLINE;
+			StoreLrclibResult(m_ActiveKey, Entry);
 			return;
 		}
 
@@ -1463,7 +1500,7 @@ public:
 				aEscapedTitle, aEscapedArtist);
 
 		m_pRequest = HttpGet(aUrl);
-		m_pRequest->Timeout(CTimeout{10000, 0, 500, 10});
+		m_pRequest->Timeout(CTimeout{10000, 30000, 500, 10});
 		m_pRequest->LogProgress(HTTPLOG::FAILURE);
 		m_pRequest->FailOnErrorStatus(false);
 		m_pRequest->HeaderString("Lrclib-Client", "TClient (github.com/TaterClient)");
@@ -1481,22 +1518,12 @@ public:
 		m_pRequest.reset();
 		const std::string FinishedKey = m_RequestKey;
 		m_RequestKey.clear();
-		const bool ApplyToActive = !FinishedKey.empty() && FinishedKey == m_ActiveKey;
-
-		if(pFinished->State() != EHttpState::DONE || pFinished->StatusCode() == 0)
-		{
-			if(ApplyToActive)
-			{
-				m_LyricsState = ELyricsState::OFFLINE;
-				m_vLines.clear();
-			}
-			return;
-		}
-
-		const int StatusCode = pFinished->StatusCode();
 		SCacheEntry Entry;
 		Entry.m_State = ELyricsState::NOTFOUND;
-		if(StatusCode >= 200 && StatusCode < 300)
+		const int StatusCode = pFinished->StatusCode();
+		if(pFinished->State() != EHttpState::DONE || StatusCode == 0)
+			Entry.m_State = ELyricsState::OFFLINE;
+		else if(StatusCode >= 200 && StatusCode < 300)
 		{
 			json_value *pRoot = pFinished->ResultJson();
 			if(pRoot != nullptr && pRoot != &json_value_none)
@@ -1533,90 +1560,22 @@ public:
 			}
 		}
 
-		if(m_Cache.size() >= LYRICS_CACHE_MAX)
-			m_Cache.clear();
-		m_Cache[FinishedKey] = Entry;
-		m_LrclibState = Entry.m_State == ELyricsState::IDLE ? ELyricsState::NOTFOUND : Entry.m_State;
-		if(ApplyToActive)
-		{
-			m_LyricsState = Entry.m_State;
-			m_vLines = Entry.m_vLines;
-		}
+		StoreLrclibResult(FinishedKey, Entry);
 	}
 
 	void UpdateLyrics(const STrack &Track)
 	{
-		ProcessRequest();
 		if(!Track.m_Valid || (Track.m_Title.empty() && Track.m_Artist.empty()))
 		{
-			if(!m_ActiveKey.empty())
-			{
-				m_ActiveKey.clear();
-				m_LrclibFailedKey.clear();
-				m_LrclibState = ELyricsState::IDLE;
-				m_LyricsState = ELyricsState::IDLE;
-				m_vLines.clear();
-				AbortRequest();
-#if defined(CONF_FAMILY_WINDOWS)
-				AbortNetease();
-#endif
-			}
+			ResetLyrics();
 			return;
 		}
 
 #if defined(CONF_FAMILY_WINDOWS)
-		// The NetEase window-title monitor path always goes straight to NetEase.
-		if(Track.m_ServiceId == "netease-title")
-		{
-			UpdateNetease(Track);
-			return;
-		}
-#endif
-
-		const std::string Key = BuildCacheKey(Track);
-
-#if defined(CONF_FAMILY_WINDOWS)
-		// NetEase-first: every track goes to NetEase CloudMusic first (it has the
-		// best simplified-Chinese + word-by-word yrc coverage). Only if NetEase
-		// definitively has no lyrics do we fall back to lrclib (StartRequest).
-		// m_LrclibState tracks that fallback: IDLE means "NetEase is (or should be)
-		// the source"; anything else (LOADING/READY/NOTFOUND) means lrclib owns the
-		// display for m_LrclibOwnedKey. Any other track goes to NetEase first.
-		if(m_LrclibState != ELyricsState::IDLE && m_LrclibOwnedKey == Key)
-		{
-			// lrclib owns this track — keep driving its request pipeline.
-			if(m_ActiveKey != Key)
-			{
-				AbortRequest();
-				AbortNetease();
-				m_ActiveKey = Key;
-				m_vLines.clear();
-				ResetMediaClock();
-				SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing);
-				StartRequest(Track);
-			}
-			else
-			{
-				SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing);
-				ProcessRequest();
-			}
-			return;
-		}
-		// new track (or first): NetEase owns it now, reset any lrclib ownership.
-		if(m_LrclibOwnedKey != Key)
-		{
-			m_LrclibState = ELyricsState::IDLE;
-			m_LrclibOwnedKey.clear();
-		}
-
+		// SMTC and the title monitor share one identity through every fallback.
 		UpdateNetease(Track);
-		return;
 #else
-		if(Key == m_LrclibFailedKey)
-		{
-			return;
-		}
-
+		const std::string Key = BuildCacheKey(Track);
 		if(Key != m_ActiveKey)
 		{
 			AbortRequest();
@@ -1666,8 +1625,9 @@ public:
 		// missing we resolve it via /api/song/detail (which always carries it).
 		bool m_DetailQueued = false;
 		// QQ 音乐第三源（NetEase NOTFOUND 后、lrclib 兜底前尝试）
-		bool m_TriedQQ = false;      // QQ 流程已走完（成功或失败）
-		std::string m_QQMid;         // 搜索到的 songmid
+		bool m_TriedQQ = false; // QQ search/lyric completed, successfully or not
+		bool m_TriedLrclib = false;
+		std::string m_QQMid;
 	};
 
 	std::map<std::string, SNeteaseMeta> m_NeteaseData;
@@ -1677,22 +1637,43 @@ public:
 	bool m_NeteaseInDetailPhase = false;
 	std::shared_ptr<IHttpRequest> m_pNeteaseRequest;
 	std::shared_ptr<IHttpRequest> m_pQQRequest;
-	bool m_QQInSearch = false;  // QQ 搜索阶段进行中
-	bool m_QQInLyric = false;   // QQ 歌词阶段进行中
+	std::string m_QQInFlight; // independent of NetEase detail/cover ownership
+	bool m_QQInSearch = false;
+	bool m_QQInLyric = false;
 
 	void AbortNetease()
 	{
 		if(m_pNeteaseRequest)
 		{
+			auto It = m_NeteaseData.find(m_NeteaseInFlight);
+			if(It != m_NeteaseData.end())
+			{
+				if(m_NeteaseInDetailPhase)
+					It->second.m_DetailQueued = false;
+				else if(m_NeteaseInCoverPhase)
+					It->second.m_CoverQueued = false;
+				else
+				{
+					It->second.m_TriedLyric = false;
+					It->second.m_LyricState = ELyricsState::IDLE;
+				}
+			}
 			m_pNeteaseRequest->Abort();
 			m_pNeteaseRequest.reset();
 		}
 		if(m_pQQRequest)
 		{
+			auto It = m_NeteaseData.find(m_QQInFlight);
+			if(It != m_NeteaseData.end())
+			{
+				It->second.m_TriedQQ = false;
+				It->second.m_LyricState = ELyricsState::NOTFOUND;
+			}
 			m_pQQRequest->Abort();
 			m_pQQRequest.reset();
 		}
 		m_NeteaseInFlight.clear();
+		m_QQInFlight.clear();
 		m_NeteaseInLyricPhase = false;
 		m_NeteaseInCoverPhase = false;
 		m_NeteaseInDetailPhase = false;
@@ -1719,6 +1700,49 @@ public:
 		Key += '|';
 		Key += Track.m_Title;
 		return Key;
+	}
+
+	void StartNeteaseRequest(const std::string &Key, const char *pUrl, bool Lyric = false, bool Detail = false, bool Cover = false)
+	{
+		m_pNeteaseRequest = HttpGet(pUrl);
+		m_pNeteaseRequest->Timeout(CTimeout{10000, 30000, 500, 10});
+		m_pNeteaseRequest->LogProgress(HTTPLOG::FAILURE);
+		m_pNeteaseRequest->FailOnErrorStatus(false);
+		m_NeteaseInFlight = Key;
+		m_NeteaseInLyricPhase = Lyric;
+		m_NeteaseInDetailPhase = Detail;
+		m_NeteaseInCoverPhase = Cover;
+		m_pHttp->Run(m_pNeteaseRequest);
+	}
+
+	void StartQQ(const std::string &Key, SNeteaseMeta &Meta)
+	{
+		char aUrl[2048];
+		if(Meta.m_QQMid.empty())
+		{
+			char aEscT[512], aEscA[512];
+			EscapeUrl(aEscT, Meta.m_Title.c_str());
+			EscapeUrl(aEscA, Meta.m_Artist.c_str());
+			str_format(aUrl, sizeof(aUrl),
+				"https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&n=3&w=%s%%20%s", aEscT, aEscA);
+		}
+		else
+		{
+			char aEscMid[512];
+			EscapeUrl(aEscMid, Meta.m_QQMid.c_str());
+			str_format(aUrl, sizeof(aUrl),
+				"https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?format=json&nobase64=1&g_tk=5381&loginUin=0&hostUin=0&platform=yqq&songmid=%s", aEscMid);
+		}
+		m_pQQRequest = HttpGet(aUrl);
+		m_pQQRequest->Timeout(CTimeout{10000, 30000, 500, 10});
+		m_pQQRequest->LogProgress(HTTPLOG::FAILURE);
+		m_pQQRequest->FailOnErrorStatus(false);
+		m_pQQRequest->HeaderString("Referer", "https://y.qq.com/");
+		m_QQInFlight = Key;
+		m_QQInSearch = Meta.m_QQMid.empty();
+		m_QQInLyric = !m_QQInSearch;
+		Meta.m_LyricState = ELyricsState::LOADING;
+		m_pHttp->Run(m_pQQRequest);
 	}
 
 	void UpdateNetease(const STrack &Track)
@@ -1763,121 +1787,75 @@ public:
 		// DurationMs==0 时自动退回旧的自计时分支（含暂停冻结），行为不变。
 		SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing);
 
-		// 网易云+QQ 都判了没词 ≠ 真没词:回落 lrclib 再找一轮(多渠道歌词,
-		// 2026-11-01 用户要求)。lrclib 管线直接在这里逐帧驱动——原来的交接块在
-		// ProcessNetease 里(只有网易请求完成帧可达,QQ 收口后没人再进),而且它
-		// 把 m_ActiveKey 换成 lrclib key 后,下一帧这里的 key 检查会当切歌把请求
-		// 中止,基本是死码。现在保持 m_ActiveKey 不变,StartRequest 的
-		// m_RequestKey 会等于它,ProcessRequest 完成帧直接落到 m_vLines。
-		if(Meta.m_LyricState == ELyricsState::NOTFOUND && Meta.m_TriedLyric && Meta.m_TriedQQ && Meta.m_vLines.empty())
-		{
-			if(m_LrclibState == ELyricsState::IDLE || m_LrclibOwnedKey != Key)
-			{
-				STrack Fallback;
-				Fallback.m_Valid = true;
-				Fallback.m_Title = Meta.m_Title;
-				Fallback.m_Artist = Meta.m_Artist;
-				Fallback.m_DurationMs = Meta.m_DurationMs;
-				m_LrclibState = ELyricsState::LOADING;
-				m_LrclibOwnedKey = Key;
-				m_LyricsState = ELyricsState::LOADING;
-				m_vLines.clear();
-				StartRequest(Fallback);
-			}
-			else
-			{
-				ProcessRequest();
-				if(m_LyricsState == ELyricsState::READY && !m_vLines.empty())
-				{
-					// lrclib 找到了:回填网易缓存,后续帧走正常应用路径
-					Meta.m_vLines = m_vLines;
-					Meta.m_LyricState = ELyricsState::READY;
-				}
-			}
-			ProcessQQ();
-			return;
-		}
+		// Finish all transports before deciding the next stage. Cover work never
+		// owns the lyric state and continues while QQ/lrclib are in flight.
+		ProcessNetease();
+		ProcessQQ();
+		ProcessRequest();
 
-		// apply cached/finished data
-		if(Meta.m_LyricState == ELyricsState::READY || Meta.m_LyricState == ELyricsState::NOTFOUND)
+		if(m_pHttp == nullptr && Meta.m_LyricState != ELyricsState::READY)
 		{
-			m_LyricsState = Meta.m_LyricState;
-			m_vLines = Meta.m_vLines;
+			Meta.m_LyricState = ELyricsState::OFFLINE;
+			Meta.m_TriedLyric = Meta.m_TriedQQ = Meta.m_TriedLrclib = true;
 		}
-		else if(m_NeteaseInFlight == Key)
+		else if(m_pHttp != nullptr)
 		{
-			m_LyricsState = ELyricsState::LOADING;
-		}
-
-		// start resolution when idle and untried
-		if(m_pNeteaseRequest || Meta.m_TriedLyric)
-		{
-			// If lyrics are resolved but the cover still hasn't been fetched, kick
-			// the cover download here too. ProcessNetease only chains phases on the
-			// frame a request completes; a lyrics-READY track served from the cache
-			// would otherwise never get its cover requested.
-			if(!m_pNeteaseRequest && m_pHttp != nullptr && Meta.m_Resolved && Meta.m_SongId != 0 && Meta.m_TriedLyric && Meta.m_PicUrl.empty() && !Meta.m_DetailQueued && !m_NeteaseInDetailPhase && !m_NeteaseInCoverPhase)
+			if(!m_pNeteaseRequest && !Meta.m_TriedLyric)
 			{
-				// lyrics came from cache: resolve album.picUrl via song/detail first.
-				char aUrl[512];
-				str_format(aUrl, sizeof(aUrl), "https://music.163.com/api/song/detail?ids=[%lld]", (long long)Meta.m_SongId);
-				m_pNeteaseRequest = HttpGet(aUrl);
-				m_pNeteaseRequest->Timeout(CTimeout{10000, 0, 500, 10});
-				m_pNeteaseRequest->LogProgress(HTTPLOG::FAILURE);
-				m_pNeteaseRequest->FailOnErrorStatus(false);
-				m_NeteaseInFlight = Key;
-				m_NeteaseInDetailPhase = true;
-				m_pHttp->Run(m_pNeteaseRequest);
-			}
-			else if(!m_pNeteaseRequest && m_pHttp != nullptr && Meta.m_Resolved && Meta.m_TriedLyric && !Meta.m_CoverQueued && !Meta.m_PicUrl.empty() && !m_NeteaseInCoverPhase)
-			{
-				if(Meta.m_PicUrl.rfind("http", 0) != 0)
+				char aUrl[1400];
+				if(Meta.m_Resolved)
 				{
-					Meta.m_CoverQueued = true;
+					str_format(aUrl, sizeof(aUrl), "https://music.163.com/api/song/lyric?id=%lld&lv=-1&tv=-1&yv=-1", (long long)Meta.m_SongId);
+					StartNeteaseRequest(Key, aUrl, true);
 				}
 				else
 				{
-					m_pNeteaseRequest = HttpGet(Meta.m_PicUrl.c_str());
-					m_pNeteaseRequest->Timeout(CTimeout{10000, 0, 500, 10});
-					m_pNeteaseRequest->LogProgress(HTTPLOG::FAILURE);
-					m_pNeteaseRequest->FailOnErrorStatus(false);
-					m_NeteaseInFlight = Key;
-					m_NeteaseInCoverPhase = true;
-					m_pHttp->Run(m_pNeteaseRequest);
+					char aEscapedQuery[768];
+					std::string Query = Track.m_Title;
+					if(!Track.m_Artist.empty())
+						Query += " " + Track.m_Artist;
+					EscapeUrl(aEscapedQuery, Query.c_str());
+					str_format(aUrl, sizeof(aUrl), "https://music.163.com/api/search/get/web?s=%s&type=1&limit=20", aEscapedQuery);
+					StartNeteaseRequest(Key, aUrl);
+				}
+				Meta.m_LyricState = ELyricsState::LOADING;
+			}
+
+			if(Meta.m_TriedLyric && Meta.m_vLines.empty())
+			{
+				if(!Meta.m_TriedQQ)
+				{
+					if(!m_pQQRequest)
+						StartQQ(Key, Meta);
+				}
+				else if(!Meta.m_TriedLrclib && !m_pRequest)
+				{
+					Meta.m_TriedLrclib = true;
+					Meta.m_LyricState = ELyricsState::LOADING;
+					StartRequest(Track);
 				}
 			}
-			ProcessNetease();
-			ProcessQQ();
-			return;
+
+			if(!m_pNeteaseRequest && Meta.m_Resolved && Meta.m_TriedLyric)
+			{
+				if(Meta.m_PicUrl.empty() && !Meta.m_DetailQueued)
+				{
+					char aUrl[512];
+					str_format(aUrl, sizeof(aUrl), "https://music.163.com/api/song/detail?ids=[%lld]", (long long)Meta.m_SongId);
+					Meta.m_DetailQueued = true;
+					StartNeteaseRequest(Key, aUrl, false, true);
+				}
+				else if(!Meta.m_PicUrl.empty() && !Meta.m_CoverQueued)
+				{
+					Meta.m_CoverQueued = true;
+					if(Meta.m_PicUrl.rfind("http", 0) == 0)
+						StartNeteaseRequest(Key, Meta.m_PicUrl.c_str(), false, false, true);
+				}
+			}
 		}
 
-		if(m_pHttp == nullptr)
-		{
-			m_LyricsState = ELyricsState::OFFLINE;
-			return;
-		}
-
-		// phase 1: search song (yields id + duration)
-		char aEscapedQuery[768];
-		std::string Query = Track.m_Title;
-		if(!Track.m_Artist.empty())
-		{
-			Query += ' ';
-			Query += Track.m_Artist;
-		}
-		EscapeUrl(aEscapedQuery, Query.c_str());
-
-		char aUrl[1400];
-		str_format(aUrl, sizeof(aUrl), "https://music.163.com/api/search/get/web?s=%s&type=1&limit=20", aEscapedQuery);
-
-		m_pNeteaseRequest = HttpGet(aUrl);
-		m_pNeteaseRequest->Timeout(CTimeout{10000, 0, 500, 10});
-		m_pNeteaseRequest->LogProgress(HTTPLOG::FAILURE);
-		m_pNeteaseRequest->FailOnErrorStatus(false);
-		m_NeteaseInFlight = Key;
-		m_NeteaseInLyricPhase = false;
-		m_pHttp->Run(m_pNeteaseRequest);
-		m_LyricsState = ELyricsState::LOADING;
+		m_LyricsState = Meta.m_LyricState;
+		m_vLines = Meta.m_vLines;
 	}
 
 	void ProcessNetease()
@@ -1888,15 +1866,22 @@ public:
 		std::shared_ptr<IHttpRequest> pFinished = m_pNeteaseRequest;
 		m_pNeteaseRequest.reset();
 		const std::string Key = m_NeteaseInFlight;
+		const bool WasLyric = m_NeteaseInLyricPhase;
+		const bool WasDetail = m_NeteaseInDetailPhase;
+		const bool WasCover = m_NeteaseInCoverPhase;
 		m_NeteaseInFlight.clear();
-		if(Key.empty() || m_NeteaseData.find(Key) == m_NeteaseData.end())
+		m_NeteaseInLyricPhase = false;
+		m_NeteaseInDetailPhase = false;
+		m_NeteaseInCoverPhase = false;
+		const auto It = m_NeteaseData.find(Key);
+		if(Key.empty() || It == m_NeteaseData.end())
 			return;
 
-		SNeteaseMeta &Meta = m_NeteaseData[Key];
+		SNeteaseMeta &Meta = It->second;
 		const bool ApplyToActive = Key == m_ActiveKey;
 
 		// detail phase: resolve album.picUrl that the search response omitted.
-		if(m_NeteaseInDetailPhase)
+		if(WasDetail)
 		{
 			if(pFinished->State() == EHttpState::DONE && pFinished->StatusCode() >= 200 && pFinished->StatusCode() < 300)
 			{
@@ -1923,9 +1908,9 @@ public:
 
 		// cover phase: raw image bytes (not JSON). Store into the shared cover
 		// buffer used by the render thread's UpdateCoverTexture().
-		if(m_NeteaseInCoverPhase)
+		if(WasCover)
 		{
-			if(pFinished->State() == EHttpState::DONE && pFinished->StatusCode() >= 200 && pFinished->StatusCode() < 300)
+			if(ApplyToActive && pFinished->State() == EHttpState::DONE && pFinished->StatusCode() >= 200 && pFinished->StatusCode() < 300)
 			{
 				unsigned char *pResultPtr = nullptr;
 				size_t ResultLen = 0;
@@ -1941,10 +1926,7 @@ public:
 			else
 			{
 			}
-			m_NeteaseInCoverPhase = false;
 			Meta.m_CoverQueued = true;
-			if(ApplyToActive && !m_NeteaseInFlight.empty() && Key == m_ActiveKey)
-				m_LyricsState = Meta.m_LyricState;
 			return;
 		}
 
@@ -1953,7 +1935,7 @@ public:
 			json_value *pRoot = pFinished->ResultJson();
 			if(pRoot != nullptr && pRoot != &json_value_none && pRoot->type == json_object)
 			{
-				if(!m_NeteaseInLyricPhase)
+				if(!WasLyric)
 				{
 					// search response: pick the version (studio / live / remix / cover) that matches the
 					// title in the netease window. Blindly taking songs[0] handed a (Live版) track the
@@ -2031,7 +2013,7 @@ public:
 							const json_value *pSong = pSongs->u.array.values[i];
 							if(pSong == nullptr || pSong->type != json_object) continue;
 							const json_value *pId = json_object_get(pSong, "id");
-							if(pId == nullptr || pId->type != json_integer) continue;
+							if(pId == nullptr || pId->type != json_integer || pId->u.integer <= 0) continue;
 							const json_value *pName = json_object_get(pSong, "name");
 							const json_value *pDur = json_object_get(pSong, "duration");
 							const char *pNameText = (pName != nullptr && pName->type == json_string) ? pName->u.string.ptr : "";
@@ -2146,100 +2128,21 @@ public:
 						Ok = true;
 					}
 
-					if(Ok)
-						Meta.m_LyricState = ELyricsState::READY;
-					else
-					{
-						Meta.m_LyricState = ELyricsState::NOTFOUND;
-						// NetEase 没有歌词 → 发起 QQ 音乐搜索（第三源，两阶段）
-						if(!Meta.m_TriedQQ && m_pHttp != nullptr)
-						{
-							char aEscT[512], aEscA[512];
-							EscapeUrl(aEscT, Meta.m_Title.c_str());
-							EscapeUrl(aEscA, Meta.m_Artist.c_str());
-							char aQQUrl[2048];
-							str_format(aQQUrl, sizeof(aQQUrl),
-								"https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&n=3&w=%s%%20%s",
-								aEscT, aEscA);
-							m_pQQRequest = HttpGet(aQQUrl);
-							m_pQQRequest->Timeout(CTimeout{10000, 0, 500, 10});
-							m_pQQRequest->LogProgress(HTTPLOG::FAILURE);
-							m_pQQRequest->HeaderString("Referer", "https://y.qq.com/");
-							m_QQInSearch = true;
-						}
-					}
-					Meta.m_TriedLyric = true;
-					m_NeteaseInLyricPhase = false;
+					Meta.m_LyricState = Ok ? ELyricsState::READY : ELyricsState::NOTFOUND;
 				}
 			}
 			if(pRoot != nullptr && pRoot != &json_value_none)
 				json_value_free(pRoot);
 		}
 
-		// chain: search -> lyric request (only if not already tried)
-		if(!m_NeteaseInLyricPhase && Meta.m_Resolved && !Meta.m_TriedLyric && m_pHttp != nullptr)
+		// Every completed search/lyric request settles its stage, including
+		// transport errors, non-2xx responses, invalid JSON and empty results.
+		if(WasLyric || !Meta.m_Resolved)
 		{
-			char aUrl[512];
-			str_format(aUrl, sizeof(aUrl), "https://music.163.com/api/song/lyric?id=%lld&lv=-1&tv=-1&yv=-1", (long long)Meta.m_SongId);
-			m_pNeteaseRequest = HttpGet(aUrl);
-			m_pNeteaseRequest->Timeout(CTimeout{10000, 0, 500, 10});
-			m_pNeteaseRequest->LogProgress(HTTPLOG::FAILURE);
-			m_pNeteaseRequest->FailOnErrorStatus(false);
-			m_NeteaseInFlight = Key;
-			m_NeteaseInLyricPhase = true;
-			m_pHttp->Run(m_pNeteaseRequest);
-		}
-		else if(!m_NeteaseInCoverPhase && Meta.m_Resolved && Meta.m_TriedLyric && Meta.m_PicUrl.empty() && !Meta.m_DetailQueued && m_pHttp != nullptr)
-		{
-			// detail 兜底:搜索响应没带 album.picUrl 时用 song/detail 补齐
-			//(之前查崩溃时整体禁用,封面就再也没了——2026-11-01 恢复)
-			char aUrl[512];
-			str_format(aUrl, sizeof(aUrl), "https://music.163.com/api/song/detail?ids=[%lld]", (long long)Meta.m_SongId);
-			m_pNeteaseRequest = HttpGet(aUrl);
-			m_pNeteaseRequest->Timeout(CTimeout{10000, 0, 500, 10});
-			m_pNeteaseRequest->LogProgress(HTTPLOG::FAILURE);
-			m_pNeteaseRequest->FailOnErrorStatus(false);
-			m_NeteaseInFlight = Key;
-			m_NeteaseInDetailPhase = true;
-			m_pHttp->Run(m_pNeteaseRequest);
-		}
-		else if(!m_NeteaseInCoverPhase && Meta.m_Resolved && Meta.m_TriedLyric && !Meta.m_CoverQueued && !Meta.m_PicUrl.empty() && m_pHttp != nullptr)
-		{
-			// cover request: download the album art we scraped from the search hit.
-			if(Meta.m_PicUrl.rfind("http", 0) != 0)
-			{
-				Meta.m_CoverQueued = true; // not a plain http url, skip
-			}
-			else
-			{
-				m_pNeteaseRequest = HttpGet(Meta.m_PicUrl.c_str());
-				m_pNeteaseRequest->Timeout(CTimeout{10000, 0, 500, 10});
-				m_pNeteaseRequest->LogProgress(HTTPLOG::FAILURE);
-				m_pNeteaseRequest->FailOnErrorStatus(false);
-				m_NeteaseInFlight = Key;
-				m_NeteaseInCoverPhase = true;
-				m_pHttp->Run(m_pNeteaseRequest);
-			}
-		}
-		else if(m_NeteaseInLyricPhase && !Meta.m_TriedLyric && m_pNeteaseRequest)
-		{
-			// A lyric request is still in flight (m_pNeteaseRequest set) but not
-			// done yet — do NOT mark OFFLINE here. To reach this branch the request
-			// must have completed, so m_pNeteaseRequest would be null; guard on it.
 			Meta.m_TriedLyric = true;
+			if(Meta.m_vLines.empty())
+				Meta.m_LyricState = ELyricsState::NOTFOUND;
 		}
-		else if(!m_NeteaseInLyricPhase && !Meta.m_Resolved)
-		{
-			// search failed (no in-flight request and no song id)
-			Meta.m_TriedLyric = true;
-		}
-
-		if(ApplyToActive && !m_NeteaseInFlight.empty() && Key == m_ActiveKey)
-			m_LyricsState = Meta.m_LyricState;
-
-		// (网易云→QQ→lrclib 的多渠道回落已上移到 UpdateNetease:原交接块只在
-		// ProcessNetease 可达——QQ 收口后没有网易请求完成帧,且换 m_ActiveKey
-		// 会被下一帧的 key 检查中止,是死码。)
 	}
 
 	// ---------------- QQ 音乐第三源（NetEase NOTFOUND 后、lrclib 前） ----------------
@@ -2250,65 +2153,62 @@ public:
 			return;
 		std::shared_ptr<IHttpRequest> pFinished = m_pQQRequest;
 		m_pQQRequest.reset();
+		const std::string Key = m_QQInFlight;
 		const bool WasSearch = m_QQInSearch;
+		const bool WasLyric = m_QQInLyric;
+		m_QQInFlight.clear();
 		m_QQInSearch = false;
 		m_QQInLyric = false;
-		auto It = m_NeteaseData.find(m_NeteaseInFlight);
-		if(It == m_NeteaseData.end())
-			return; // 已切歌，丢弃
-		SNeteaseMeta &Meta = It->second;
-		if(Meta.m_TriedQQ)
+		auto It = m_NeteaseData.find(Key);
+		if(Key.empty() || It == m_NeteaseData.end())
 			return;
+		SNeteaseMeta &Meta = It->second;
 
-		json_value *pRoot = pFinished->ResultJson();
-		if(pRoot != nullptr && pRoot != &json_value_none)
+		bool FoundMid = false;
+		if(pFinished->State() == EHttpState::DONE && pFinished->StatusCode() >= 200 && pFinished->StatusCode() < 300)
 		{
-			if(WasSearch)
+			json_value *pRoot = pFinished->ResultJson();
+			if(pRoot != nullptr && pRoot != &json_value_none && pRoot->type == json_object)
 			{
-				// {"code":0,"data":{"song":{"list":[{...,"songmid":"xxx",...}]}}}
-				const json_value *pData = json_object_get(pRoot, "data");
-				const json_value *pSong = pData ? json_object_get(pData, "song") : nullptr;
-				const json_value *pList = pSong ? json_object_get(pSong, "list") : nullptr;
-				const json_value *pFirst = (pList != nullptr && pList->type == json_array && pList->u.array.length > 0)
-					? pList->u.array.values[0] : nullptr;
-				const json_value *pMid = pFirst ? json_object_get(pFirst, "songmid") : nullptr;
-				if(pMid != nullptr && pMid->type == json_string && pMid->u.string.length > 0)
+				const json_value *pCode = json_object_get(pRoot, "code");
+				const bool Success = pCode->type == json_none || (pCode->type == json_integer && pCode->u.integer == 0);
+				if(Success && WasSearch)
 				{
-					Meta.m_QQMid = pMid->u.string.ptr;
-					// 第二阶段：拿歌词
-					char aUrl[512];
-					str_format(aUrl, sizeof(aUrl),
-						"https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?format=json&nobase64=1&g_tk=5381&loginUin=0&hostUin=0&platform=yqq&songmid=%s",
-						Meta.m_QQMid.c_str());
-					m_pQQRequest = HttpGet(aUrl);
-					m_pQQRequest->Timeout(CTimeout{10000, 0, 500, 10});
-					m_pQQRequest->LogProgress(HTTPLOG::FAILURE);
-					m_pQQRequest->HeaderString("Referer", "https://y.qq.com/");
-					m_QQInLyric = true;
+					const json_value *pData = json_object_get(pRoot, "data");
+					const json_value *pSong = json_object_get(pData, "song");
+					const json_value *pList = json_object_get(pSong, "list");
+					const json_value *pFirst = pList->type == json_array && pList->u.array.length > 0 ? pList->u.array.values[0] : &json_value_none;
+					const json_value *pMid = json_object_get(pFirst, "songmid");
+					if(pMid->type == json_string && pMid->u.string.length > 0)
+					{
+						Meta.m_QQMid = pMid->u.string.ptr;
+						FoundMid = true;
+					}
 				}
-				else
-					Meta.m_TriedQQ = true; // 搜索无结果 → 放行 lrclib
-			}
-			else
-			{
-				// 歌词响应：{"code":0,"lyric":"[mm:ss.xx]..."}
-				const json_value *pLyric = json_object_get(pRoot, "lyric");
-				const char *pLyricText = (pLyric != nullptr && pLyric->type == json_string) ? pLyric->u.string.ptr : "";
-				std::vector<SLyricLine> vLines;
-				if(pLyricText[0] != '\0' && ParseSyncedLyrics(pLyricText, vLines) && !vLines.empty())
+				else if(Success && WasLyric)
 				{
-					Meta.m_vLines = std::move(vLines);
-					Meta.m_vFallbackLines.clear();
-					Meta.m_LyricState = ELyricsState::READY;
-					Meta.m_Resolved = true;
+					const json_value *pLyric = json_object_get(pRoot, "lyric");
+					std::vector<SLyricLine> vLines;
+					if(pLyric->type == json_string && ParseSyncedLyrics(pLyric->u.string.ptr, vLines))
+					{
+						Meta.m_vLines = std::move(vLines);
+						Meta.m_vFallbackLines.clear();
+						Meta.m_LyricState = ELyricsState::READY;
+					}
 				}
-				Meta.m_TriedQQ = true; // 成功或失败都收口，失败放行 lrclib
 			}
+			if(pRoot != nullptr && pRoot != &json_value_none)
+				json_value_free(pRoot);
 		}
-		else
-			Meta.m_TriedQQ = true; // 网络失败也放行 lrclib
-		if(pRoot != nullptr && pRoot != &json_value_none)
-			json_value_free(pRoot);
+
+		if(FoundMid && Key == m_ActiveKey && m_pHttp != nullptr)
+		{
+			StartQQ(Key, Meta);
+			return;
+		}
+		Meta.m_TriedQQ = !FoundMid;
+		if(Meta.m_vLines.empty())
+			Meta.m_LyricState = ELyricsState::NOTFOUND;
 	}
 #endif
 
@@ -3450,6 +3350,8 @@ void CIslandMusic::OnInit()
 
 void CIslandMusic::OnReset()
 {
+	if(m_pImpl)
+		m_pImpl->ResetLyrics();
 }
 
 void CIslandMusic::OnRender()
@@ -3464,6 +3366,8 @@ void CIslandMusic::OnRender()
 
 void CIslandMusic::OnShutdown()
 {
+	if(m_pImpl)
+		m_pImpl->ResetLyrics();
 #if TCLIENT_HAS_WINRT_MUSIC
 	if(m_pImpl)
 		m_pImpl->StopWorker();

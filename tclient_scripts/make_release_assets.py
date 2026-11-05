@@ -2,14 +2,16 @@
 """Create the TClient autoupdate release assets.
 
 Given a packaged client directory (the contents of the portable client, i.e. the directory that
-holds DDNet.exe, the DLLs and data/), this writes two files into the output directory:
+holds DDNet.exe, the DLLs and data/), this writes four release assets:
 
-  TClient-update-win64.zip    only the files an update needs to replace
-  TClient-update-win64.json   manifest describing that zip (version, size, sha256, notes)
+  TClient-update-win64.zip       only the files an update needs to replace
+  TClient-update-win64.json      manifest describing that zip and the helper
+  TClient-update-win64.json.sig  detached Ed25519 signature (64 raw bytes)
+  TClientUpdater.exe             standalone bootstrap helper from the package
 
 The zip is written deterministically: entries are sorted by name and all timestamps are fixed, so
-building the same input twice produces byte identical output. Only the Python standard library is
-used.
+building the same input twice produces byte identical output. Signing requires cryptography and an
+Ed25519 PEM key matching the public key embedded in the client.
 
 User data is never put into the zip: cfg/, demos/, screenshots/, themes/, downloadedmaps/,
 tclient/ (custom fonts and other user resources), storage.cfg, settings_*.cfg, logs, crash dumps
@@ -20,6 +22,7 @@ Example:
     --source "E:/TClient-10.9-win64" \\
     --version 1.4.0 \\
     --output "E:/TClient-release" \\
+    --private-key "E:/secure/release-signing.pem" \\
     --notes "Fix skin loading, add new pings"
 """
 
@@ -27,6 +30,8 @@ import argparse
 import hashlib
 import json
 import os
+import re
+import shutil
 import sys
 import zipfile
 from pathlib import Path
@@ -35,6 +40,7 @@ ASSET_NAME = "TClient-update-win64.zip"
 MANIFEST_NAME = "TClient-update-win64.json"
 MANIFEST_SIG_NAME = MANIFEST_NAME + ".sig"
 HELPER_NAME = "TClientUpdater.exe"
+PUBLIC_KEY_HEADER = Path(__file__).resolve().parents[1] / "src/game/client/components/tclient/update_public_key.h"
 
 # Fixed timestamp for every entry (the earliest value a zip file can store) so that the archive
 # is reproducible.
@@ -209,17 +215,42 @@ def load_notes(args: argparse.Namespace) -> str:
 	return f"TClient {args.version}"
 
 
+def load_signing_key(path):
+	if not path:
+		raise PackageError("release signing requires --private-key (CI secret: TCLIENT_UPDATE_ED25519_PRIVATE_KEY)")
+	try:
+		from cryptography.hazmat.primitives import serialization
+		from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+	except ImportError as error:
+		raise PackageError("release signing requires the Python cryptography package") from error
+	try:
+		private_key = serialization.load_pem_private_key(Path(path).read_bytes(), password=None)
+	except (ValueError, TypeError) as error:
+		raise PackageError("release signing key must be an unencrypted Ed25519 PEM") from error
+	if not isinstance(private_key, Ed25519PrivateKey):
+		raise PackageError("release signing key is not an Ed25519 key")
+	# Check the same trust anchor the client uses before producing any assets.
+	header = PUBLIC_KEY_HEADER.read_text(encoding="utf-8")
+	match = re.search(r"s_aUpdateEd25519PublicKey\[32\]\s*=\s*\{([^}]+)\}", header)
+	public_bytes = bytes(int(value, 16) for value in re.findall(r"0x([0-9a-fA-F]{2})\b", match[1])) if match else b""
+	if len(public_bytes) != 32:
+		raise PackageError("could not read the client's embedded update public key")
+	if private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw) != public_bytes:
+		raise PackageError("release signing key does not match the client's embedded update public key")
+	return private_key
+
+
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
 	parser = argparse.ArgumentParser(
-		description="Create TClient-update-win64.zip and its json manifest.",
+		description="Create the signed TClient Windows autoupdate assets.",
 		formatter_class=argparse.RawTextHelpFormatter,
 	)
 	parser.add_argument("--source", required=True, help="Packaged client directory (contains DDNet.exe and data/)")
 	parser.add_argument("--version", required=True, help="Client version, e.g. 1.4.0")
-	parser.add_argument("--output", required=True, help="Directory the two assets are written to")
+	parser.add_argument("--output", required=True, help="Directory the signed release assets are written to")
 	parser.add_argument("--notes", default=None, help="Release notes stored in the manifest")
 	parser.add_argument("--notes-file", default=None, help="Read the release notes from this file instead")
-	parser.add_argument("--private-key", help="Ed25519 private key PEM; when given the manifest is signed (TClient-update-win64.json.sig)")
+	parser.add_argument("--private-key", help="Required Ed25519 private key PEM matching the client's embedded public key")
 	parser.add_argument("--product", default="TClient", help="Product name in the manifest (default: TClient)")
 	parser.add_argument("--channel", default="stable", help="Update channel in the manifest (default: stable)")
 	parser.add_argument("--platform", default="win64", help="Platform in the manifest (default: win64)")
@@ -247,6 +278,7 @@ def main(argv: list[str]) -> int:
 	output = Path(args.output).resolve()
 
 	try:
+		private_key = load_signing_key(args.private_key)
 		extra_data = tuple(part.strip().lower() for part in args.include_data.split(",") if part.strip())
 		update_data = tuple(dict.fromkeys(UPDATE_DATA_SUBDIRS + extra_data))
 		files = collect_files(source, update_data)
@@ -255,6 +287,13 @@ def main(argv: list[str]) -> int:
 		missing = [name for name in REQUIRED_FILES if name not in {relative for relative, _ in files}]
 		if missing:
 			raise PackageError(f"required files missing from the package: {', '.join(missing)}")
+
+		# Validate the bootstrap dependency before writing a zip or manifest.
+		helper_path = source / HELPER_NAME
+		if not helper_path.is_file() or helper_path.stat().st_size == 0:
+			raise PackageError(f"nonempty bootstrap helper missing from the package: {helper_path}")
+		helper_digest = sha256_of(helper_path)
+		helper_size = helper_path.stat().st_size
 
 		notes = load_notes(args)
 		output.mkdir(parents=True, exist_ok=True)
@@ -277,14 +316,6 @@ def main(argv: list[str]) -> int:
 			"sha256": digest,
 			"notes": notes,
 		}
-		# 自举 helper：更新包里自带新版 TClientUpdater.exe，客户端验哈希后
-		# 用它执行安装（运行的永远是验签链上的新 helper）
-		helper_path = source / HELPER_NAME
-		if not helper_path.is_file():
-			raise PackageError(f"bootstrap helper missing from the package: {helper_path}")
-		helper_digest = sha256_of(helper_path)
-		helper_size = helper_path.stat().st_size
-
 		manifest["helper"] = {
 			"name": HELPER_NAME,
 			"size": helper_size,
@@ -292,28 +323,20 @@ def main(argv: list[str]) -> int:
 		}
 		manifest_bytes = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
-		# Ed25519 签名（学习 QmClient）：私钥只在发布者本地；客户端内嵌公钥验签
-		if args.private_key:
-			from cryptography.hazmat.primitives import serialization
-			from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-			private_key = serialization.load_pem_private_key(Path(args.private_key).read_bytes(), password=None)
-			if not isinstance(private_key, Ed25519PrivateKey):
-				raise PackageError("private key is not an Ed25519 key")
-			public_hex = private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
-			signature = private_key.sign(manifest_bytes)
-			manifest_path.write_bytes(manifest_bytes)
-			(output / MANIFEST_SIG_NAME).write_bytes(signature)
-			# 同时写一份到 update/ 子目录：提交到仓库后即可作为
-			# raw.githubusercontent.com 清单源（国内可达性更好）
-			raw_dir = output / "update"
-			raw_dir.mkdir(exist_ok=True)
-			(raw_dir / MANIFEST_NAME).write_bytes(manifest_bytes)
-			(raw_dir / MANIFEST_SIG_NAME).write_bytes(signature)
-			if not args.quiet:
-				print(f"signed with ed25519, public key: {public_hex}")
-		else:
-			manifest_path.write_bytes(manifest_bytes)
-			print("warning: manifest is UNSIGNED (no --private-key)", file=sys.stderr)
+		signature = private_key.sign(manifest_bytes)
+		manifest_path.write_bytes(manifest_bytes)
+		(output / MANIFEST_SIG_NAME).write_bytes(signature)
+		# Also retain the signed pair for the optional raw manifest source.
+		raw_dir = output / "update"
+		raw_dir.mkdir(exist_ok=True)
+		(raw_dir / MANIFEST_NAME).write_bytes(manifest_bytes)
+		(raw_dir / MANIFEST_SIG_NAME).write_bytes(signature)
+		# The running client downloads this independently using the signed hash.
+		helper_output = output / HELPER_NAME
+		if helper_path.resolve() != helper_output.resolve():
+			shutil.copyfile(helper_path, helper_output)
+		if not args.quiet:
+			print("manifest signed with ed25519")
 
 		if not args.quiet:
 			print(f"source: {source}")

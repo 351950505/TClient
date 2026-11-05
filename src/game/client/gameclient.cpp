@@ -150,7 +150,8 @@ void CGameClient::OnConsoleInit()
 					      &m_TClient, // TClient (Must be before chat and players)
 					      &m_ClientBadge, // TClient: 记分板企鹅徽标（必须注册才能拿到接口）
 					      &m_Gradient, // TClient: animated text and skin gradients
-					      &m_Players,
+						      &m_WaterHammerIndicator, // TClient
+						      &m_Players,
 					      &m_MovingTilesBackground, // TClient
 					      &m_MapLayersForeground,
 					      &m_MovingTilesForeground, // TClient
@@ -575,6 +576,7 @@ void CGameClient::OnDummySwap()
 	m_DummyInput = m_Controls.m_aInputData[!g_Config.m_ClDummy];
 	m_Controls.m_aInputData[g_Config.m_ClDummy].m_Fire = PrevDummyFire;
 	m_IsDummySwapping = 1;
+	m_WaterHammerIndicator.OnDummySwap();
 }
 
 int CGameClient::OnSnapInput(int *pData, bool Dummy, bool Force)
@@ -601,6 +603,7 @@ int CGameClient::OnSnapInput(int *pData, bool Dummy, bool Force)
 			return 0;
 		}
 
+		m_WaterHammerIndicator.OnLocalInput(false);
 		mem_copy(pData, &m_DummyInput, sizeof(m_DummyInput));
 		return sizeof(m_DummyInput);
 	}
@@ -627,6 +630,7 @@ int CGameClient::OnSnapInput(int *pData, bool Dummy, bool Force)
 		m_HammerInput.m_TargetX = (int)Dir.x;
 		m_HammerInput.m_TargetY = (int)Dir.y;
 
+		m_WaterHammerIndicator.OnLocalInput(true);
 		mem_copy(pData, &m_HammerInput, sizeof(m_HammerInput));
 		return sizeof(m_HammerInput);
 	}
@@ -965,6 +969,7 @@ void CGameClient::OnRender()
 
 void CGameClient::OnDummyDisconnect()
 {
+	m_WaterHammerIndicator.OnDummyDisconnect();
 	m_aLocalIds[1] = -1;
 	m_aDDRaceMsgSent[1] = false;
 	m_aShowOthers[1] = SHOW_OTHERS_NOT_SET;
@@ -1185,6 +1190,11 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker, int Conn, bool Dumm
 		CNetMsg_Sv_ChangeInfoCooldown *pMsg = (CNetMsg_Sv_ChangeInfoCooldown *)pRawMsg;
 		m_aNextChangeInfo[Conn] = pMsg->m_WaitUntil;
 		return;
+	}
+
+	if(MsgId == NETMSGTYPE_SV_PREINPUT)
+	{
+		m_WaterHammerIndicator.OnPreInput(Conn, *static_cast<const CNetMsg_Sv_PreInput *>(pRawMsg));
 	}
 
 	if(Dummy)
@@ -1797,6 +1807,11 @@ void CGameClient::InvalidateSnapshot()
 	m_Snap.m_SpecInfo.m_Zoom = 1.0f;
 	m_Snap.m_LocalClientId = -1;
 	SnapCollectEntities();
+}
+
+void CGameClient::OnSnapshotReceived(int Conn, int Tick, const CSnapshot *pSnapshot)
+{
+	m_WaterHammerIndicator.OnSnapshot(Conn, Tick, pSnapshot);
 }
 
 void CGameClient::OnNewSnapshot(bool DummySwapped)

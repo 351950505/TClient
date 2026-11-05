@@ -510,6 +510,7 @@ void *CGameClient::TranslateGameMsg(int *pMsgId, CUnpacker *pUnpacker, int Conn)
 			dbg_msg("sixup", "Sv_ClientDrop got invalid ClientId: %d", pMsg7->m_ClientId);
 			return nullptr;
 		}
+		m_WaterHammerIndicator.OnClientDrop(Conn, pMsg7->m_ClientId);
 		CTranslationContext::CClientData &Client = m_pClient->m_TranslationContext.m_aClients[pMsg7->m_ClientId];
 		Client.Reset();
 

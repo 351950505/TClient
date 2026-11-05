@@ -1200,82 +1200,117 @@ void CEditorActionEditLayersGroupAndOrder::Redo()
 
 // -----------------------------------
 
-CEditorActionAppendMap::CEditorActionAppendMap(CEditorMap *pMap, const char *pMapName, const SPrevInfo &PrevInfo, std::vector<int> &vImageIndexMap) :
-	IEditorAction(pMap), m_PrevInfo(PrevInfo), m_vImageIndexMap(vImageIndexMap)
+CEditorActionAppendMap::CSelection::CSelection(const CEditorMap *pMap) :
+	m_Group(pMap->m_SelectedGroup),
+	m_vLayers(pMap->m_vSelectedLayers),
+	m_vQuads(pMap->m_vSelectedQuads),
+	m_QuadPoints(pMap->m_SelectedQuadPoints),
+	m_QuadEnvelope(pMap->m_SelectedQuadEnvelope),
+	m_CurrentQuad(pMap->m_CurrentQuadIndex),
+	m_Envelope(pMap->m_SelectedEnvelope),
+	m_vEnvelopePoints(pMap->m_vSelectedEnvelopePoints),
+	m_TangentInPoint(pMap->m_SelectedTangentInPoint),
+	m_TangentOutPoint(pMap->m_SelectedTangentOutPoint),
+	m_Image(pMap->m_SelectedImage),
+	m_Sound(pMap->m_SelectedSound),
+	m_SoundSource(pMap->m_SelectedSoundSource)
 {
-	str_copy(m_aMapName, pMapName);
-	str_format(m_aDisplayText, sizeof(m_aDisplayText), "Append %s", m_aMapName);
+}
+
+void CEditorActionAppendMap::CSelection::Restore(CEditorMap *pMap) const
+{
+	pMap->m_SelectedGroup = m_Group;
+	pMap->m_vSelectedLayers = m_vLayers;
+	pMap->m_vSelectedQuads = m_vQuads;
+	pMap->m_SelectedQuadPoints = m_QuadPoints;
+	pMap->m_SelectedQuadEnvelope = m_QuadEnvelope;
+	pMap->m_CurrentQuadIndex = m_CurrentQuad;
+	pMap->m_SelectedEnvelope = m_Envelope;
+	pMap->m_vSelectedEnvelopePoints = m_vEnvelopePoints;
+	pMap->m_SelectedTangentInPoint = m_TangentInPoint;
+	pMap->m_SelectedTangentOutPoint = m_TangentOutPoint;
+	pMap->m_SelectedImage = m_Image;
+	pMap->m_SelectedSound = m_Sound;
+	pMap->m_SelectedSoundSource = m_SoundSource;
+	pMap->m_UpdateEnvPointInfo = true;
+	pMap->m_QuadKnifeState.Reset();
+}
+
+CEditorActionAppendMap::SPrevInfo::SPrevInfo(const CEditorMap *pMap) :
+	m_Groups(pMap->m_vpGroups.size()),
+	m_Images(pMap->m_vpImages.size()),
+	m_Sounds(pMap->m_vpSounds.size()),
+	m_Envelopes(pMap->m_vpEnvelopes.size()),
+	m_vSettings(pMap->m_vSettings),
+	m_Selection(pMap)
+{
+}
+
+CEditorActionAppendMap::CEditorActionAppendMap(CEditorMap *pMap, const char *pMapName, const SPrevInfo &PrevInfo, const std::vector<int> &vImageIndexMap) :
+	IEditorAction(pMap),
+	m_PrevInfo(PrevInfo),
+	m_vImageIndexMap(vImageIndexMap),
+	m_vpGroups(pMap->m_vpGroups.begin() + PrevInfo.m_Groups, pMap->m_vpGroups.end()),
+	m_vpImages(pMap->m_vpImages),
+	m_vpSounds(pMap->m_vpSounds.begin() + PrevInfo.m_Sounds, pMap->m_vpSounds.end()),
+	m_vpEnvelopes(pMap->m_vpEnvelopes.begin() + PrevInfo.m_Envelopes, pMap->m_vpEnvelopes.end()),
+	m_vSettings(pMap->m_vSettings),
+	m_Selection(pMap)
+{
+	str_format(m_aDisplayText, sizeof(m_aDisplayText), "Append %s", pMapName);
 }
 
 void CEditorActionAppendMap::Undo()
 {
-	// Undo append:
-	// - delete added groups
-	// - delete added envelopes
-	// - delete added images
-	// - delete added sounds
+	// Detach the imported groups first. Their indices must stay in post-append
+	// space, like the indices saved by subsequent actions referencing their layers.
+	Map()->m_vpGroups.resize(m_PrevInfo.m_Groups);
+	Map()->m_vpEnvelopes.resize(m_PrevInfo.m_Envelopes);
+	Map()->m_vpSounds.resize(m_PrevInfo.m_Sounds);
 
-	// Delete added groups
-	while((int)Map()->m_vpGroups.size() > m_PrevInfo.m_Groups)
-	{
-		Map()->m_vpGroups.pop_back();
-	}
+	std::vector<std::shared_ptr<CEditorImage>> vpPreviousImages(m_PrevInfo.m_Images);
+	for(int Index = 0; Index < m_PrevInfo.m_Images; ++Index)
+		vpPreviousImages[Index] = m_vpImages[m_vImageIndexMap.empty() ? Index : m_vImageIndexMap[Index]];
 
-	// Delete added envelopes
-	while((int)Map()->m_vpEnvelopes.size() > m_PrevInfo.m_Envelopes)
-	{
-		Map()->m_vpEnvelopes.pop_back();
-	}
-
-	// Delete added sounds
-	while((int)Map()->m_vpSounds.size() > m_PrevInfo.m_Sounds)
-	{
-		Map()->m_vpSounds.pop_back();
-	}
-
-	// Delete added images
-	// Images are sorted when appending, so we need to revert sorting before deleting the images
 	if(!m_vImageIndexMap.empty())
 	{
-		std::vector<int> vReverseIndexMap;
-		vReverseIndexMap.resize(m_vImageIndexMap.size());
+		std::vector<int> vReverseIndexMap(m_vImageIndexMap.size());
+		for(size_t Index = 0; Index < m_vImageIndexMap.size(); ++Index)
+			vReverseIndexMap[m_vImageIndexMap[Index]] = Index;
 
-		for(int k = 0; k < (int)m_vImageIndexMap.size(); k++)
-			vReverseIndexMap[m_vImageIndexMap[k]] = k;
-
-		std::vector<std::shared_ptr<CEditorImage>> vpRevertedImages;
-		vpRevertedImages.resize(Map()->m_vpImages.size());
-
-		for(int k = 0; k < (int)vReverseIndexMap.size(); k++)
-		{
-			vpRevertedImages[vReverseIndexMap[k]] = Map()->m_vpImages[k];
-		}
-		Map()->m_vpImages = vpRevertedImages;
-
-		Map()->ModifyImageIndex([vReverseIndexMap](int *pIndex) {
+		Map()->ModifyImageIndex([&vReverseIndexMap](int *pIndex) {
 			if(*pIndex >= 0)
-			{
 				*pIndex = vReverseIndexMap[*pIndex];
-			}
 		});
 	}
+	Map()->m_vpImages = std::move(vpPreviousImages);
+	Map()->m_vSettings = m_PrevInfo.m_vSettings;
+	m_PrevInfo.m_Selection.Restore(Map());
 
-	while((int)Map()->m_vpImages.size() > m_PrevInfo.m_Images)
-	{
-		Map()->m_vpImages.pop_back();
-	}
-
+	Map()->CheckIntegrity();
 	Map()->OnModify();
 }
 
 void CEditorActionAppendMap::Redo()
 {
-	const auto &&ErrorHandler = [this](const char *pErrorMessage) {
-		Editor()->ShowFileDialogError("%s", pErrorMessage);
-		log_error("editor/append", "%s", pErrorMessage);
-	};
-	// Redo is just re-appending the same map
-	Map()->Append(m_aMapName, IStorage::TYPE_ALL, true, ErrorHandler);
+	// Only the surviving groups need the forward image remap. Retained imported
+	// groups already have the final image, sound and envelope indices.
+	if(!m_vImageIndexMap.empty())
+	{
+		Map()->ModifyImageIndex([this](int *pIndex) {
+			if(*pIndex >= 0)
+				*pIndex = m_vImageIndexMap[*pIndex];
+		});
+	}
+	Map()->m_vpImages = m_vpImages;
+	Map()->m_vpSounds.insert(Map()->m_vpSounds.end(), m_vpSounds.begin(), m_vpSounds.end());
+	Map()->m_vpEnvelopes.insert(Map()->m_vpEnvelopes.end(), m_vpEnvelopes.begin(), m_vpEnvelopes.end());
+	Map()->m_vpGroups.insert(Map()->m_vpGroups.end(), m_vpGroups.begin(), m_vpGroups.end());
+	Map()->m_vSettings = m_vSettings;
+	m_Selection.Restore(Map());
+
+	Map()->CheckIntegrity();
+	Map()->OnModify();
 }
 
 // ---------------------------

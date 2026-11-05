@@ -428,6 +428,7 @@ public:
 	virtual void OnInit() = 0;
 	virtual void InvalidateSnapshot() = 0;
 	virtual void OnNewSnapshot(bool DummySwapped) = 0;
+	virtual void OnSnapshotReceived(int Conn, int Tick, const CSnapshot *pSnapshot) = 0;
 	virtual void OnEnterGame() = 0;
 	virtual void OnShutdown() = 0;
 	virtual void OnRender() = 0;

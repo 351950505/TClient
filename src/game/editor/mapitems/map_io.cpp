@@ -1091,11 +1091,7 @@ bool CEditorMap::Append(const char *pFilename, int StorageType, bool IgnoreHisto
 	if(!NewMap.Load(pFilename, StorageType, ErrorHandler))
 		return false;
 
-	CEditorActionAppendMap::SPrevInfo Info{
-		(int)m_vpGroups.size(),
-		(int)m_vpImages.size(),
-		(int)m_vpSounds.size(),
-		(int)m_vpEnvelopes.size()};
+	const CEditorActionAppendMap::SPrevInfo Info(this);
 
 	// Keep a map to check if specific indices have already been replaced to prevent
 	// replacing those indices again when transferring images

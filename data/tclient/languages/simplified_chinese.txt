@@ -880,6 +880,10 @@ No items to write
 No changes since last save
 == 自上次保存以来没有更改
 
+[bgdraw]
+Failed to save background drawing; unsaved changes retained
+== 背景绘图保存失败；未保存的更改已保留
+
 [Outlines]
 Kill
 == 即死轮廓
@@ -1813,3 +1817,9 @@ Show tune zone colors
 
 When disabled, tune zones use your entity tiles without added colors.
 == 关闭后，调谐区使用你的实体贴图，不额外着色。
+
+Water hammer highlight
+== 水域卡锤高亮
+
+Highlight frozen teammates holding hammer fire
+== 高亮冻结时持锤并按住开火的队友

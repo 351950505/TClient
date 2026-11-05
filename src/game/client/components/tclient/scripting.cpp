@@ -62,13 +62,16 @@ private:
 		{
 			return Client()->RconAuthed();
 		}
-		else if(Str == "team")
+		else if(Str == "team" || Str == "ddnet_team")
 		{
-			return GameClient()->m_aClients[GameClient()->m_aLocalIds[g_Config.m_ClDummy]].m_Team;
-		}
-		if(Str == "ddnet_team")
-		{
-			return GameClient()->m_Teams.Team(GameClient()->m_aLocalIds[g_Config.m_ClDummy]);
+			if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+				return nullptr;
+			const int LocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy];
+			if(LocalId < 0 || LocalId >= MAX_CLIENTS)
+				return nullptr;
+			if(Str == "team")
+				return GameClient()->m_aClients[LocalId].m_Team;
+			return GameClient()->m_Teams.Team(LocalId);
 		}
 		if(Str == "map")
 		{
@@ -198,7 +201,7 @@ private:
 			if(!std::holds_alternative<int>(Arg))
 				return nullptr;
 			int Id = std::get<int>(Arg);
-			if(Id < 0 || Id > MAX_CLIENTS)
+			if(Id < 0 || Id >= MAX_CLIENTS)
 				return nullptr;
 			if(!GameClient()->m_aClients[Id].m_Active)
 				return nullptr;
@@ -211,7 +214,7 @@ private:
 			if(!std::holds_alternative<int>(Arg))
 				return nullptr;
 			int Id = std::get<int>(Arg);
-			if(Id < 0 || Id > MAX_CLIENTS)
+			if(Id < 0 || Id >= MAX_CLIENTS)
 				return nullptr;
 			if(!GameClient()->m_aClients[Id].m_Active)
 				return nullptr;

@@ -92,6 +92,7 @@
 #include "components/tclient/trails.h"
 #include "components/tclient/translate.h"
 #include "components/tclient/warlist.h"
+#include "components/tclient/water_hammer_indicator.h"
 #include "components/tooltips.h"
 #include "components/touch_controls.h"
 #include "components/voting.h"
@@ -251,6 +252,7 @@ public:
 	CMumble m_Mumble;
 	CRainbow m_Rainbow;
 	CWarList m_WarList;
+	CWaterHammerIndicator m_WaterHammerIndicator;
 	CScripting m_Scripting;
 	CMod m_Mod;
 	CCustomCommunities m_CustomCommunities;
@@ -733,6 +735,7 @@ public:
 	void OnMessage(int MsgId, CUnpacker *pUnpacker, int Conn, bool Dummy) override;
 	void InvalidateSnapshot() override;
 	void OnNewSnapshot(bool DummySwapped) override;
+	void OnSnapshotReceived(int Conn, int Tick, const CSnapshot *pSnapshot) override;
 	void OnPredict() override;
 	void OnActivateEditor() override;
 	void OnDummySwap() override;

@@ -1479,14 +1479,11 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		DoLine_ColorPicker(&s_IslandColorBottomId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Capsule bottom color"), &g_Config.m_TcIslandColorBottom, ColorRGBA(0.016f, 0.024f, 0.039f), false);
 		DoLine_ColorPicker(&s_IslandColorAccentId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Accent color (karaoke, progress, equalizer)"), &g_Config.m_TcIslandColorAccent, ColorRGBA(0.122f, 0.839f, 0.380f), false);
 		{
-			static std::vector<const char *> s_vIslandGradientNames;
-			if(s_vIslandGradientNames.empty())
-			{
-				s_vIslandGradientNames.push_back(TCLocalize("Flat (single color)"));
-				s_vIslandGradientNames.push_back(TCLocalize("Vertical gradient"));
-				s_vIslandGradientNames.push_back(TCLocalize("Diagonal gradient"));
-				s_vIslandGradientNames.push_back(TCLocalize("Horizontal gradient"));
-			}
+			const char *apIslandGradientNames[] = {
+				TCLocalize("Flat (single color)"),
+				TCLocalize("Vertical gradient"),
+				TCLocalize("Diagonal gradient"),
+				TCLocalize("Horizontal gradient")};
 			static CUi::SDropDownState s_IslandGradientDropDownState;
 			static CScrollRegion s_IslandGradientDropDownScrollRegion;
 			s_IslandGradientDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_IslandGradientDropDownScrollRegion;
@@ -1494,7 +1491,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 			Column.HSplitTop(LineSize, &GradRect, &Column);
 			GradRect.VSplitLeft(100.0f, &Label, &GradRect);
 			Ui()->DoLabel(&Label, TCLocalize("Gradient: "), FontSize, TEXTALIGN_ML);
-			const int GradNew = Ui()->DoDropDown(&GradRect, std::clamp(g_Config.m_TcIslandGradient, 0, 3), s_vIslandGradientNames.data(), s_vIslandGradientNames.size(), s_IslandGradientDropDownState);
+			const int GradNew = Ui()->DoDropDown(&GradRect, std::clamp(g_Config.m_TcIslandGradient, 0, 3), apIslandGradientNames, std::size(apIslandGradientNames), s_IslandGradientDropDownState);
 			if(GradNew != g_Config.m_TcIslandGradient)
 				g_Config.m_TcIslandGradient = GradNew;
 		}
@@ -3991,6 +3988,13 @@ void CMenus::RenderSettingsTClientConfigs(CUIRect MainView)
 void CMenus::RenderSettingsMe(CUIRect MainView)
 {
 	CUIRect LeftView, RightView, Button, Label;
+	static CScrollRegion s_ScrollRegion;
+	CScrollRegionParams ScrollParams;
+	ScrollParams.m_ScrollUnit = 60.0f;
+	ScrollParams.m_ForceShowScrollbar = true;
+	ScrollParams.m_ScrollbarMargin = 5.0f;
+	s_ScrollRegion.Begin(&MainView, &ScrollParams);
+
 	MainView.Margin(Margin, &MainView);
 	MainView.VSplitMid(&LeftView, &RightView, MarginBetweenViews);
 
@@ -4008,8 +4012,16 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	Ui()->DoLabel(&Label, TCLocalize("Country flags are always hidden while streamer mode is on"), FontSize, TEXTALIGN_ML);
 
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
-	LeftView.HSplitTop(LineSize + MarginExtraSmall, &Button, &LeftView);
-	Button.VSplitLeft(140.0f, &Label, &Button);
+	if(LeftView.w >= 280.0f)
+	{
+		LeftView.HSplitTop(LineSize + MarginExtraSmall, &Button, &LeftView);
+		Button.VSplitLeft(140.0f, &Label, &Button);
+	}
+	else
+	{
+		LeftView.HSplitTop(LineSize, &Label, &LeftView);
+		LeftView.HSplitTop(LineSize + MarginExtraSmall, &Button, &LeftView);
+	}
 	Ui()->DoLabel(&Label, TCLocalize("Custom word list file"), FontSize, TEXTALIGN_ML);
 	static CLineInput s_WordsFile(g_Config.m_MeStreamerWordsFile, sizeof(g_Config.m_MeStreamerWordsFile));
 	s_WordsFile.SetEmptyText(TCLocalize("One word per line, # starts a comment"));
@@ -4101,14 +4113,25 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 		// 三个动作：检查 / 下载 / 安装并重启。每一步都要用户点，客户端从不自己
 		// 下载或退出，避免在对局里被打断。
 		static CButtonContainer s_CheckButton, s_DownloadButton, s_InstallButton;
-		CUIRect Row;
-		RightView.HSplitTop(LineSize + MarginExtraSmall, &Row, &RightView);
 		CUIRect CheckRect, DownloadRect, InstallRect;
-		Row.VSplitLeft(120.0f, &CheckRect, &Row);
-		Row.VSplitLeft(MarginSmall, nullptr, &Row);
-		Row.VSplitLeft(120.0f, &DownloadRect, &Row);
-		Row.VSplitLeft(MarginSmall, nullptr, &Row);
-		Row.VSplitLeft(160.0f, &InstallRect, &Row);
+		if(RightView.w >= 400.0f + 2.0f * MarginSmall)
+		{
+			CUIRect Row;
+			RightView.HSplitTop(LineSize + MarginExtraSmall, &Row, &RightView);
+			Row.VSplitLeft(120.0f, &CheckRect, &Row);
+			Row.VSplitLeft(MarginSmall, nullptr, &Row);
+			Row.VSplitLeft(120.0f, &DownloadRect, &Row);
+			Row.VSplitLeft(MarginSmall, nullptr, &Row);
+			Row.VSplitLeft(160.0f, &InstallRect, &Row);
+		}
+		else
+		{
+			RightView.HSplitTop(LineSize + MarginExtraSmall, &CheckRect, &RightView);
+			RightView.HSplitTop(MarginSmall, nullptr, &RightView);
+			RightView.HSplitTop(LineSize + MarginExtraSmall, &DownloadRect, &RightView);
+			RightView.HSplitTop(MarginSmall, nullptr, &RightView);
+			RightView.HSplitTop(LineSize + MarginExtraSmall, &InstallRect, &RightView);
+		}
 
 		if(DoButton_Menu(&s_CheckButton, TCLocalize("Check now"), 0, &CheckRect) && State != CTClient::EUpdateState::CHECKING && State != CTClient::EUpdateState::DOWNLOADING)
 			TC.UpdateCheck(true);
@@ -4121,4 +4144,16 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 		RightView.HSplitTop(LineSize, &Label, &RightView);
 		Ui()->DoLabel(&Label, TCLocalize("Updates are downloaded from the public GitHub releases of this client. Your config, demos and custom fonts are not touched."), EditBoxFontSize, TEXTALIGN_TL);
 	}
+
+	RightView.HSplitTop(MarginBetweenSections, nullptr, &RightView);
+	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
+	Ui()->DoLabel(&Label, TCLocalize("Water hammer highlight"), HeadlineFontSize, TEXTALIGN_ML);
+	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlight, TCLocalize("Highlight frozen teammates holding hammer fire"), &g_Config.m_TcWaterHammerHighlight, &RightView, LineSize);
+
+	// The columns' remaining height may be negative after scrolling; only their consumed height is content.
+	CUIRect Content = MainView;
+	Content.h = std::max(LeftView.y, RightView.y) - Content.y + Margin;
+	s_ScrollRegion.AddRect(Content);
+	s_ScrollRegion.End();
 }

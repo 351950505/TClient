@@ -15,6 +15,7 @@
 #include <generated/client_data.h>
 #include <generated/client_data7.h>
 #include <generated/protocol.h>
+#include <generated/protocol7.h>
 
 #include <game/client/animstate.h>
 #include <game/client/components/controls.h>
@@ -1130,6 +1131,7 @@ void CPlayers::OnRender()
 
 	// update render info for ninja
 	CTeeRenderInfo aRenderInfo[MAX_CLIENTS];
+	CNetObj_Character aRenderCharacters[MAX_CLIENTS];
 	const bool IsTeamPlay = GameClient()->IsTeamPlay();
 	for(int i = 0; i < MAX_CLIENTS; ++i)
 	{
@@ -1164,14 +1166,13 @@ void CPlayers::OnRender()
 			Frozen = GameClient()->m_Snap.m_aCharacters[i].m_HasExtendedData && GameClient()->m_Snap.m_aCharacters[i].m_ExtendedData.m_FreezeEnd != 0;
 		}
 
-		// TClient
-		if(g_Config.m_TcFrozenKatana > 0 && Frozen)
-		{
-			GameClient()->m_aClients[i].m_RenderCur.m_Weapon = WEAPON_NINJA;
+		// Keep the real weapon intact for prediction and water hammer detection.
+		const bool FrozenKatana = g_Config.m_TcFrozenKatana > 0 && Frozen;
+		aRenderCharacters[i] = TcFrozenKatanaRenderCharacter(GameClient()->m_aClients[i].m_RenderCur, FrozenKatana);
+		if(FrozenKatana)
 			aRenderInfo[i].m_TeeRenderFlags &= ~TEE_NO_WEAPON;
-		}
 
-		if((GameClient()->m_aClients[i].m_RenderCur.m_Weapon == WEAPON_NINJA || (Frozen && !GameClient()->m_GameInfo.m_NoSkinChangeForFrozen)) && g_Config.m_ClShowNinja)
+		if((aRenderCharacters[i].m_Weapon == WEAPON_NINJA || (Frozen && !GameClient()->m_GameInfo.m_NoSkinChangeForFrozen)) && g_Config.m_ClShowNinja)
 		{
 			// change the skin for the player to the ninja
 			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].Reset();
@@ -1198,6 +1199,19 @@ void CPlayers::OnRender()
 				}
 			}
 		}
+
+		if(GameClient()->m_WaterHammerIndicator.IsMarked(i))
+		{
+			const ColorRGBA BodyColor(1.0f, 0.25f, 0.08f, 1.0f);
+			const ColorRGBA FeetColor(1.0f, 0.55f, 0.12f, 1.0f);
+			aRenderInfo[i].m_CustomColoredSkin = true;
+			aRenderInfo[i].m_ColorBody = BodyColor;
+			aRenderInfo[i].m_ColorFeet = FeetColor;
+			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aUseCustomColors[protocol7::SKINPART_BODY] = true;
+			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aUseCustomColors[protocol7::SKINPART_FEET] = true;
+			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aColors[protocol7::SKINPART_BODY] = BodyColor;
+			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aColors[protocol7::SKINPART_FEET] = FeetColor;
+		}
 	}
 
 	// get screen edges to avoid rendering offscreen
@@ -1217,12 +1231,12 @@ void CPlayers::OnRender()
 		{
 			continue;
 		}
-		RenderHook(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &GameClient()->m_aClients[ClientId].m_RenderCur, &aRenderInfo[ClientId], ClientId);
+		RenderHook(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &aRenderCharacters[ClientId], &aRenderInfo[ClientId], ClientId);
 	}
 	if(LocalClientId != -1 && IsPlayerInfoAvailable(LocalClientId))
 	{
 		const CGameClient::CClientData *pLocalClientData = &GameClient()->m_aClients[LocalClientId];
-		RenderHook(ScreenRect, &pLocalClientData->m_RenderPrev, &pLocalClientData->m_RenderCur, &aRenderInfo[LocalClientId], LocalClientId);
+		RenderHook(ScreenRect, &pLocalClientData->m_RenderPrev, &aRenderCharacters[LocalClientId], &aRenderInfo[LocalClientId], LocalClientId);
 	}
 
 	// render spectating players
@@ -1261,15 +1275,15 @@ void CPlayers::OnRender()
 				       (g_Config.m_TcUnpredOthersInFreeze && Client()->m_IsLocalFrozen);
 		if(g_Config.m_TcShowOthersGhosts && !HideGhost && !GameClient()->m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		{
-			RenderPlayer(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &GameClient()->m_aClients[ClientId].m_RenderCur, &aRenderInfo[ClientId], ClientId, 0.0f, true);
+			RenderPlayer(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &aRenderCharacters[ClientId], &aRenderInfo[ClientId], ClientId, 0.0f, true);
 		}
-		RenderPlayer(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &GameClient()->m_aClients[ClientId].m_RenderCur, &aRenderInfo[ClientId], ClientId);
+		RenderPlayer(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &aRenderCharacters[ClientId], &aRenderInfo[ClientId], ClientId);
 	}
 	if(RenderLastId != -1 && IsPlayerInfoAvailable(RenderLastId))
 	{
 		const CGameClient::CClientData *pClientData = &GameClient()->m_aClients[RenderLastId];
 		RenderHookCollLine(ScreenRect, &pClientData->m_RenderPrev, &pClientData->m_RenderCur, RenderLastId);
-		RenderPlayer(ScreenRect, &pClientData->m_RenderPrev, &pClientData->m_RenderCur, &aRenderInfo[RenderLastId], RenderLastId);
+		RenderPlayer(ScreenRect, &pClientData->m_RenderPrev, &aRenderCharacters[RenderLastId], &aRenderInfo[RenderLastId], RenderLastId);
 	}
 }
 

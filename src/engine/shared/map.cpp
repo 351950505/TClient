@@ -13,6 +13,8 @@
 #include <game/gamecore.h>
 #include <game/mapitems.h>
 
+#include <cstddef>
+
 CMap::CMap() = default;
 
 CMap::~CMap()
@@ -158,6 +160,13 @@ bool CMap::Load(const char *pFullName, IStorage *pStorage, const char *pPath, in
 				if(pLayerTilemap->m_Flags & TILESLAYERFLAG_GAME)
 				{
 					pGameLayer = pLayerTilemap;
+				}
+			}
+			else if(pLayer->m_Type == LAYERTYPE_QUADS)
+			{
+				if(!UpgradeAndValidateQuadsLayerItem(NewDataFile, GroupIndex, LayerIndex, reinterpret_cast<CMapItemLayerQuads *>(pLayer), LayerItemIndex, LayerItemSize))
+				{
+					return false;
 				}
 			}
 		}
@@ -450,6 +459,48 @@ static bool EnsureTileLayerProperties(int GroupIndex, int LayerIndex, CMapItemLa
 	EnsureUnsetPhysicsData(TILESLAYERFLAG_SWITCH, &LayerTilemap.m_Switch, "switch");
 	EnsureUnsetPhysicsData(TILESLAYERFLAG_TUNE, &LayerTilemap.m_Tune, "tune");
 
+	return true;
+}
+
+bool CMap::UpgradeAndValidateQuadsLayerItem(
+	CDataFileReader &NewDataFile, int GroupIndex, int LayerIndex,
+	CMapItemLayerQuads *pLayerQuads, int LayerItemIndex, size_t LayerItemSize)
+{
+	const size_t LegacySize = offsetof(CMapItemLayerQuads, m_aName);
+	if(LayerItemSize < LegacySize)
+	{
+		log_error("map/load", "Quad layer %d in group %d is truncated (size %" PRIzu ").", LayerIndex, GroupIndex, LayerItemSize);
+		return false;
+	}
+	if(pLayerQuads->m_Version < 1 || pLayerQuads->m_Version > 2)
+	{
+		log_error("map/load", "Quad layer %d in group %d has unsupported version %d.", LayerIndex, GroupIndex, pLayerQuads->m_Version);
+		return false;
+	}
+	if(pLayerQuads->m_Version >= 2 && LayerItemSize < sizeof(CMapItemLayerQuads))
+	{
+		log_error("map/load", "Quad layer %d in group %d has a truncated name (size %" PRIzu ").", LayerIndex, GroupIndex, LayerItemSize);
+		return false;
+	}
+	if(pLayerQuads->m_NumQuads < 0)
+	{
+		log_error("map/load", "Quad layer %d in group %d has invalid quad count %d.", LayerIndex, GroupIndex, pLayerQuads->m_NumQuads);
+		return false;
+	}
+	if(pLayerQuads->m_NumQuads > 0 &&
+		(pLayerQuads->m_Data < 0 || pLayerQuads->m_Data >= NewDataFile.NumData() ||
+			(size_t)pLayerQuads->m_NumQuads > (size_t)NewDataFile.GetDataSize(pLayerQuads->m_Data) / sizeof(CQuad)))
+	{
+		log_error("map/load", "Quad data of layer %d in group %d is missing or truncated (wanted %d quads).", LayerIndex, GroupIndex, pLayerQuads->m_NumQuads);
+		return false;
+	}
+	if(pLayerQuads->m_Version == 1)
+	{
+		CMapItemLayerQuads OverriddenLayerQuads = {};
+		mem_copy(&OverriddenLayerQuads, pLayerQuads, LegacySize);
+		StrToInts(OverriddenLayerQuads.m_aName, std::size(OverriddenLayerQuads.m_aName), "");
+		return NewDataFile.OverrideItemData(LayerItemIndex, &OverriddenLayerQuads, sizeof(OverriddenLayerQuads));
+	}
 	return true;
 }
 

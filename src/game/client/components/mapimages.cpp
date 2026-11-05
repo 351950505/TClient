@@ -353,6 +353,7 @@ IGraphics::CTextureHandle CMapImages::GetEntities(EMapImageEntityLayerType Entit
 					float Hue = std::fmod((TileIndex - 1) * normalized_golden_angle, 1.0f);
 					ColorizeWithHueRect(TuneMapInfo, Hue, 0.75f, StartX, StartY, CopyWidth, CopyHeight);
 				}
+				Graphics()->UnloadTexture(&m_TuneColorMapTexture);
 				m_TuneColorMapTexture = Graphics()->LoadTextureRawMove(TuneMapInfo, TextureLoadFlag);
 				m_TuneColorsIsLoaded = true;
 			}
@@ -417,6 +418,8 @@ void CMapImages::ChangeEntitiesPath(const char *pPath)
 		str_format(m_aEntitiesPath, sizeof(m_aEntitiesPath), "assets/entities/%s", pPath);
 	}
 
+	Graphics()->UnloadTexture(&m_TuneColorMapTexture);
+	m_TuneColorsIsLoaded = false;
 	for(int ModType = 0; ModType < MAP_IMAGE_MOD_TYPE_COUNT * 2; ++ModType)
 	{
 		if(m_aEntitiesIsLoaded[ModType])

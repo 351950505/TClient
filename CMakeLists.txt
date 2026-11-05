@@ -2964,6 +2964,9 @@ if(CLIENT)
     components/tclient/update_public_key.h
     components/tclient/warlist.cpp
     components/tclient/warlist.h
+    components/tclient/water_hammer_indicator.cpp
+    components/tclient/water_hammer_indicator.h
+    components/tclient/water_hammer_indicator_logic.h
     components/tooltips.cpp
     components/tooltips.h
     components/touch_controls.cpp
@@ -3718,6 +3721,8 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     json_test.cpp
     jsonwriter_test.cpp
     linereader_test.cpp
+    log_test.cpp
+    map_test.cpp
     mapbugs_test.cpp
     mapitems_test.cpp
     math_test.cpp
@@ -3742,6 +3747,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     tclient_console_filter_test.cpp
     tclient_gradient_test.cpp
     tclient_jitter_buffer_test.cpp
+    tclient_skinprofiles_test.cpp
     teehistorian_test.cpp
     test.cpp
     test.h
@@ -3751,6 +3757,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     unix_test.cpp
     uuid_test.cpp
     vmath_test.cpp
+    water_hammer_indicator.cpp
     windows_test.cpp
     # tidy-alphabetical-end
   )

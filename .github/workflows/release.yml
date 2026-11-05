@@ -20,6 +20,10 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      actions: read
+      contents: write
 
     env:
       BUILD_PREFIX: ddnet
@@ -29,6 +33,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Check release signing material
+        env:
+          TCLIENT_UPDATE_ED25519_PRIVATE_KEY: ${{ secrets.TCLIENT_UPDATE_ED25519_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TCLIENT_UPDATE_ED25519_PRIVATE_KEY" ]; then
+            echo "::error::Missing release environment secret TCLIENT_UPDATE_ED25519_PRIVATE_KEY (unencrypted Ed25519 PEM matching update_public_key.h)"
+            exit 1
+          fi
+
+      - name: Install release tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64-posix python3-cryptography
 
       - name: Download Ubuntu artifact
         uses: actions/download-artifact@v4
@@ -66,18 +86,6 @@ jobs:
           repository: ${{ env.TARGET_REPOSITORY }}
           run-id: ${{ github.event.inputs.run_id }}
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.event.inputs.tag_name }}
-          release_name: ${{ github.event.inputs.release_name }}
-          body: ${{ github.event.inputs.body }}
-          draft: false
-          prerelease: false
-
       - name: Rename and Move Artifacts
         run: |
           declare -a multi_ext=("tar.gz" "tar.bz2" "tar.xz" "tar.Z")
@@ -113,32 +121,70 @@ jobs:
           echo "Listing ./artifacts directory:"
           ls -R ./artifacts
 
-      # Build the two autoupdate assets from the packaged Windows client:
-      # TClient-update-win64.zip (only the files an update replaces) and its json manifest.
+      # The client requires a signed manifest and a separately downloadable helper.
       - name: Generate autoupdate assets
         env:
           RELEASE_BODY: ${{ github.event.inputs.body }}
           RELEASE_TAG: ${{ github.event.inputs.tag_name }}
+          TCLIENT_UPDATE_ED25519_PRIVATE_KEY: ${{ secrets.TCLIENT_UPDATE_ED25519_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          rm -rf update-package
-          mkdir -p update-package
-          unzip -q "./artifacts/${{ env.CLIENT_NAME }}-windows.zip" -d update-package
-          source_dir=$(dirname "$(find update-package -type f -name 'DDNet.exe' | head -n 1)")
-          if [ -z "$source_dir" ] || [ ! -d "$source_dir" ]; then
-            echo "Could not find the packaged client in the Windows artifact" >&2
+          package_dir=$(mktemp -d "$RUNNER_TEMP/tclient-update-package.XXXXXX")
+          helper_build=$(mktemp -d "$RUNNER_TEMP/tclient-helper-build.XXXXXX")
+          key_file=$(mktemp "$RUNNER_TEMP/tclient-signing-key.XXXXXX")
+          trap 'rm -f "$key_file"; rm -rf "$package_dir" "$helper_build"' EXIT
+          chmod 600 "$key_file"
+          printf '%s' "$TCLIENT_UPDATE_ED25519_PRIVATE_KEY" > "$key_file"
+          unset TCLIENT_UPDATE_ED25519_PRIVATE_KEY
+          unzip -q "./artifacts/${CLIENT_NAME}-windows.zip" -d "$package_dir"
+          mapfile -d '' clients < <(find "$package_dir" -type f -name DDNet.exe -print0)
+          if [ "${#clients[@]}" -ne 1 ]; then
+            echo "::error::Windows artifact must contain exactly one packaged DDNet.exe"
             exit 1
           fi
-          echo "Using packaged client from $source_dir"
-          printf '%s\n' "$RELEASE_BODY" > update-notes.txt
-          python3 tclient_scripts/make_release_assets.py \
+          source_dir=$(dirname "${clients[0]}")
+          # Build the existing standalone helper target in its own cross-build tree.
+          cmake -S "$GITHUB_WORKSPACE" -B "$helper_build" \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/mingw64.toolchain" \
+            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc-posix \
+            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++-posix \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
+            -DCLIENT=OFF -DSERVER=OFF -DTOOLS=OFF -DDOWNLOAD_GTEST=OFF \
+            -DPREFER_BUNDLED_LIBS=ON -DDEV=ON
+          cmake --build "$helper_build" --target TClientUpdater --parallel 2
+          install -m 755 "$helper_build/TClientUpdater.exe" "$source_dir/TClientUpdater.exe"
+          printf '%s\n' "$RELEASE_BODY" > "$RUNNER_TEMP/update-notes.txt"
+          /usr/bin/python3 -I tclient_scripts/make_release_assets.py \
             --source "$source_dir" \
             --version "$version" \
             --output ./artifacts \
-            --notes-file update-notes.txt \
+            --private-key "$key_file" \
+            --full-zip "./artifacts/${CLIENT_NAME}-windows.zip" \
+            --notes-file "$RUNNER_TEMP/update-notes.txt" \
             --quiet
-          ls -l ./artifacts/TClient-update-win64.zip ./artifacts/TClient-update-win64.json
+          for asset in TClient-update-win64.zip TClient-update-win64.json TClient-update-win64.json.sig TClientUpdater.exe; do
+            if [ ! -s "./artifacts/$asset" ]; then
+              echo "::error::Required autoupdate asset missing or empty: $asset"
+              exit 1
+            fi
+          done
+          if [ "$(wc -c < ./artifacts/TClient-update-win64.json.sig)" -ne 64 ]; then
+            echo "::error::Autoupdate manifest signature must contain 64 raw bytes"
+            exit 1
+          fi
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.event.inputs.tag_name }}
+          release_name: ${{ github.event.inputs.release_name }}
+          body: ${{ github.event.inputs.body }}
+          draft: false
+          prerelease: false
 
       - name: Upload Ubuntu
         uses: actions/upload-release-asset@v1
@@ -180,6 +226,26 @@ jobs:
           asset_path: ./artifacts/TClient-update-win64.json
           asset_name: TClient-update-win64.json
           asset_content_type: application/json
+
+      - name: Upload Windows autoupdate signature
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/TClient-update-win64.json.sig
+          asset_name: TClient-update-win64.json.sig
+          asset_content_type: application/octet-stream
+
+      - name: Upload Windows bootstrap helper
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/TClientUpdater.exe
+          asset_name: TClientUpdater.exe
+          asset_content_type: application/octet-stream
 
       - name: Upload macOS
         uses: actions/upload-release-asset@v1

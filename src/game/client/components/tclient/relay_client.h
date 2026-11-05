@@ -19,6 +19,34 @@
 
 #include <game/client/component.h>
 
+namespace RelayRouting
+{
+// Keep direct delivery and relay suppression in one decision. Fresh peers only
+// suppress the relay when direct delivery is actually enabled.
+template<typename TPeers, typename TDirect, typename TSendDirect, typename TSendRelay>
+int Broadcast(bool P2pEnabled, bool RelayOnline, const TPeers &Peers, TDirect Direct, TSendDirect SendDirect, TSendRelay SendRelay)
+{
+	bool AllDirect = P2pEnabled && !Peers.empty();
+	int SentDirect = 0;
+	if(P2pEnabled)
+	{
+		for(const auto &Peer : Peers)
+		{
+			if(Direct(Peer))
+			{
+				SendDirect(Peer);
+				++SentDirect;
+			}
+			else
+				AllDirect = false;
+		}
+	}
+	if(RelayOnline && !AllDirect)
+		SendRelay();
+	return SentDirect;
+}
+} // namespace RelayRouting
+
 class CRelayClient : public CComponent
 {
 public:
@@ -84,7 +112,6 @@ private:
 	static void ConRelayStatus(IConsole::IResult *pResult, void *pUserData);
 	void HandlePeer(const char *pUid, const char *pAddrStr);
 	bool PeerDirect(const SPeer &Peer) const;
-	bool AllPeersDirect() const;
 	bool SendReg();
 	// 只在诊断原因变化时输出日志；同一原因重复发生不再写 F1（避免心跳刷屏）。
 	void LogOnce(const char *pReason, const char *pDetail);

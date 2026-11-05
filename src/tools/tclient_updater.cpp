@@ -29,7 +29,9 @@
 //   6  unsafe entry name (absolute path, drive letter, "..", reserved device name, duplicate
 //      path) or an entry that could not be extracted
 //   7  file system error while preparing the staging directory or the backup
-//   8  the update was installed but the restart executable could not be started
+//   8  the previous client could not be restarted
+//   9  the new client exited early or did not report startup health in time; update rolled back
+//  10  recovery is incomplete; retained backup requires manual recovery, no client restarted
 //
 // Only method 0 (stored) and method 8 (deflate) zip entries are supported. Zip64 archives are
 // supported as long as the entries themselves use one of those two methods.
@@ -39,6 +41,7 @@
 // logged, everything else in the archive is installed.
 
 #include <windows.h>
+#include <tlhelp32.h>
 #include <zlib.h>
 
 #include <algorithm>
@@ -64,24 +67,42 @@ namespace
 	constexpr int EXIT_UNSAFE_ENTRY = 6;
 	constexpr int EXIT_FILE_SYSTEM = 7;
 	constexpr int EXIT_RESTART_FAILED = 8;
+	constexpr int EXIT_HEALTH_FAILED = 9;
+	constexpr int EXIT_RECOVERY_FAILED = 10;
+	bool g_PreviousClientRestored = false;
 
 	// Waiting for the client to exit, never kill it. The environment variable
 	// TCLIENT_UPDATER_WAIT_TIMEOUT_MS may only shorten this limit (it is clamped to the value below),
 	// which is used by the automated tests so they do not have to wait five minutes.
 	constexpr DWORD WAIT_FOR_PID_TIMEOUT_MS = 300 * 1000;
 
-	DWORD GetWaitTimeout()
+	DWORD GetBoundedTimeout(const wchar_t *pEnvironmentVariable, DWORD DefaultTimeout)
 	{
 		wchar_t aValue[32];
-		const DWORD Length = GetEnvironmentVariableW(L"TCLIENT_UPDATER_WAIT_TIMEOUT_MS", aValue, (DWORD)(sizeof(aValue) / sizeof(aValue[0])));
+		const DWORD Length = GetEnvironmentVariableW(pEnvironmentVariable, aValue, (DWORD)(sizeof(aValue) / sizeof(aValue[0])));
 		if(Length == 0 || Length >= sizeof(aValue) / sizeof(aValue[0]))
-			return WAIT_FOR_PID_TIMEOUT_MS;
+			return DefaultTimeout;
 		wchar_t *pEnd = nullptr;
 		const unsigned long Parsed = wcstoul(aValue, &pEnd, 10);
 		if(pEnd == aValue || *pEnd != L'\0' || Parsed < 1000)
-			return WAIT_FOR_PID_TIMEOUT_MS;
-		return (DWORD)std::min<unsigned long>(Parsed, WAIT_FOR_PID_TIMEOUT_MS);
+			return DefaultTimeout;
+		return (DWORD)std::min<unsigned long>(Parsed, DefaultTimeout);
 	}
+
+	DWORD GetWaitTimeout()
+	{
+		return GetBoundedTimeout(L"TCLIENT_UPDATER_WAIT_TIMEOUT_MS", WAIT_FOR_PID_TIMEOUT_MS);
+	}
+
+	constexpr DWORD STARTUP_HEALTH_TIMEOUT_MS = 120 * 1000;
+
+	DWORD GetStartupHealthTimeout()
+	{
+		return GetBoundedTimeout(L"TCLIENT_UPDATER_HEALTH_TIMEOUT_MS", STARTUP_HEALTH_TIMEOUT_MS);
+	}
+
+	constexpr const wchar_t *READY_FILE_ENVIRONMENT = L"TCLIENT_UPDATER_READY_FILE";
+	constexpr const wchar_t *READY_TOKEN_ENVIRONMENT = L"TCLIENT_UPDATER_READY_TOKEN";
 
 	// Sanity limits so a malicious archive cannot fill the disk.
 	constexpr uint64_t MAX_ENTRY_UNCOMPRESSED_SIZE = 2ull * 1024 * 1024 * 1024;
@@ -139,7 +160,7 @@ namespace
 		const size_t PrefixLength = wcslen(pPrefix);
 		if(Text.size() < PrefixLength)
 			return false;
-		return ToLowerWide(Text.substr(0, PrefixLength)) == pPrefix;
+		return CompareStringOrdinal(Text.c_str(), (int)PrefixLength, pPrefix, (int)PrefixLength, TRUE) == CSTR_EQUAL;
 	}
 
 	std::wstring JoinPath(const std::wstring &Left, const std::wstring &Right)
@@ -173,6 +194,39 @@ namespace
 			return Path;
 		Result.resize((size_t)Written);
 		return Result;
+	}
+
+	std::wstring NormalizePathForComparison(const std::wstring &Path)
+	{
+		std::wstring Result = GetFullPath(Path);
+		std::replace(Result.begin(), Result.end(), L'/', L'\\');
+		while(Result.size() > 3 && Result.back() == L'\\')
+			Result.pop_back();
+		return Result;
+	}
+
+	bool SamePath(const std::wstring &Left, const std::wstring &Right)
+	{
+		const std::wstring NormalizedLeft = NormalizePathForComparison(Left);
+		const std::wstring NormalizedRight = NormalizePathForComparison(Right);
+		return CompareStringOrdinal(NormalizedLeft.c_str(), (int)NormalizedLeft.size(), NormalizedRight.c_str(), (int)NormalizedRight.size(), TRUE) == CSTR_EQUAL;
+	}
+
+	std::wstring PathDirectory(const std::wstring &Path)
+	{
+		const std::wstring Normalized = NormalizePathForComparison(Path);
+		const size_t Slash = Normalized.find_last_of(L'\\');
+		if(Slash == std::wstring::npos)
+			return std::wstring();
+		const bool IsDriveRoot = Slash > 0 && Normalized[Slash - 1] == L':';
+		return Normalized.substr(0, Slash + (IsDriveRoot ? 1 : 0));
+	}
+
+	std::wstring PathFilename(const std::wstring &Path)
+	{
+		const std::wstring Normalized = NormalizePathForComparison(Path);
+		const size_t Slash = Normalized.find_last_of(L'\\');
+		return Slash == std::wstring::npos ? Normalized : Normalized.substr(Slash + 1);
 	}
 
 	//////////////////////////////////////////////////////////////////////////
@@ -1127,7 +1181,9 @@ namespace
 			"  5 install failed, previous files restored\n"
 			"  6 unsafe or unsupported zip entry\n"
 			"  7 file system error\n"
-			"  8 restart executable could not be started\n");
+			"  8 restart executable could not be started\n"
+			"  9 new client startup health failed, previous files restored\n"
+			" 10 recovery incomplete, no client restarted\n");
 	}
 
 	bool ParseCommandLine(int argc, wchar_t **argv, SOptions &Options, std::string &Error)
@@ -1277,23 +1333,20 @@ namespace
 					OutTimedOut = true;
 					return false;
 				}
-				g_Logger.Warn("waiting for process %lu failed: %s", Pid, FormatLastError(GetLastError()).c_str());
-				return true;
+				g_Logger.Warn("waiting for process %lu failed: %s; retrying", Pid, FormatLastError(GetLastError()).c_str());
+			}
+			else
+			{
+				const DWORD LastError = GetLastError();
+				if(LastError == ERROR_INVALID_PARAMETER)
+				{
+					g_Logger.Info("process %lu does not exist anymore", Pid);
+					return true;
+				}
+				g_Logger.Warn("could not open process %lu: %s; retrying until its exit is confirmed", Pid, FormatLastError(LastError).c_str());
 			}
 
-			const DWORD LastError = GetLastError();
-			if(LastError == ERROR_INVALID_PARAMETER)
-			{
-				g_Logger.Info("process %lu does not exist anymore", Pid);
-				return true;
-			}
-			if(LastError != ERROR_ACCESS_DENIED)
-			{
-				g_Logger.Warn("could not open process %lu: %s, assuming it has exited", Pid, FormatLastError(LastError).c_str());
-				return true;
-			}
-
-			// Access denied means the process exists but we may not synchronize with it. Poll instead.
+			// Access denied and transient process-query failures do not prove that the process exited.
 			if(GetTickCount64() - StartTime >= TimeoutMs)
 			{
 				OutTimedOut = true;
@@ -1301,6 +1354,219 @@ namespace
 			}
 			Sleep(250);
 		}
+	}
+
+	//////////////////////////////////////////////////////////////////////////
+	// target process discovery and shutdown
+	//////////////////////////////////////////////////////////////////////////
+
+	struct SRunningProcess
+	{
+		DWORD m_Pid;
+		std::wstring m_Path;
+	};
+
+	bool QueryProcessImagePath(HANDLE hProcess, std::wstring &OutPath)
+	{
+		std::vector<wchar_t> Buffer(1024);
+		for(;;)
+		{
+			DWORD Length = (DWORD)Buffer.size();
+			if(QueryFullProcessImageNameW(hProcess, 0, Buffer.data(), &Length))
+			{
+				OutPath.assign(Buffer.data(), Length);
+				return true;
+			}
+			if(GetLastError() != ERROR_INSUFFICIENT_BUFFER || Buffer.size() >= 32768)
+				return false;
+			Buffer.resize(Buffer.size() * 2);
+		}
+	}
+
+	bool IsTargetProcessPath(const std::wstring &ProcessPath, const std::vector<std::wstring> &ExecutablePaths, const std::wstring &TargetDir, bool IncludeStaleHelper)
+	{
+		for(const std::wstring &ExecutablePath : ExecutablePaths)
+		{
+			if(SamePath(ProcessPath, ExecutablePath))
+				return true;
+		}
+		if(!IncludeStaleHelper || !SamePath(PathDirectory(ProcessPath), TargetDir))
+			return false;
+		return StartsWithNoCase(PathFilename(ProcessPath), L"TClientUpdater.exe.old_");
+	}
+
+	bool EnumerateTargetProcesses(const std::vector<std::wstring> &ExecutablePaths, const std::wstring &TargetDir, bool IncludeStaleHelper, std::vector<SRunningProcess> &OutProcesses)
+	{
+		OutProcesses.clear();
+		HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if(hSnapshot == INVALID_HANDLE_VALUE)
+		{
+			g_Logger.Error("could not enumerate processes: %s", FormatLastError(GetLastError()).c_str());
+			return false;
+		}
+
+		bool Complete = true;
+		PROCESSENTRY32W Entry;
+		memset(&Entry, 0, sizeof(Entry));
+		Entry.dwSize = sizeof(Entry);
+		if(Process32FirstW(hSnapshot, &Entry))
+		{
+			do
+			{
+				if(Entry.th32ProcessID == 0 || Entry.th32ProcessID == GetCurrentProcessId())
+					continue;
+				bool Candidate = IncludeStaleHelper && StartsWithNoCase(Entry.szExeFile, L"tclientupdater.exe.old_");
+				for(const std::wstring &ExecutablePath : ExecutablePaths)
+				{
+					const std::wstring Filename = PathFilename(ExecutablePath);
+					Candidate |= CompareStringOrdinal(Entry.szExeFile, -1, Filename.c_str(), -1, TRUE) == CSTR_EQUAL;
+				}
+				if(!Candidate)
+					continue;
+				HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, Entry.th32ProcessID);
+				if(hProcess == nullptr)
+				{
+					const DWORD LastError = GetLastError();
+					if(LastError != ERROR_INVALID_PARAMETER)
+					{
+						g_Logger.Error("could not identify candidate process pid=%lu: %s", (unsigned long)Entry.th32ProcessID, FormatLastError(LastError).c_str());
+						Complete = false;
+					}
+					continue;
+				}
+				std::wstring ProcessPath;
+				if(QueryProcessImagePath(hProcess, ProcessPath))
+				{
+					if(WaitForSingleObject(hProcess, 0) != WAIT_OBJECT_0 && IsTargetProcessPath(ProcessPath, ExecutablePaths, TargetDir, IncludeStaleHelper))
+						OutProcesses.push_back({Entry.th32ProcessID, ProcessPath});
+				}
+				else
+				{
+					const DWORD LastError = GetLastError();
+					if(WaitForSingleObject(hProcess, 0) != WAIT_OBJECT_0)
+					{
+						g_Logger.Error("could not query candidate process pid=%lu: %s", (unsigned long)Entry.th32ProcessID, FormatLastError(LastError).c_str());
+						Complete = false;
+					}
+				}
+				CloseHandle(hProcess);
+			} while(Process32NextW(hSnapshot, &Entry));
+		}
+		if(GetLastError() != ERROR_NO_MORE_FILES)
+		{
+			g_Logger.Error("could not read complete process snapshot: %s", FormatLastError(GetLastError()).c_str());
+			Complete = false;
+		}
+		CloseHandle(hSnapshot);
+		return Complete;
+	}
+
+	struct SWindowCloseContext
+	{
+		DWORD m_Pid;
+		unsigned m_Posted;
+	};
+
+	BOOL CALLBACK PostCloseToProcessWindow(HWND hWindow, LPARAM UserData)
+	{
+		SWindowCloseContext *pContext = reinterpret_cast<SWindowCloseContext *>(UserData);
+		DWORD Pid = 0;
+		GetWindowThreadProcessId(hWindow, &Pid);
+		if(Pid == pContext->m_Pid && PostMessageW(hWindow, WM_CLOSE, 0, 0))
+			pContext->m_Posted++;
+		return TRUE;
+	}
+
+	bool CloseTargetProcess(const SRunningProcess &Process)
+	{
+		g_Logger.Info("closing target process pid=%lu path='%s'", (unsigned long)Process.m_Pid, Utf8FromWide(Process.m_Path).c_str());
+		HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE | PROCESS_TERMINATE, FALSE, Process.m_Pid);
+		if(hProcess == nullptr)
+		{
+			const DWORD LastError = GetLastError();
+			if(LastError == ERROR_INVALID_PARAMETER)
+			{
+				g_Logger.Info("target process pid=%lu already exited", (unsigned long)Process.m_Pid);
+				return true;
+			}
+			g_Logger.Error("could not open target process pid=%lu path='%s': %s", (unsigned long)Process.m_Pid, Utf8FromWide(Process.m_Path).c_str(), FormatLastError(LastError).c_str());
+			return false;
+		}
+
+		std::wstring CurrentPath;
+		if(!QueryProcessImagePath(hProcess, CurrentPath) || !SamePath(CurrentPath, Process.m_Path))
+		{
+			g_Logger.Warn("target process pid=%lu changed or could not be identified; not terminating it", (unsigned long)Process.m_Pid);
+			CloseHandle(hProcess);
+			return false;
+		}
+
+		SWindowCloseContext CloseContext = {Process.m_Pid, 0};
+		EnumWindows(PostCloseToProcessWindow, reinterpret_cast<LPARAM>(&CloseContext));
+		if(CloseContext.m_Posted != 0)
+			g_Logger.Info("posted WM_CLOSE to %u window(s) for pid=%lu", CloseContext.m_Posted, (unsigned long)Process.m_Pid);
+
+		if(WaitForSingleObject(hProcess, 750) == WAIT_OBJECT_0)
+		{
+			g_Logger.Info("target process pid=%lu exited cleanly", (unsigned long)Process.m_Pid);
+			CloseHandle(hProcess);
+			return true;
+		}
+
+		if(!TerminateProcess(hProcess, ERROR_INSTALL_FAILURE))
+		{
+			const DWORD LastError = GetLastError();
+			if(WaitForSingleObject(hProcess, 0) == WAIT_OBJECT_0)
+			{
+				g_Logger.Info("target process pid=%lu exited during termination", (unsigned long)Process.m_Pid);
+				CloseHandle(hProcess);
+				return true;
+			}
+			g_Logger.Error("could not terminate target process pid=%lu path='%s': %s", (unsigned long)Process.m_Pid, Utf8FromWide(Process.m_Path).c_str(), FormatLastError(LastError).c_str());
+			CloseHandle(hProcess);
+			return false;
+		}
+
+		const DWORD WaitResult = WaitForSingleObject(hProcess, 5000);
+		CloseHandle(hProcess);
+		if(WaitResult != WAIT_OBJECT_0)
+		{
+			g_Logger.Error("target process pid=%lu did not exit after TerminateProcess", (unsigned long)Process.m_Pid);
+			return false;
+		}
+		g_Logger.Info("terminated target process pid=%lu path='%s'", (unsigned long)Process.m_Pid, Utf8FromWide(Process.m_Path).c_str());
+		return true;
+	}
+
+	bool CloseTargetProcesses(const std::vector<std::wstring> &ExecutablePaths, const std::wstring &TargetDir, bool IncludeStaleHelper)
+	{
+		// Multiple complete enumerations are intentional: monitor processes may create or restart a
+		// child while the first pass is shutting their parent down.
+		for(int Pass = 1; Pass <= 3; Pass++)
+		{
+			std::vector<SRunningProcess> Processes;
+			if(!EnumerateTargetProcesses(ExecutablePaths, TargetDir, IncludeStaleHelper, Processes))
+				return false;
+			g_Logger.Info("target process sweep %d/3 found %llu process(es)", Pass, (unsigned long long)Processes.size());
+			for(const SRunningProcess &Process : Processes)
+				CloseTargetProcess(Process);
+			if(Pass != 3)
+				Sleep(250);
+		}
+
+		std::vector<SRunningProcess> Remaining;
+		if(!EnumerateTargetProcesses(ExecutablePaths, TargetDir, IncludeStaleHelper, Remaining))
+			return false;
+		for(const SRunningProcess &Process : Remaining)
+			g_Logger.Error("target process still running pid=%lu path='%s'", (unsigned long)Process.m_Pid, Utf8FromWide(Process.m_Path).c_str());
+		return Remaining.empty();
+	}
+
+	bool IsProcessRunningAtPath(const std::wstring &Executable, bool &OutLookupComplete)
+	{
+		std::vector<SRunningProcess> Processes;
+		OutLookupComplete = EnumerateTargetProcesses({Executable}, PathDirectory(Executable), false, Processes);
+		return OutLookupComplete && !Processes.empty();
 	}
 
 	//////////////////////////////////////////////////////////////////////////
@@ -1504,7 +1770,52 @@ namespace
 		bool m_HadBackup = false;
 	};
 
-	bool StartRestartProcess(const std::wstring &Executable, const std::wstring &WorkingDirectory, std::string &Error)
+	bool EnvironmentEntryHasName(const std::wstring &Entry, const wchar_t *pName)
+	{
+		const size_t NameStart = !Entry.empty() && Entry[0] == L'=' ? 1 : 0;
+		const size_t Equals = Entry.find(L'=', NameStart);
+		if(Equals == std::wstring::npos)
+			return false;
+		const size_t NameLength = Equals;
+		const size_t ExpectedLength = wcslen(pName);
+		return NameLength == ExpectedLength && CompareStringOrdinal(Entry.c_str(), (int)NameLength, pName, (int)ExpectedLength, TRUE) == CSTR_EQUAL;
+	}
+
+	bool BuildReadyEnvironment(const std::wstring &ReadyPath, const std::wstring &ReadyToken, std::vector<wchar_t> &OutEnvironment, std::string &Error)
+	{
+		LPWCH pEnvironment = GetEnvironmentStringsW();
+		if(pEnvironment == nullptr)
+		{
+			Error = "could not read the current environment: " + FormatLastError(GetLastError());
+			return false;
+		}
+
+		std::vector<std::wstring> Entries;
+		for(const wchar_t *pEntry = pEnvironment; *pEntry != L'\0'; pEntry += wcslen(pEntry) + 1)
+		{
+			const std::wstring Entry = pEntry;
+			if(!EnvironmentEntryHasName(Entry, READY_FILE_ENVIRONMENT) && !EnvironmentEntryHasName(Entry, READY_TOKEN_ENVIRONMENT))
+				Entries.push_back(Entry);
+		}
+		FreeEnvironmentStringsW(pEnvironment);
+
+		Entries.push_back(std::wstring(READY_FILE_ENVIRONMENT) + L"=" + ReadyPath);
+		Entries.push_back(std::wstring(READY_TOKEN_ENVIRONMENT) + L"=" + ReadyToken);
+		std::sort(Entries.begin(), Entries.end(), [](const std::wstring &Left, const std::wstring &Right) {
+			return CompareStringOrdinal(Left.c_str(), (int)Left.size(), Right.c_str(), (int)Right.size(), TRUE) == CSTR_LESS_THAN;
+		});
+
+		OutEnvironment.clear();
+		for(const std::wstring &Entry : Entries)
+		{
+			OutEnvironment.insert(OutEnvironment.end(), Entry.begin(), Entry.end());
+			OutEnvironment.push_back(L'\0');
+		}
+		OutEnvironment.push_back(L'\0');
+		return true;
+	}
+
+	bool StartProcess(const std::wstring &Executable, const std::wstring &WorkingDirectory, const std::wstring *pReadyPath, const std::wstring *pReadyToken, PROCESS_INFORMATION &OutProcessInfo, std::string &Error)
 	{
 		std::wstring CommandLine = L"\"" + Executable + L"\"";
 		std::vector<wchar_t> CommandLineBuffer(CommandLine.begin(), CommandLine.end());
@@ -1513,16 +1824,138 @@ namespace
 		STARTUPINFOW StartupInfo;
 		memset(&StartupInfo, 0, sizeof(StartupInfo));
 		StartupInfo.cb = sizeof(StartupInfo);
-		PROCESS_INFORMATION ProcessInfo;
-		memset(&ProcessInfo, 0, sizeof(ProcessInfo));
+		memset(&OutProcessInfo, 0, sizeof(OutProcessInfo));
 
-		if(!CreateProcessW(Executable.c_str(), CommandLineBuffer.data(), nullptr, nullptr, FALSE, 0, nullptr, WorkingDirectory.c_str(), &StartupInfo, &ProcessInfo))
+		std::vector<wchar_t> Environment;
+		LPVOID pEnvironment = nullptr;
+		DWORD CreationFlags = 0;
+		if(pReadyPath != nullptr && pReadyToken != nullptr)
+		{
+			if(!BuildReadyEnvironment(*pReadyPath, *pReadyToken, Environment, Error))
+				return false;
+			pEnvironment = Environment.data();
+			CreationFlags |= CREATE_UNICODE_ENVIRONMENT;
+		}
+
+		if(!CreateProcessW(Executable.c_str(), CommandLineBuffer.data(), nullptr, nullptr, FALSE, CreationFlags, pEnvironment, WorkingDirectory.c_str(), &StartupInfo, &OutProcessInfo))
 		{
 			Error = "could not start '" + Utf8FromWide(Executable) + "': " + FormatLastError(GetLastError());
 			return false;
 		}
-		g_Logger.Info("restarted '%s' with pid %lu", Utf8FromWide(Executable).c_str(), (unsigned long)ProcessInfo.dwProcessId);
-		CloseHandle(ProcessInfo.hThread);
+		CloseHandle(OutProcessInfo.hThread);
+		OutProcessInfo.hThread = nullptr;
+		g_Logger.Info("started '%s' with pid %lu", Utf8FromWide(Executable).c_str(), (unsigned long)OutProcessInfo.dwProcessId);
+		return true;
+	}
+
+	std::wstring GenerateReadyToken()
+	{
+		LARGE_INTEGER Counter;
+		QueryPerformanceCounter(&Counter);
+		wchar_t aToken[96];
+		swprintf(aToken, sizeof(aToken) / sizeof(aToken[0]), L"%08lx-%016llx-%016llx", (unsigned long)GetCurrentProcessId(), (unsigned long long)GetTickCount64(), (unsigned long long)Counter.QuadPart);
+		return aToken;
+	}
+
+	bool ReadyMarkerMatches(const std::wstring &Path, const std::wstring &Token)
+	{
+		HANDLE hFile = CreateFileW(LongPath(Path).c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+		if(hFile == INVALID_HANDLE_VALUE)
+			return false;
+		LARGE_INTEGER Size;
+		if(!GetFileSizeEx(hFile, &Size) || Size.QuadPart <= 0 || Size.QuadPart > 1024)
+		{
+			CloseHandle(hFile);
+			return false;
+		}
+		std::string Contents((size_t)Size.QuadPart, '\0');
+		DWORD Read = 0;
+		const bool ReadOk = ReadFile(hFile, Contents.data(), (DWORD)Contents.size(), &Read, nullptr) && Read == Contents.size();
+		CloseHandle(hFile);
+		if(!ReadOk)
+			return false;
+		while(!Contents.empty() && (Contents.back() == '\r' || Contents.back() == '\n'))
+			Contents.pop_back();
+		return Contents == Utf8FromWide(Token);
+	}
+
+	bool WaitForStartupHealth(HANDLE hProcess, DWORD Pid, const std::wstring &ReadyPath, const std::wstring &ReadyToken, std::string &Failure)
+	{
+		const DWORD TimeoutMs = GetStartupHealthTimeout();
+		const ULONGLONG Start = GetTickCount64();
+		for(;;)
+		{
+			const DWORD ProcessState = WaitForSingleObject(hProcess, 0);
+			if(ProcessState == WAIT_OBJECT_0)
+			{
+				DWORD ExitCode = 0;
+				GetExitCodeProcess(hProcess, &ExitCode);
+				char aMessage[160];
+				snprintf(aMessage, sizeof(aMessage), "new client pid=%lu exited before startup health with code %lu", (unsigned long)Pid, (unsigned long)ExitCode);
+				Failure = aMessage;
+				return false;
+			}
+			if(ProcessState == WAIT_FAILED)
+			{
+				Failure = "could not query the new client process while checking startup health: " + FormatLastError(GetLastError());
+				return false;
+			}
+
+			if(ReadyMarkerMatches(ReadyPath, ReadyToken))
+			{
+				// Reject a marker from a client that crashes immediately after its first frame.
+				const DWORD Stabilized = WaitForSingleObject(hProcess, 2000);
+				if(Stabilized == WAIT_TIMEOUT)
+				{
+					g_Logger.Info("startup health ready marker accepted for live pid=%lu after %llu ms", (unsigned long)Pid, (unsigned long long)(GetTickCount64() - Start));
+					return true;
+				}
+				DWORD ExitCode = 0;
+				GetExitCodeProcess(hProcess, &ExitCode);
+				char aMessage[192];
+				snprintf(aMessage, sizeof(aMessage), "new client pid=%lu exited with code %lu immediately after reporting startup health", (unsigned long)Pid, (unsigned long)ExitCode);
+				Failure = aMessage;
+				return false;
+			}
+
+			const ULONGLONG Elapsed = GetTickCount64() - Start;
+			if(Elapsed >= TimeoutMs)
+			{
+				char aMessage[160];
+				snprintf(aMessage, sizeof(aMessage), "new client pid=%lu did not report startup health within %lu ms", (unsigned long)Pid, (unsigned long)TimeoutMs);
+				Failure = aMessage;
+				return false;
+			}
+			Sleep(50);
+		}
+	}
+
+	bool RestartOldClientIfNeeded(const std::wstring &Executable, const std::wstring &WorkingDirectory)
+	{
+		bool LookupComplete = false;
+		if(IsProcessRunningAtPath(Executable, LookupComplete))
+		{
+			g_Logger.Info("not restarting old client because '%s' is already running", Utf8FromWide(Executable).c_str());
+			return true;
+		}
+		if(!LookupComplete)
+		{
+			g_Logger.Error("not restarting old client because running-process lookup was incomplete");
+			return false;
+		}
+		if(!FileExists(Executable))
+		{
+			g_Logger.Error("cannot restart old client because executable is missing: %s", Utf8FromWide(Executable).c_str());
+			return false;
+		}
+
+		PROCESS_INFORMATION ProcessInfo;
+		std::string StartError;
+		if(!StartProcess(Executable, WorkingDirectory, nullptr, nullptr, ProcessInfo, StartError))
+		{
+			g_Logger.Error("could not restart old client: %s", StartError.c_str());
+			return false;
+		}
 		CloseHandle(ProcessInfo.hProcess);
 		return true;
 	}
@@ -1553,9 +1986,65 @@ namespace
 		}
 	}
 
-	bool SamePath(const std::wstring &Left, const std::wstring &Right)
+	bool RollbackInstalledFiles(const std::vector<SInstalledFile> &Installed, size_t InstalledCount, const std::wstring &OwnExecutable, const std::wstring &RenamedOwnExecutable)
 	{
-		return ToLowerWide(Left) == ToLowerWide(Right);
+		g_Logger.Warn("rolling back %llu installed file(s)", (unsigned long long)InstalledCount);
+		bool Complete = true;
+		for(size_t Index = InstalledCount; Index > 0; Index--)
+		{
+			const SInstalledFile &Record = Installed[Index - 1];
+			ClearReadOnly(Record.m_TargetPath);
+			if(Record.m_HadBackup)
+			{
+				if(CopyFileW(LongPath(Record.m_BackupPath).c_str(), LongPath(Record.m_TargetPath).c_str(), FALSE))
+					g_Logger.Info("restored '%s'", Utf8FromWide(Record.m_TargetPath).c_str());
+				else
+				{
+					Complete = false;
+					g_Logger.Error("could not restore '%s': %s", Utf8FromWide(Record.m_TargetPath).c_str(), FormatLastError(GetLastError()).c_str());
+				}
+			}
+			else if(DeleteFileW(LongPath(Record.m_TargetPath).c_str()))
+			{
+				g_Logger.Info("removed newly created '%s'", Utf8FromWide(Record.m_TargetPath).c_str());
+			}
+			else
+			{
+				const DWORD LastError = GetLastError();
+				if(LastError != ERROR_FILE_NOT_FOUND && LastError != ERROR_PATH_NOT_FOUND)
+				{
+					Complete = false;
+					g_Logger.Error("could not remove '%s': %s", Utf8FromWide(Record.m_TargetPath).c_str(), FormatLastError(LastError).c_str());
+				}
+			}
+		}
+
+		// When the installed helper was used as the fallback helper, its mapped image was renamed
+		// before replacement. Restore it explicitly even if installation failed before reaching its
+		// archive entry. Copying is allowed while this process still executes the renamed image.
+		if(!RenamedOwnExecutable.empty())
+		{
+			ClearReadOnly(OwnExecutable);
+			if(CopyFileW(LongPath(RenamedOwnExecutable).c_str(), LongPath(OwnExecutable).c_str(), FALSE))
+				g_Logger.Info("restored fallback helper '%s' from '%s'", Utf8FromWide(OwnExecutable).c_str(), Utf8FromWide(RenamedOwnExecutable).c_str());
+			else
+			{
+				Complete = false;
+				g_Logger.Error("could not restore fallback helper '%s' from '%s': %s", Utf8FromWide(OwnExecutable).c_str(), Utf8FromWide(RenamedOwnExecutable).c_str(), FormatLastError(GetLastError()).c_str());
+			}
+		}
+		return Complete;
+	}
+
+	int RestartAfterFailure(int FailureCode, const std::wstring &RestartPath, const std::wstring &TargetDir)
+	{
+		if(RestartOldClientIfNeeded(RestartPath, TargetDir))
+		{
+			g_PreviousClientRestored = true;
+			return FailureCode;
+		}
+		g_Logger.Error("update failure recovery could not restart the previous client");
+		return EXIT_RESTART_FAILED;
 	}
 
 	// The previous helper executable is renamed out of the way while the update runs, so it can
@@ -1628,21 +2117,38 @@ namespace
 			g_Logger.Error("target directory does not exist: %s", Utf8FromWide(TargetDir).c_str());
 			return EXIT_USAGE;
 		}
-		if(!FileExists(ZipPath))
+		if(!SamePath(PathDirectory(RestartPath), TargetDir))
 		{
-			g_Logger.Error("zip file does not exist: %s", Utf8FromWide(ZipPath).c_str());
+			g_Logger.Error("restart executable must be in the target installation directory");
 			return EXIT_USAGE;
 		}
 		if(!FileExists(RestartPath))
 			g_Logger.Warn("restart executable does not exist yet: %s", Utf8FromWide(RestartPath).c_str());
 
-		// 2. Verify the sha256 of the downloaded archive before doing anything else.
+		// 2. Confirm that the original client is gone before any operation that can fail and
+		// leave the user without a running client.
+		bool TimedOut = false;
+		if(!WaitForProcessExit(Options.m_Pid, TimedOut))
+		{
+			g_Logger.Error("timed out after %lu ms waiting for process %lu to exit", (unsigned long)GetWaitTimeout(), Options.m_Pid);
+			return EXIT_PID_TIMEOUT;
+		}
+		auto FinishFailure = [&](int FailureCode) {
+			return RestartAfterFailure(FailureCode, RestartPath, TargetDir);
+		};
+		if(!FileExists(ZipPath))
+		{
+			g_Logger.Error("zip file does not exist: %s", Utf8FromWide(ZipPath).c_str());
+			return FinishFailure(EXIT_USAGE);
+		}
+
+		// 3. Verify the sha256 of the downloaded archive.
 		std::string ActualSha256;
 		std::string HashError;
 		if(!Sha256File(ZipPath, ActualSha256, HashError))
 		{
 			g_Logger.Error("hashing the zip failed: %s", HashError.c_str());
-			return EXIT_FILE_SYSTEM;
+			return FinishFailure(EXIT_FILE_SYSTEM);
 		}
 		std::string ExpectedSha256 = Options.m_Sha256;
 		std::transform(ExpectedSha256.begin(), ExpectedSha256.end(), ExpectedSha256.begin(), [](unsigned char Character) { return (char)tolower(Character); });
@@ -1650,15 +2156,7 @@ namespace
 		if(ActualSha256 != ExpectedSha256)
 		{
 			g_Logger.Error("sha256 mismatch, refusing to install");
-			return EXIT_SHA_MISMATCH;
-		}
-
-		// 3. Wait for the running client to exit.
-		bool TimedOut = false;
-		if(!WaitForProcessExit(Options.m_Pid, TimedOut))
-		{
-			g_Logger.Error("timed out after %lu ms waiting for process %lu to exit", (unsigned long)GetWaitTimeout(), Options.m_Pid);
-			return EXIT_PID_TIMEOUT;
+			return FinishFailure(EXIT_SHA_MISMATCH);
 		}
 
 		// 4. Read the central directory and validate every entry before touching the target.
@@ -1667,7 +2165,7 @@ namespace
 		if(!Archive.Open(ZipPath, ZipError))
 		{
 			g_Logger.Error("invalid zip archive: %s", ZipError.c_str());
-			return EXIT_ZIP_INVALID;
+			return FinishFailure(EXIT_ZIP_INVALID);
 		}
 		g_Logger.Info("zip contains %llu entries", (unsigned long long)Archive.Entries().size());
 
@@ -1685,7 +2183,7 @@ namespace
 			if(Check == EEntryCheck::REJECT)
 			{
 				g_Logger.Error("refusing to install entry '%s': %s", Utf8FromWide(Entry.m_LogName).c_str(), NameError.c_str());
-				return EXIT_UNSAFE_ENTRY;
+				return FinishFailure(EXIT_UNSAFE_ENTRY);
 			}
 			if(Check == EEntryCheck::SKIP_PROTECTED)
 			{
@@ -1696,7 +2194,7 @@ namespace
 			if(!SeenPaths.insert(ToLowerWide(RelativePath)).second)
 			{
 				g_Logger.Error("refusing to install entry '%s': the path appears more than once in the archive", Utf8FromWide(Entry.m_LogName).c_str());
-				return EXIT_UNSAFE_ENTRY;
+				return FinishFailure(EXIT_UNSAFE_ENTRY);
 			}
 			Planned.push_back({&Entry, RelativePath, IsDirectory});
 			if(!IsDirectory)
@@ -1706,9 +2204,22 @@ namespace
 		if(Planned.empty())
 		{
 			g_Logger.Error("zip contains no files that could be installed");
-			return EXIT_ZIP_INVALID;
+			return FinishFailure(EXIT_ZIP_INVALID);
 		}
 		g_Logger.Info("planned: %llu entries, %llu skipped, %llu bytes", (unsigned long long)Planned.size(), (unsigned long long)Skipped, (unsigned long long)PlannedBytes);
+
+		std::vector<std::wstring> PlannedExecutablePaths;
+		bool HelperExecutablePlanned = false;
+		for(const SPlannedEntry &Entry : Planned)
+		{
+			if(Entry.m_IsDirectory || !EndsWithNoCase(Entry.m_RelativePath, L".exe"))
+				continue;
+			const std::wstring ExecutablePath = JoinPath(TargetDir, Entry.m_RelativePath);
+			PlannedExecutablePaths.push_back(ExecutablePath);
+			if(SamePath(ExecutablePath, JoinPath(TargetDir, L"TClientUpdater.exe")))
+				HelperExecutablePlanned = true;
+		}
+		g_Logger.Info("planned executable files: %llu", (unsigned long long)PlannedExecutablePaths.size());
 
 		// 5. Extract everything into the staging directory first.
 		const std::wstring StagingDir = JoinPath(TargetDir, L"update_staging_" + std::to_wstring(Options.m_Pid));
@@ -1716,12 +2227,12 @@ namespace
 		if(!RemoveTree(StagingDir, FileError))
 		{
 			g_Logger.Error("could not clean the staging directory: %s", FileError.c_str());
-			return EXIT_FILE_SYSTEM;
+			return FinishFailure(EXIT_FILE_SYSTEM);
 		}
 		if(!EnsureDirectory(StagingDir, FileError))
 		{
 			g_Logger.Error("could not create the staging directory: %s", FileError.c_str());
-			return EXIT_FILE_SYSTEM;
+			return FinishFailure(EXIT_FILE_SYSTEM);
 		}
 		g_Logger.Info("staging directory: %s", Utf8FromWide(StagingDir).c_str());
 
@@ -1732,10 +2243,19 @@ namespace
 			{
 				g_Logger.Error("extracting '%s' failed: %s", Utf8FromWide(Entry.m_pEntry->m_LogName).c_str(), FileError.c_str());
 				RemoveTree(StagingDir, FileError);
-				return EXIT_UNSAFE_ENTRY;
+				return FinishFailure(EXIT_UNSAFE_ENTRY);
 			}
 		}
 		g_Logger.Info("extraction finished");
+
+		// Close only processes whose exact image path is an executable that this update plans to
+		// replace. Repeated sweeps catch monitor children that race their parent's shutdown.
+		if(!CloseTargetProcesses(PlannedExecutablePaths, TargetDir, HelperExecutablePlanned))
+		{
+			g_Logger.Error("could not stop every target-owned process required for this update");
+			RemoveTree(StagingDir, FileError);
+			return FinishFailure(EXIT_INSTALL_FAILED);
+		}
 
 		// 6. Back up the files that are about to be replaced. User data never gets here because
 		// such entries were skipped above.
@@ -1760,7 +2280,7 @@ namespace
 					{
 						g_Logger.Error("could not create the backup directory: %s", FileError.c_str());
 						RemoveTree(StagingDir, FileError);
-						return EXIT_FILE_SYSTEM;
+						return FinishFailure(EXIT_FILE_SYSTEM);
 					}
 					BackupDirectoryCreated = true;
 					g_Logger.Info("backup directory: %s", Utf8FromWide(BackupDir).c_str());
@@ -1775,14 +2295,14 @@ namespace
 					{
 						g_Logger.Error("could not create the backup directory: %s", FileError.c_str());
 						RemoveTree(StagingDir, FileError);
-						return EXIT_FILE_SYSTEM;
+						return FinishFailure(EXIT_FILE_SYSTEM);
 					}
 				}
 				if(!CopyFileW(LongPath(Record.m_TargetPath).c_str(), LongPath(Record.m_BackupPath).c_str(), FALSE))
 				{
 					g_Logger.Error("could not back up '%s': %s", Utf8FromWide(Record.m_TargetPath).c_str(), FormatLastError(GetLastError()).c_str());
 					RemoveTree(StagingDir, FileError);
-					return EXIT_FILE_SYSTEM;
+					return FinishFailure(EXIT_FILE_SYSTEM);
 				}
 				Record.m_HadBackup = true;
 			}
@@ -1792,22 +2312,26 @@ namespace
 		// 7. If the archive contains a new version of this helper, move the running executable
 		// out of the way first: Windows refuses to replace a mapped image in place.
 		const std::wstring OwnExecutable = GetOwnExecutablePath();
+		std::wstring RenamedOwnExecutable;
 		for(const SPlannedEntry &Entry : FileEntries)
 		{
 			const std::wstring Destination = JoinPath(TargetDir, Entry.m_RelativePath);
 			if(OwnExecutable.empty() || !SamePath(Destination, OwnExecutable))
 				continue;
-			const std::wstring Renamed = OwnExecutable + L".old_" + TimestampSuffix();
-			if(!MoveFileExW(LongPath(OwnExecutable).c_str(), LongPath(Renamed).c_str(), MOVEFILE_REPLACE_EXISTING))
+			RenamedOwnExecutable = OwnExecutable + L".old_" + TimestampSuffix();
+			if(!MoveFileExW(LongPath(OwnExecutable).c_str(), LongPath(RenamedOwnExecutable).c_str(), MOVEFILE_REPLACE_EXISTING))
 			{
+				RenamedOwnExecutable.clear();
 				g_Logger.Error("could not move the running helper out of the way: %s", FormatLastError(GetLastError()).c_str());
 				RemoveTree(StagingDir, FileError);
-				return EXIT_FILE_SYSTEM;
+				return FinishFailure(EXIT_FILE_SYSTEM);
 			}
-			g_Logger.Info("moved the running helper to '%s'", Utf8FromWide(Renamed).c_str());
+			g_Logger.Info("moved the running helper to '%s'", Utf8FromWide(RenamedOwnExecutable).c_str());
+			break;
 		}
 
 		// 8. Move the staged files into place.
+		size_t InstalledCount = 0;
 		for(size_t Index = 0; Index < FileEntries.size(); Index++)
 		{
 			const std::wstring Source = JoinPath(StagingDir, FileEntries[Index].m_RelativePath);
@@ -1815,98 +2339,143 @@ namespace
 
 			std::string DirectoryError;
 			const size_t Slash = Destination.find_last_of(L'\\');
+			bool Replaced = false;
+			DWORD MoveError = ERROR_SUCCESS;
 			if(Slash != std::wstring::npos && !EnsureDirectory(Destination.substr(0, Slash), DirectoryError))
 			{
 				g_Logger.Error("could not create the target directory: %s", DirectoryError.c_str());
-				// Fall through to the rollback below.
 			}
 			else
 			{
 				ClearReadOnly(Destination);
-				bool Replaced = false;
-				// 被占用的文件（比如客户端拉起的后台监控进程还没退干净）
-				// 短暂重试，而不是立刻整体回滚
-				for(int Retry = 0; Retry < 10; ++Retry)
+				for(int Retry = 0; Retry < 10; Retry++)
 				{
 					if(MoveFileExW(LongPath(Source).c_str(), LongPath(Destination).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
 					{
 						Replaced = true;
 						break;
 					}
-					const DWORD MoveError = GetLastError();
+					// Capture the MoveFileExW error immediately. Sleep and attribute APIs may
+					// overwrite the thread's last-error value before it is logged.
+					MoveError = GetLastError();
 					if(MoveError != ERROR_ACCESS_DENIED && MoveError != ERROR_SHARING_VIOLATION)
 						break;
 					Sleep(200);
 					ClearReadOnly(Destination);
 				}
-				if(Replaced)
-					continue;
-				g_Logger.Error("could not replace '%s': %s", Utf8FromWide(Destination).c_str(), FormatLastError(GetLastError()).c_str());
+				if(!Replaced)
+					g_Logger.Error("could not replace '%s': %s", Utf8FromWide(Destination).c_str(), FormatLastError(MoveError).c_str());
 			}
 
-			// Roll back everything that was already replaced.
-			g_Logger.Warn("rolling back %llu already installed files", (unsigned long long)Index);
-			bool RollbackComplete = true;
-			for(size_t Rollback = Index; Rollback > 0; Rollback--)
+			if(Replaced)
 			{
-				const SInstalledFile &Record = Installed[Rollback - 1];
-				ClearReadOnly(Record.m_TargetPath);
-				if(Record.m_HadBackup)
-				{
-					if(MoveFileExW(LongPath(Record.m_BackupPath).c_str(), LongPath(Record.m_TargetPath).c_str(), MOVEFILE_REPLACE_EXISTING))
-						g_Logger.Info("restored '%s'", Utf8FromWide(Record.m_TargetPath).c_str());
-					else
-					{
-						RollbackComplete = false;
-						g_Logger.Error("could not restore '%s': %s", Utf8FromWide(Record.m_TargetPath).c_str(), FormatLastError(GetLastError()).c_str());
-					}
-				}
-				else
-				{
-					if(DeleteFileW(LongPath(Record.m_TargetPath).c_str()))
-						g_Logger.Info("removed newly created '%s'", Utf8FromWide(Record.m_TargetPath).c_str());
-					else
-					{
-						RollbackComplete = false;
-						g_Logger.Error("could not remove '%s': %s", Utf8FromWide(Record.m_TargetPath).c_str(), FormatLastError(GetLastError()).c_str());
-					}
-				}
+				InstalledCount++;
+				continue;
 			}
+
+			const bool RollbackComplete = RollbackInstalledFiles(Installed, InstalledCount, OwnExecutable, RenamedOwnExecutable);
 			RemoveTree(StagingDir, FileError);
+			Archive.Close();
 			if(RollbackComplete)
 				g_Logger.Error("update failed, previous state restored");
 			else
 				g_Logger.Error("update failed and the previous state could NOT be fully restored; see the errors above");
-			return EXIT_INSTALL_FAILED;
+			return RollbackComplete ? FinishFailure(EXIT_INSTALL_FAILED) : EXIT_RECOVERY_FAILED;
 		}
-		g_Logger.Info("installed %llu files", (unsigned long long)FileEntries.size());
+		g_Logger.Info("installed %llu files", (unsigned long long)InstalledCount);
 
-		// 9. Remove the staging directory and restart the client.
+		// 9. Launch the new client with a child-only ready marker and retain its process handle.
 		if(!RemoveTree(StagingDir, FileError))
 			g_Logger.Warn("could not remove the staging directory: %s", FileError.c_str());
+
+		const std::wstring ReadyToken = GenerateReadyToken();
+		const std::wstring ReadyPath = LongPath(JoinPath(TargetDir, L".tclient-update-ready-" + ReadyToken + L".tmp"));
+		DeleteFileW(LongPath(ReadyPath).c_str());
+
+		PROCESS_INFORMATION RestartProcess;
+		std::string StartError;
+		bool Started = FileExists(RestartPath) && StartProcess(RestartPath, TargetDir, &ReadyPath, &ReadyToken, RestartProcess, StartError);
+		if(!Started)
+		{
+			if(!FileExists(RestartPath))
+				StartError = "restart executable is missing after the update: " + Utf8FromWide(RestartPath);
+			g_Logger.Error("startup health failed: %s", StartError.c_str());
+			const bool RollbackComplete = RollbackInstalledFiles(Installed, InstalledCount, OwnExecutable, RenamedOwnExecutable);
+			Archive.Close();
+			DeleteFileW(LongPath(ReadyPath).c_str());
+			if(!RollbackComplete)
+				g_Logger.Error("startup failure rollback was incomplete");
+			return RollbackComplete ? FinishFailure(EXIT_HEALTH_FAILED) : EXIT_RECOVERY_FAILED;
+		}
+
+		std::string HealthFailure;
+		const bool Healthy = WaitForStartupHealth(RestartProcess.hProcess, RestartProcess.dwProcessId, ReadyPath, ReadyToken, HealthFailure);
+		if(!Healthy)
+		{
+			g_Logger.Error("startup health failed: %s", HealthFailure.c_str());
+			bool NewClientStopped = WaitForSingleObject(RestartProcess.hProcess, 0) == WAIT_OBJECT_0;
+			if(!NewClientStopped)
+			{
+				if(TerminateProcess(RestartProcess.hProcess, ERROR_INSTALL_FAILURE))
+				{
+					NewClientStopped = WaitForSingleObject(RestartProcess.hProcess, 5000) == WAIT_OBJECT_0;
+					if(NewClientStopped)
+						g_Logger.Info("terminated unhealthy new client pid=%lu", (unsigned long)RestartProcess.dwProcessId);
+				}
+				else
+				{
+					const DWORD LastError = GetLastError();
+					NewClientStopped = WaitForSingleObject(RestartProcess.hProcess, 0) == WAIT_OBJECT_0;
+					if(!NewClientStopped)
+						g_Logger.Error("could not terminate unhealthy new client pid=%lu: %s", (unsigned long)RestartProcess.dwProcessId, FormatLastError(LastError).c_str());
+				}
+			}
+			CloseHandle(RestartProcess.hProcess);
+
+			std::vector<std::wstring> HealthProcessPaths = PlannedExecutablePaths;
+			bool RestartPathCovered = false;
+			for(const std::wstring &ExecutablePath : HealthProcessPaths)
+				RestartPathCovered |= SamePath(ExecutablePath, RestartPath);
+			if(!RestartPathCovered)
+				HealthProcessPaths.push_back(RestartPath);
+			const bool TargetProcessesStopped = CloseTargetProcesses(HealthProcessPaths, TargetDir, HelperExecutablePlanned);
+			if(!NewClientStopped || !TargetProcessesStopped)
+			{
+				g_Logger.Error("startup recovery stopped: could not confirm every target-owned process exited; backup retained at '%s', no client restarted", Utf8FromWide(BackupDir).c_str());
+				Archive.Close();
+				DeleteFileW(LongPath(ReadyPath).c_str());
+				return EXIT_RECOVERY_FAILED;
+			}
+
+			const bool RollbackComplete = RollbackInstalledFiles(Installed, InstalledCount, OwnExecutable, RenamedOwnExecutable);
+			Archive.Close();
+			DeleteFileW(LongPath(ReadyPath).c_str());
+			if(RollbackComplete)
+				g_Logger.Error("startup health failed, previous state restored");
+			else
+				g_Logger.Error("startup health failed and rollback was incomplete");
+			return RollbackComplete ? FinishFailure(EXIT_HEALTH_FAILED) : EXIT_RECOVERY_FAILED;
+		}
+		CloseHandle(RestartProcess.hProcess);
+		DeleteFileW(LongPath(ReadyPath).c_str());
+
+		// The SPlannedEntry records point into the archive mapping, so close it only after every
+		// installation and rollback decision is complete. Closing it explicitly is required before
+		// deleting the consumed package on Windows.
+		Archive.Close();
 		RemoveStaleSelfBackups(TargetDir);
 		PruneOldBackups(TargetDir, 1);
 
-		// 更新包（约 61 MB）已经用完了：留在 update/ 里只会白占空间，
-		// 下次更新还会重新下载覆盖它。失败时这里不会执行，包仍可用于重试。
 		if(DeleteFileW(LongPath(ZipPath).c_str()))
 			g_Logger.Info("removed the consumed update package '%s'", Utf8FromWide(ZipPath).c_str());
-		else if(GetLastError() != ERROR_FILE_NOT_FOUND)
-			g_Logger.Warn("could not remove the update package '%s': %s", Utf8FromWide(ZipPath).c_str(), FormatLastError(GetLastError()).c_str());
-
-		if(!FileExists(RestartPath))
+		else
 		{
-			g_Logger.Error("restart executable is missing after the update: %s", Utf8FromWide(RestartPath).c_str());
-			return EXIT_RESTART_FAILED;
-		}
-		std::string StartError;
-		if(!StartRestartProcess(RestartPath, TargetDir, StartError))
-		{
-			g_Logger.Error("%s", StartError.c_str());
-			return EXIT_RESTART_FAILED;
+			const DWORD DeleteError = GetLastError();
+			if(DeleteError != ERROR_FILE_NOT_FOUND)
+				g_Logger.Warn("could not remove the update package '%s': %s", Utf8FromWide(ZipPath).c_str(), FormatLastError(DeleteError).c_str());
 		}
 
-		g_Logger.Info("update finished successfully");
+		g_Logger.Info("update finished successfully after startup health verification");
 		return EXIT_OK;
 	}
 
@@ -1940,5 +2509,24 @@ int wmain(int argc, wchar_t **argv)
 
 	g_Logger.Info("TClientUpdater exiting with code %d", Result);
 	g_Logger.Close();
+	if(Result != EXIT_OK)
+	{
+		wchar_t aNoUi[8] = {};
+		const bool SuppressUi = GetEnvironmentVariableW(L"TCLIENT_UPDATER_NO_UI", aNoUi, (DWORD)(sizeof(aNoUi) / sizeof(aNoUi[0]))) == 1 && aNoUi[0] == L'1';
+		if(!SuppressUi)
+		{
+			std::wstring Message;
+			if(g_PreviousClientRestored)
+				Message = L"更新未完成，旧版文件已保留或恢复，并已重新启动客户端。";
+			else if(Result == EXIT_RECOVERY_FAILED)
+				Message = L"更新失败，未能完成恢复。备份已保留，未自动启动客户端，请根据日志恢复后再启动。";
+			else if(Result == EXIT_RESTART_FAILED)
+				Message = L"更新失败，旧版文件已保留或恢复，但未能自动启动客户端。";
+			else
+				Message = L"更新未完成。请查看日志中的原因后重试。";
+			Message += L"\n\n日志：" + LogPath + L"\n退出码：" + std::to_wstring(Result);
+			MessageBoxW(nullptr, Message.c_str(), L"TClient 更新失败", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+		}
+	}
 	return Result;
 }

@@ -952,6 +952,7 @@ void CTClient::UpdateFail(const char *pFormat, ...)
 
 void CTClient::ResetUpdateTasks()
 {
+	m_UpdateRetryAt = -1.0f;
 	// 必须四个任务全清：残留的 sig/helper 任务会让下一次检查读到旧结果，
 	// 甚至在 abort 后仍被 Finish* 解引用（崩溃）。
 	if(m_pUpdateManifestTask)
@@ -1012,6 +1013,7 @@ void CTClient::UpdateCheck(bool Force)
 	m_aUpdateBootstrapPath[0] = '\0';
 	BootstrapHelperPending = false;
 	m_UpdateManifestSource = 0;
+	m_UpdateDownloadAttempt = 0;
 	m_LastUpdateCheck = time_timestamp();
 	m_UpdateState = EUpdateState::CHECKING;
 	SetUpdateStatus(TCLocalize("Checking for updates..."));
@@ -1159,12 +1161,19 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 // 只杀安装目录匹配的进程，不碰其他安装/其他用户的同名进程。
 static void StopOwnHelperProcesses(const wchar_t *pInstallDir)
 {
+	std::wstring InstallDir = pInstallDir;
+	if(InstallDir.empty())
+		return;
+	for(wchar_t &c : InstallDir)
+	{
+		if(c == L'/')
+			c = L'\\';
+	}
+	if(InstallDir.back() != L'\\')
+		InstallDir += L'\\';
 	HANDLE Snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	if(Snapshot == INVALID_HANDLE_VALUE)
 		return;
-	std::wstring LowerInstall = pInstallDir;
-	for(wchar_t &c : LowerInstall)
-		c = towlower(c);
 
 	PROCESSENTRY32W Entry;
 	Entry.dwSize = sizeof(Entry);
@@ -1175,17 +1184,15 @@ static void StopOwnHelperProcesses(const wchar_t *pInstallDir)
 			if(_wcsicmp(Entry.szExeFile, L"island_media_monitor.exe") != 0 &&
 				_wcsicmp(Entry.szExeFile, L"netease-watcher.exe") != 0)
 				continue;
-			HANDLE Process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, FALSE, Entry.th32ProcessID);
+			HANDLE Process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, Entry.th32ProcessID);
 			if(!Process)
 				continue;
 			wchar_t aPath[MAX_PATH + 8];
 			DWORD PathSize = std::size(aPath);
 			if(QueryFullProcessImageNameW(Process, 0, aPath, &PathSize))
 			{
-				std::wstring LowerPath = aPath;
-				for(wchar_t &c : LowerPath)
-					c = towlower(c);
-				if(LowerPath.rfind(LowerInstall, 0) == 0)
+				const std::wstring ExpectedPath = InstallDir + Entry.szExeFile;
+				if(CompareStringOrdinal(aPath, PathSize, ExpectedPath.c_str(), (int)ExpectedPath.size(), TRUE) == CSTR_EQUAL)
 				{
 					TerminateProcess(Process, 0);
 					WaitForSingleObject(Process, 2000);
@@ -1362,9 +1369,11 @@ void CTClient::UpdateInstallAndRestart()
 #if defined(CONF_FAMILY_WINDOWS)
 	{
 		wchar_t aWideTarget[IO_MAX_PATH_LENGTH];
-		MultiByteToWideChar(CP_UTF8, 0, aTarget, -1, aWideTarget, std::size(aWideTarget));
-		StopOwnHelperProcesses(aWideTarget);
-		Sleep(300);
+		if(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, aTarget, -1, aWideTarget, std::size(aWideTarget)) > 0)
+		{
+			StopOwnHelperProcesses(aWideTarget);
+			Sleep(300);
+		}
 	}
 #endif
 	log_info("tclient-update", "starting helper: %s (pid %s, target %s)", aHelper, aPid, aTarget);
@@ -1404,10 +1413,12 @@ int CTClient::UpdateDownloadPercent() const
 
 void CTClient::PollUpdateTasks()
 {
-	// 清单任务处理过一次后就不再进入本分支（否则签名完成后清单仍 Done，
-	// 会一直卡在"已在拉签名"的静态状态，永远走不到下面的签名完成分支）。
-	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done() && !m_pUpdateManifestSigTask)
+	// Keep the completed manifest while its signature is being retried, and
+	// use this same path for both the initial request and delayed retries.
+	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done() && !m_pUpdateManifestSigTask &&
+		(m_UpdateRetryAt < 0 || Client()->LocalTime() >= m_UpdateRetryAt))
 	{
+		m_UpdateRetryAt = -1.0f;
 		// 清单下载完成后先拉签名，验签通过才解析
 		if(m_pUpdateManifestTask->State() != EHttpState::DONE)
 		{
@@ -1472,22 +1483,6 @@ void CTClient::PollUpdateTasks()
 			StartDownloadTask();
 			return;
 		}
-		if(m_UpdateState == EUpdateState::CHECKING && m_pUpdateManifestTask && !m_pUpdateManifestSigTask)
-		{
-			char aSigUrl[512];
-			if(m_UpdateManifestSource == 2)
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
-			else if(m_UpdateManifestSource == 0)
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%shttps://github.com/351950505/TClient/releases/latest/download/%s", TCLIENT_UPDATE_PROXY_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
-			else
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_GH_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
-			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
-			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
-			m_pUpdateManifestSigTask->MaxResponseSize(1024);
-			m_pUpdateManifestSigTask->FailOnErrorStatus(true);
-			Http()->Run(m_pUpdateManifestSigTask);
-			return;
-		}
 	}
 	if(m_pUpdateManifestSigTask && m_pUpdateManifestSigTask->Done())
 	{
@@ -1495,13 +1490,12 @@ void CTClient::PollUpdateTasks()
 		std::shared_ptr<IHttpRequest> pSigTask = m_pUpdateManifestSigTask;
 		m_pUpdateManifestSigTask = nullptr;
 		const bool SigOk = pSigTask->State() == EHttpState::DONE;
-		// 无论验签成败，清单任务都已用掉：不置空的话下一帧清单仍 Done 且
-		// sig 为空，又会重新拉签名 → 每帧重复验签（日志里连续多条
-		// "manifest signature verified" 就是这个循环）。
-		std::shared_ptr<IHttpRequest> pManifestDone = m_pUpdateManifestTask;
-		m_pUpdateManifestTask = nullptr;
 		if(SigOk)
 		{
+			// Consume the manifest only once the signature bytes are available.
+			// HTTP failures must retain it for the next signature request.
+			std::shared_ptr<IHttpRequest> pManifestDone = m_pUpdateManifestTask;
+			m_pUpdateManifestTask = nullptr;
 			FinishUpdateManifest(pSigTask, pManifestDone);
 			return;
 		}
@@ -1541,11 +1535,6 @@ void CTClient::PollUpdateTasks()
 		}
 		FinishUpdateDownload();
 		return;
-	}
-	if(m_UpdateRetryAt > 0 && Client()->LocalTime() >= m_UpdateRetryAt)
-	{
-		m_UpdateRetryAt = -1.0f;
-		StartDownloadTask();
 	}
 }
 

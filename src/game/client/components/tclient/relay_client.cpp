@@ -131,18 +131,8 @@ bool CRelayClient::Available() const
 
 bool CRelayClient::PeerDirect(const SPeer &Peer) const
 {
-	// 10s 内收到过对方的直连包即视为已打通（探针每秒一次，留足抖动余量）
-	return Client()->LocalTime() - Peer.m_LastDirect < 10.0f;
-}
-
-bool CRelayClient::AllPeersDirect() const
-{
-	if(m_vPeers.empty())
-		return false;
-	for(const SPeer &Peer : m_vPeers)
-		if(!PeerDirect(Peer))
-			return false;
-	return true;
+	// P2P disabled means no direct route, including stale/probed peers.
+	return g_Config.m_TcRelayP2p && Client()->LocalTime() - Peer.m_LastDirect < 10.0f;
 }
 
 bool CRelayClient::GameServerAddr(char *pBuf, int Size) const
@@ -225,35 +215,28 @@ void CRelayClient::Broadcast(const char *pPayload)
 		return;
 	// P2P 直发默认关闭（2026-10-31 用户反馈）：走 P2P 的接收方只有已打通的
 	// 客户端玩家，其他人看不到 ping。tc_relay_p2p=1 可临时开回测试。
-	if(g_Config.m_TcRelayP2p)
-	{
-		int SentDirect = 0;
-		for(const SPeer &Peer : m_vPeers)
-		{
-			if(!PeerDirect(Peer))
-				continue;
+	const int SentDirect = RelayRouting::Broadcast(g_Config.m_TcRelayP2p != 0, Online(), m_vPeers,
+		[this](const SPeer &Peer) { return PeerDirect(Peer); },
+		[this, pPayload](const SPeer &Peer) {
 			char aBuf[192];
 			str_format(aBuf, sizeof(aBuf), "D %s", pPayload);
 			net_udp_send(m_Socket, &Peer.m_Addr, aBuf, str_length(aBuf) + 1);
-			SentDirect++;
-		}
-		if(SentDirect > 0)
-		{
-			char aPeers[16];
-			str_format(aPeers, sizeof(aPeers), "%d", SentDirect);
-			LogOnce("p2p direct send", aPeers);
-		}
-	}
-	// 还有成员没打通（或还不知道有谁）时走信令中转兜底
-	if(AllPeersDirect() || !Online())
-		return;
-	if(m_vSendQueue.size() < 8) // 限深：ping 频率远低于此
+		},
+		[this, pPayload] {
+			if(m_vSendQueue.size() < 8) // 限深：ping 频率远低于此
+			{
+				SQueued Item;
+				Item.m_Payload = pPayload;
+				Item.m_UseRelay = true;
+				m_vSendQueue.push_back(Item);
+				LogOnce("broadcast queued (relay)", nullptr);
+			}
+		});
+	if(SentDirect > 0)
 	{
-		SQueued Item;
-		Item.m_Payload = pPayload;
-		Item.m_UseRelay = true;
-		m_vSendQueue.push_back(Item);
-		LogOnce("broadcast queued (relay)", nullptr);
+		char aPeers[16];
+		str_format(aPeers, sizeof(aPeers), "%d", SentDirect);
+		LogOnce("p2p direct send", aPeers);
 	}
 }
 
@@ -298,6 +281,8 @@ void CRelayClient::PumpRecv()
 		// 仅已知 UID 可学习 NAT 地址；收发共用每 peer 一秒节流。
 		if(str_startswith(aText, "P "))
 		{
+			if(!g_Config.m_TcRelayP2p)
+				continue;
 			for(SPeer &Peer : m_vPeers)
 			{
 				if(str_comp(Peer.m_aUid, aText + 2) != 0)
@@ -322,6 +307,8 @@ void CRelayClient::PumpRecv()
 		bool Direct = false;
 		if(str_startswith(aText, "D "))
 		{
+			if(!g_Config.m_TcRelayP2p)
+				continue;
 			pPayload = aText + 2;
 			for(SPeer &Peer : m_vPeers)
 			{

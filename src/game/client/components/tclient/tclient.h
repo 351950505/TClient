@@ -93,9 +93,12 @@ private:
 	void UpdateFail(const char *pFormat, ...) [[gnu::format(printf, 2, 3)]];
 	void PollUpdateTasks();
 	void FetchUpdateManifest();
+	void NextUpdateManifestSource(const char *pReason);
 	void FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std::shared_ptr<IHttpRequest> pManifestTask);
 	void FinishUpdateDownload();
 	void StartDownloadTask();
+	void StartUpdateHelperTask();
+	void RetryUpdateDownload(bool Helper, const char *pReason);
 	void FinishUpdateBootstrap();
 	void ResetUpdateTasks();
 	bool UpdateShouldAutoCheck() const;
@@ -108,8 +111,11 @@ private:
 	char m_aUpdateBootstrapPath[IO_MAX_PATH_LENGTH] = "";
 	bool BootstrapHelperPending = false;
 	int m_UpdateManifestSource = 0;
+	bool m_UpdateFoundCurrentRelease = false;
 	std::shared_ptr<IHttpRequest> m_pUpdateHelperTask = nullptr;
+	int m_UpdateDownloadSource = 0;
 	int m_UpdateDownloadAttempt = 0;
+	bool m_UpdateRetryHelper = false;
 	float m_UpdateRetryAt = -1.0f;
 
 	// 游戏内中键玩家菜单(2026-11-01):中键点玩家弹出「偷取皮肤 / 加入队伍」

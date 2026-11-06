@@ -52,13 +52,10 @@ static constexpr const char *TCLIENT_INFO_URL = "https://update.tclient.app/info
 //   TClient-update-win64.zip   整包，由独立的 TClientUpdater.exe 在主进程退出后替换
 // 旧的 update.tclient.app 逐文件更新器与本流程无关，也不受这里影响。
 static constexpr const char *TCLIENT_UPDATE_LATEST_URL = "https://github.com/351950505/TClient/releases/latest/download/";
-// 清单/签名的备用源（QmClient 做法）：raw.githubusercontent.com 不经过
-// release-assets 域名，国内可达性明显更好。发布时把清单+签名同时提交到
-// 仓库 update/ 目录即可。按顺序尝试，第一个成功的为准。
+// 清单/签名的最后备用源：raw 不经过 release-assets 域名，但可能落后于
+// Release；只有它返回的新版本能形成候选，不能单独证明本机已是最新。
 static constexpr const char *TCLIENT_UPDATE_RAW_BASE = "https://raw.githubusercontent.com/351950505/TClient/master/update/";
-// 自建 gh-proxy 加速（用户部署）：把 github.com 的原始地址拼在代理域名后即可，
-// 对国内网络友好；下载 zip / helper 也走它。
-static constexpr const char *TCLIENT_UPDATE_GH_BASE = "https://github.com/351950505/TClient/releases/latest/download/";
+static constexpr const char *TCLIENT_UPDATE_GH_BASE = "https://github.com/351950505/TClient/releases/download/";
 // 候选清单源，按顺序尝试：ghfast 加速 → 自建优选镜像（fast1/fast2，同一优选
 // 边缘 104.17.147.66）→ github 直链 → raw 仓库。
 static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {
@@ -68,8 +65,8 @@ static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {
 	"https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://raw.githubusercontent.com/351950505/TClient/master/update/TClient-update-win64.json",
 };
-// 与清单源一一对应的同目录资产（签名/zip/helper）前缀："" = releases 直链，
-// nullptr = raw 仓库。清单验签只认内容不认来源，换镜像不改协议。
+// 与清单源一一对应的下载前缀："" = releases 直链，nullptr = raw。
+// 下载换源只改变前缀；版本、哈希和大小始终来自同一份已验签清单。
 static const char *const TCLIENT_UPDATE_SOURCE_SIBLING_BASES[] = {
 	"https://ghfast.top/",
 	"https://fast1.me3.dpdns.org/",
@@ -78,14 +75,13 @@ static const char *const TCLIENT_UPDATE_SOURCE_SIBLING_BASES[] = {
 	nullptr,
 };
 static_assert(std::size(TCLIENT_UPDATE_MANIFEST_SOURCES) == std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES));
+// raw 不托管大文件；前四个 Release 入口每个阶段最多尝试一次。
+static constexpr int TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT = 4;
+static_assert(std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES) == TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT + 1);
 
-// 用资产前缀拼 releases 资源 URL；base 为 "" 时即直链。
-static void FormatUpdateAssetUrl(char *pBuf, int BufSize, const char *pBase, const char *pAsset)
+static void FormatUpdateAssetUrl(char *pBuf, int BufSize, const char *pBase, const char *pTag, const char *pAsset)
 {
-	if(pBase[0] == '\0')
-		str_format(pBuf, BufSize, "%s%s", TCLIENT_UPDATE_GH_BASE, pAsset);
-	else
-		str_format(pBuf, BufSize, "%shttps://github.com/351950505/TClient/releases/latest/download/%s", pBase, pAsset);
+	str_format(pBuf, BufSize, "%s%s%s/%s", pBase, TCLIENT_UPDATE_GH_BASE, pTag, pAsset);
 }
 static constexpr const char *TCLIENT_UPDATE_PRODUCT = "TClient";
 static constexpr const char *TCLIENT_UPDATE_CHANNEL = "stable";
@@ -965,7 +961,8 @@ void CTClient::UpdateFail(const char *pFormat, ...)
 	str_format_v(m_aUpdateStatus, sizeof(m_aUpdateStatus), pFormat, Args);
 	va_end(Args);
 	m_UpdateState = EUpdateState::FAILED;
-	m_UpdateRelease.m_Valid = false;
+	m_UpdateRelease = SUpdateRelease();
+	m_UpdateFoundCurrentRelease = false;
 	// 失败即中止所有在途任务，避免 PollUpdateTasks 下一帧重复触发
 	ResetUpdateTasks();
 	log_warn("tclient-update", "%s", m_aUpdateStatus);
@@ -974,6 +971,8 @@ void CTClient::UpdateFail(const char *pFormat, ...)
 void CTClient::ResetUpdateTasks()
 {
 	m_UpdateRetryAt = -1.0f;
+	m_UpdateRetryHelper = false;
+	BootstrapHelperPending = false;
 	// 必须四个任务全清：残留的 sig/helper 任务会让下一次检查读到旧结果，
 	// 甚至在 abort 后仍被 Finish* 解引用（崩溃）。
 	if(m_pUpdateManifestTask)
@@ -1034,6 +1033,8 @@ void CTClient::UpdateCheck(bool Force)
 	m_aUpdateBootstrapPath[0] = '\0';
 	BootstrapHelperPending = false;
 	m_UpdateManifestSource = 0;
+	m_UpdateFoundCurrentRelease = false;
+	m_UpdateDownloadSource = 0;
 	m_UpdateDownloadAttempt = 0;
 	m_LastUpdateCheck = time_timestamp();
 	m_UpdateState = EUpdateState::CHECKING;
@@ -1046,12 +1047,20 @@ void CTClient::UpdateCheck(bool Force)
 
 void CTClient::FetchUpdateManifest()
 {
-	if(m_UpdateManifestSource >= (int)(sizeof(TCLIENT_UPDATE_MANIFEST_SOURCES) / sizeof(TCLIENT_UPDATE_MANIFEST_SOURCES[0])))
+	if(m_UpdateManifestSource >= (int)std::size(TCLIENT_UPDATE_MANIFEST_SOURCES))
 	{
+		if(m_UpdateFoundCurrentRelease)
+		{
+			m_UpdateState = EUpdateState::UP_TO_DATE;
+			SetUpdateStatus(TCLocalize("You are on the latest version"));
+			return;
+		}
 		UpdateFail(TCLocalize("Update check failed: the manifest could not be downloaded"));
 		return;
 	}
-	m_pUpdateManifestTask = HttpGet(TCLIENT_UPDATE_MANIFEST_SOURCES[m_UpdateManifestSource]);
+	str_copy(m_aUpdateManifestUrl, TCLIENT_UPDATE_MANIFEST_SOURCES[m_UpdateManifestSource]);
+	str_format(m_aUpdateManifestSigUrl, sizeof(m_aUpdateManifestSigUrl), "%s.sig", m_aUpdateManifestUrl);
+	m_pUpdateManifestTask = HttpGet(m_aUpdateManifestUrl);
 	m_pUpdateManifestTask->Timeout(CTimeout{15000, 0, 800, 10});
 	m_pUpdateManifestTask->IpResolve(IPRESOLVE::V4);
 	m_pUpdateManifestTask->MaxResponseSize(64 * 1024);
@@ -1059,16 +1068,24 @@ void CTClient::FetchUpdateManifest()
 	Http()->Run(m_pUpdateManifestTask);
 }
 
+void CTClient::NextUpdateManifestSource(const char *pReason)
+{
+	log_warn("tclient-update", "manifest source %d rejected: %s", m_UpdateManifestSource + 1, pReason);
+	// 签名和清单构成一个不可拆开的来源对；换源必须丢弃两者。
+	ResetUpdateTasks();
+	m_UpdateRelease = SUpdateRelease();
+	++m_UpdateManifestSource;
+	FetchUpdateManifest();
+}
+
 void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std::shared_ptr<IHttpRequest> pManifestTask)
 {
-	// 两个任务都由调用方传入快照（调用点已把成员置空，避免重复处理同一份结果）。
+	// 两个任务都是同一来源的快照；验签优先于任何 JSON 解析。
 	if(!pManifestTask || !pSigTask)
 	{
-		UpdateFail(TCLocalize("Update check failed: the manifest could not be downloaded"));
+		NextUpdateManifestSource(TCLocalize("Update check failed: the manifest could not be downloaded"));
 		return;
 	}
-
-	// 验签优先于任何解析：清单字节 + Ed25519 签名（公钥内嵌），签名不符直接拒绝
 	unsigned char *pManifest = nullptr;
 	size_t ManifestSize = 0;
 	unsigned char *pSig = nullptr;
@@ -1077,7 +1094,7 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 	pSigTask->Result(&pSig, &SigSize);
 	if(!pManifest || !pSig || !VerifyUpdateManifestSignature(pManifest, ManifestSize, pSig, SigSize))
 	{
-		UpdateFail(TCLocalize("Update rejected: manifest signature is invalid"));
+		NextUpdateManifestSource(TCLocalize("Update rejected: manifest signature is invalid"));
 		return;
 	}
 	log_info("tclient-update", "manifest signature verified");
@@ -1087,21 +1104,21 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 	{
 		if(pJson)
 			json_value_free(pJson);
-		UpdateFail(TCLocalize("Update check failed: the manifest is not valid JSON"));
+		NextUpdateManifestSource(TCLocalize("Update check failed: the manifest is not valid JSON"));
 		return;
 	}
 
-	// 清单必须证明自己是"这个产品、这个渠道、这个平台、这个版本"的包，
-	// 否则一律不下载——防止拿到别的项目或别的平台的资产。
 	const char *pProduct = JsonStr(JsonObj(*pJson, "product"));
 	const char *pChannel = JsonStr(JsonObj(*pJson, "channel"));
 	const char *pVersion = JsonStr(JsonObj(*pJson, "version"));
 	const char *pPlatform = JsonStr(JsonObj(*pJson, "platform"));
 	const char *pAsset = JsonStr(JsonObj(*pJson, "asset"));
 	const char *pSha256 = JsonStr(JsonObj(*pJson, "sha256"));
-	const json_value &SizeValue = JsonObj(*pJson, "size");
-	const int64_t Size = JsonGetInt(SizeValue, -1);
-
+	const int64_t Size = JsonGetInt(JsonObj(*pJson, "size"), -1);
+	const json_value &Helper = JsonObj(*pJson, "helper");
+	const char *pHelperSha = JsonStr(JsonObj(Helper, "sha256"));
+	const int64_t HelperSize = JsonGetInt(JsonObj(Helper, "size"), -1);
+	int aVersion[APP_VERSION_MAX_SEGMENTS];
 	const char *pError = nullptr;
 	if(!pProduct || str_comp(pProduct, TCLIENT_UPDATE_PRODUCT) != 0)
 		pError = TCLocalize("Update rejected: wrong product");
@@ -1109,7 +1126,7 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 		pError = TCLocalize("Update rejected: wrong channel");
 	else if(!pPlatform || str_comp(pPlatform, TCLIENT_UPDATE_PLATFORM) != 0)
 		pError = TCLocalize("Update rejected: wrong platform");
-	else if(!pVersion)
+	else if(!pVersion || str_length(pVersion) >= (int)sizeof(m_UpdateRelease.m_aVersion) || ParseAppVersion(pVersion, aVersion, APP_VERSION_MAX_SEGMENTS) < 0)
 		pError = TCLocalize("Update rejected: version does not match the release");
 	else if(!pAsset || str_comp(pAsset, TCLIENT_UPDATE_ZIP_ASSET) != 0)
 		pError = TCLocalize("Update rejected: unexpected asset name");
@@ -1117,52 +1134,39 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 		pError = TCLocalize("Update rejected: missing or malformed SHA-256");
 	else if(Size <= 0)
 		pError = TCLocalize("Update rejected: missing file size");
-
-	if(!pError && CompareAppVersion(pVersion, TCLIENT_APP_VERSION) <= 0)
-	{
-		// 「版本不比当前新」不是错误：发布页的 latest 可能正好就是本机版本
-		// （刚更新完再检查一次）。这里显示"已是最新版本"，不要报成红色失败。
-		m_UpdateState = EUpdateState::UP_TO_DATE;
-		SetUpdateStatus(TCLocalize("You are on the latest version"));
-		log_info("tclient-update", "latest release is %s, current is %s: up to date", pVersion, TCLIENT_APP_VERSION);
-		// pVersion points into pJson; free only after the log call.
-		json_value_free(pJson);
-		return;
-	}
-
+	else if(!IsHexSha256(pHelperSha) || HelperSize <= 0)
+		pError = TCLocalize("Update rejected: missing bootstrap helper");
 	if(pError)
 	{
 		json_value_free(pJson);
-		UpdateFail("%s", pError);
+		NextUpdateManifestSource(pError);
+		return;
+	}
+
+	const int VersionOrder = CompareAppVersion(pVersion, TCLIENT_APP_VERSION);
+	if(VersionOrder <= 0)
+	{
+		// 旧镜像不能阻断后面的新版本。raw 可能长期滞后，不能证明已是最新。
+		if(VersionOrder == 0 && TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource] != nullptr)
+			m_UpdateFoundCurrentRelease = true;
+		log_info("tclient-update", "source version %s is not newer than %s; checking remaining sources", pVersion, TCLIENT_APP_VERSION);
+		json_value_free(pJson);
+		NextUpdateManifestSource("manifest version is not newer");
 		return;
 	}
 
 	str_copy(m_UpdateRelease.m_aAsset, pAsset);
 	str_copy(m_UpdateRelease.m_aSha256, pSha256);
 	m_UpdateRelease.m_Size = Size;
-	// 自举：清单同时携带新 helper 的哈希，客户端下载后验哈希再用它安装
-	const json_value &Helper = JsonObj(*pJson, "helper");
-	const char *pHelperSha = JsonStr(JsonObj(Helper, "sha256"));
-	const json_value &HelperSize = JsonObj(Helper, "size");
-	if(!pHelperSha || !IsHexSha256(pHelperSha) || JsonGetInt(HelperSize, -1) <= 0)
-	{
-		json_value_free(pJson);
-		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
-		return;
-	}
 	str_copy(m_UpdateRelease.m_aHelperSha256, pHelperSha);
-	m_UpdateRelease.m_HelperSize = JsonGetInt(HelperSize, -1);
+	m_UpdateRelease.m_HelperSize = HelperSize;
 	str_format(m_UpdateRelease.m_aTag, sizeof(m_UpdateRelease.m_aTag), "v%s", pVersion);
 	str_copy(m_UpdateRelease.m_aVersion, pVersion);
-	// 大文件（zip/helper）：跟随清单来源的同一加速前缀；raw 仓库放不下
-	// 61MB 包，用 releases 直链兜底。
-	{
-		const char *pSiblingBase = TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource];
-		if(pSiblingBase == nullptr)
-			pSiblingBase = "";
-		FormatUpdateAssetUrl(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), pSiblingBase, TCLIENT_UPDATE_ZIP_ASSET);
-		FormatUpdateAssetUrl(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), pSiblingBase, TCLIENT_UPDATE_HELPER_ASSET);
-	}
+	// 从 raw 取得清单时先用 Release 直链，其余来源优先用自己的下载入口。
+	m_UpdateDownloadSource = TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource] == nullptr ? TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT - 1 : m_UpdateManifestSource;
+	const char *pBase = TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource];
+	FormatUpdateAssetUrl(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), pBase, m_UpdateRelease.m_aTag, TCLIENT_UPDATE_ZIP_ASSET);
+	FormatUpdateAssetUrl(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), pBase, m_UpdateRelease.m_aTag, TCLIENT_UPDATE_HELPER_ASSET);
 	m_UpdateRelease.m_Valid = true;
 	json_value_free(pJson);
 
@@ -1177,7 +1181,7 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 // 更新前结束本客户端拉起的后台监控进程：它们会锁住自己的 exe，导致 helper
 // 替换失败并整体回滚（2026-10-31 实测 island_media_monitor.exe 拒绝访问）。
 // 只杀安装目录匹配的进程，不碰其他安装/其他用户的同名进程。
-static void StopOwnHelperProcesses(const wchar_t *pInstallDir)
+static void StopOwnHelperProcesses(const wchar_t *pInstallDir, bool OnlyIfLastClient = false)
 {
 	std::wstring InstallDir = pInstallDir;
 	if(InstallDir.empty())
@@ -1189,12 +1193,108 @@ static void StopOwnHelperProcesses(const wchar_t *pInstallDir)
 	}
 	if(InstallDir.back() != L'\\')
 		InstallDir += L'\\';
+
+	struct CShutdownLock
+	{
+		HANDLE m_Handle = nullptr;
+		bool m_Locked = false;
+		~CShutdownLock()
+		{
+			if(m_Locked)
+				ReleaseMutex(m_Handle);
+			if(m_Handle)
+				CloseHandle(m_Handle);
+		}
+	} ShutdownLock;
+
+	wchar_t aOwnPath[32768];
+	DWORD OwnPathSize = std::size(aOwnPath);
+	const wchar_t *pOwnName = nullptr;
+	if(OnlyIfLastClient)
+	{
+		if(!QueryFullProcessImageNameW(GetCurrentProcess(), 0, aOwnPath, &OwnPathSize))
+			return;
+		const std::wstring OwnPath(aOwnPath, OwnPathSize);
+		const size_t NameStart = OwnPath.find_last_of(L"\\/");
+		if(NameStart == std::wstring::npos ||
+			CompareStringOrdinal(aOwnPath, (int)NameStart + 1, InstallDir.c_str(), (int)InstallDir.size(), TRUE) != CSTR_EQUAL)
+			return;
+		pOwnName = aOwnPath + NameStart + 1;
+
+		// Serialize normal shutdowns, including separate installs. Updates keep the force-cleanup default.
+		ShutdownLock.m_Handle = CreateMutexW(nullptr, FALSE, L"Local\\TClientHelperShutdown");
+		if(!ShutdownLock.m_Handle)
+			return;
+		const DWORD WaitResult = WaitForSingleObject(ShutdownLock.m_Handle, 5000);
+		if(WaitResult != WAIT_OBJECT_0 && WaitResult != WAIT_ABANDONED)
+			return;
+		ShutdownLock.m_Locked = true;
+
+		// Keep this signaled event until process teardown. Concurrent quitters can ignore
+		// a PID already shutting down, so their last active instance performs the cleanup.
+		static HANDLE s_ExitingEvent = nullptr;
+		if(!s_ExitingEvent)
+		{
+			const std::wstring EventName = L"Local\\TClientHelperExit-" + std::to_wstring(GetCurrentProcessId());
+			s_ExitingEvent = CreateEventW(nullptr, TRUE, TRUE, EventName.c_str());
+		}
+		if(!s_ExitingEvent)
+			return;
+	}
+
 	HANDLE Snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	if(Snapshot == INVALID_HANDLE_VALUE)
 		return;
 
 	PROCESSENTRY32W Entry;
 	Entry.dwSize = sizeof(Entry);
+	if(OnlyIfLastClient)
+	{
+		bool OtherClientActive = !Process32FirstW(Snapshot, &Entry);
+		if(!OtherClientActive)
+		{
+			do
+			{
+				if(Entry.th32ProcessID == GetCurrentProcessId() || _wcsicmp(Entry.szExeFile, pOwnName) != 0)
+					continue;
+				HANDLE Process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, Entry.th32ProcessID);
+				if(!Process)
+				{
+					// A vanished PID is harmless; access denial or unknown state must preserve shared helpers.
+					if(GetLastError() == ERROR_INVALID_PARAMETER)
+						continue;
+					OtherClientActive = true;
+					break;
+				}
+				wchar_t aPath[32768];
+				DWORD PathSize = std::size(aPath);
+				if(WaitForSingleObject(Process, 0) != WAIT_OBJECT_0)
+				{
+					if(!QueryFullProcessImageNameW(Process, 0, aPath, &PathSize))
+						OtherClientActive = WaitForSingleObject(Process, 0) != WAIT_OBJECT_0;
+					else if(CompareStringOrdinal(aPath, PathSize, aOwnPath, OwnPathSize, TRUE) == CSTR_EQUAL)
+					{
+						const std::wstring EventName = L"Local\\TClientHelperExit-" + std::to_wstring(Entry.th32ProcessID);
+						HANDLE ExitingEvent = OpenEventW(SYNCHRONIZE, FALSE, EventName.c_str());
+						OtherClientActive = !ExitingEvent || WaitForSingleObject(ExitingEvent, 0) != WAIT_OBJECT_0;
+						if(ExitingEvent)
+							CloseHandle(ExitingEvent);
+					}
+				}
+				CloseHandle(Process);
+				if(OtherClientActive)
+					break;
+			} while(Process32NextW(Snapshot, &Entry));
+			if(!OtherClientActive && GetLastError() != ERROR_NO_MORE_FILES)
+				OtherClientActive = true;
+		}
+		if(OtherClientActive)
+		{
+			CloseHandle(Snapshot);
+			return;
+		}
+	}
+
 	if(Process32FirstW(Snapshot, &Entry))
 	{
 		do
@@ -1205,7 +1305,7 @@ static void StopOwnHelperProcesses(const wchar_t *pInstallDir)
 			HANDLE Process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, Entry.th32ProcessID);
 			if(!Process)
 				continue;
-			wchar_t aPath[MAX_PATH + 8];
+			wchar_t aPath[32768];
 			DWORD PathSize = std::size(aPath);
 			if(QueryFullProcessImageNameW(Process, 0, aPath, &PathSize))
 			{
@@ -1233,6 +1333,7 @@ void CTClient::UpdateStartDownload()
 	if(m_UpdateState == EUpdateState::DOWNLOADING)
 		return;
 	m_UpdateDownloadAttempt = 0;
+	m_UpdateDownloadSource = TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource] == nullptr ? TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT - 1 : m_UpdateManifestSource;
 	StartDownloadTask();
 }
 
@@ -1246,6 +1347,7 @@ void CTClient::StartDownloadTask()
 	}
 	ResetUpdateTasks();
 	m_UpdateState = EUpdateState::DOWNLOADING;
+	FormatUpdateAssetUrl(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource], m_UpdateRelease.m_aTag, TCLIENT_UPDATE_ZIP_ASSET);
 	SetUpdateStatus(TCLocalize("Downloading update..."));
 	log_info("tclient-update", "downloading %s (%lld bytes)", m_UpdateRelease.m_aZipUrl, (long long)m_UpdateRelease.m_Size);
 
@@ -1264,32 +1366,34 @@ void CTClient::StartDownloadTask()
 
 void CTClient::FinishUpdateDownload()
 {
-	// 同 FinishUpdateManifest：UpdateFail 会置空成员，先抓局部快照
 	std::shared_ptr<IHttpRequest> pDownloadTask = m_pUpdateDownloadTask;
 	if(!pDownloadTask || pDownloadTask->State() != EHttpState::DONE)
 	{
-		// 哈希不符或传输中断：临时文件由 HTTP 层删掉，这里只报告。
-		UpdateFail(TCLocalize("Download failed or the file is corrupted"));
+		RetryUpdateDownload(false, TCLocalize("Download failed or the file is corrupted"));
 		return;
 	}
-	// 校验通过后 HTTP 层才会把临时文件搬到 update/ 下，这里确认一次大小。
+	// HTTP 层已校验哈希；确认最终落盘大小后才允许取 helper。
 	char aPath[IO_MAX_PATH_LENGTH];
 	Storage()->GetCompletePath(IStorage::TYPE_SAVE, TCLIENT_UPDATE_ZIP_PATH, aPath, sizeof(aPath));
 	IOHANDLE File = io_open(aPath, IOFLAG_READ);
 	if(!File)
 	{
-		UpdateFail(TCLocalize("Download failed: the file could not be saved"));
+		RetryUpdateDownload(false, TCLocalize("Download failed: the file could not be saved"));
 		return;
 	}
 	const int64_t Length = io_length(File);
 	io_close(File);
-	if(m_UpdateRelease.m_Size > 0 && Length != m_UpdateRelease.m_Size)
+	if(Length != m_UpdateRelease.m_Size)
 	{
-		UpdateFail(TCLocalize("Download failed: the file size does not match the manifest"));
+		RetryUpdateDownload(false, TCLocalize("Download failed: the file size does not match the manifest"));
 		return;
 	}
-	// 自举：从服务器取新版 helper（清单内含其哈希），装包由它执行 ——
-	// 运行的永远是验签链上的新 helper，而不是安装目录里的旧版
+	m_UpdateDownloadAttempt = 0;
+	StartUpdateHelperTask();
+}
+
+void CTClient::StartUpdateHelperTask()
+{
 	ResetUpdateTasks();
 	m_UpdateState = EUpdateState::DOWNLOADING;
 	SetUpdateStatus(TCLocalize("Fetching the update helper..."));
@@ -1299,14 +1403,34 @@ void CTClient::FinishUpdateDownload()
 		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
 		return;
 	}
+	FormatUpdateAssetUrl(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource], m_UpdateRelease.m_aTag, TCLIENT_UPDATE_HELPER_ASSET);
 	Storage()->GetCompletePath(IStorage::TYPE_SAVE, TCLIENT_UPDATE_BOOTSTRAP_PATH, m_aUpdateBootstrapPath, sizeof(m_aUpdateBootstrapPath));
 	m_pUpdateHelperTask = HttpGetFile(m_aUpdateHelperUrl, Storage(), TCLIENT_UPDATE_BOOTSTRAP_PATH, IStorage::TYPE_SAVE);
 	m_pUpdateHelperTask->Timeout(CTimeout{20000, 0, 800, 60});
 	m_pUpdateHelperTask->IpResolve(IPRESOLVE::V4);
 	m_pUpdateHelperTask->FailOnErrorStatus(true);
 	m_pUpdateHelperTask->ExpectSha256(HelperDigest);
+	m_pUpdateHelperTask->ValidateBeforeOverwrite(false);
 	m_pUpdateHelperTask->AllowResume(true);
 	Http()->Run(m_pUpdateHelperTask);
+}
+
+void CTClient::RetryUpdateDownload(bool Helper, const char *pReason)
+{
+	ResetUpdateTasks();
+	if(m_UpdateDownloadAttempt + 1 >= TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT)
+	{
+		UpdateFail("%s", pReason);
+		return;
+	}
+	++m_UpdateDownloadAttempt;
+	m_UpdateDownloadSource = (m_UpdateDownloadSource + 1) % TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT;
+	m_UpdateRetryHelper = Helper;
+	m_UpdateRetryAt = Client()->LocalTime() + 2.0f;
+	char aStatus[128];
+	str_format(aStatus, sizeof(aStatus), TCLocalize("Download failed, retrying (%d/%d)..."), m_UpdateDownloadAttempt, TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT - 1);
+	SetUpdateStatus(aStatus);
+	log_warn("tclient-update", "%s; retrying %s on source %d", pReason, Helper ? "helper" : "ZIP", m_UpdateDownloadSource + 1);
 }
 
 void CTClient::FinishUpdateBootstrap()
@@ -1316,16 +1440,17 @@ void CTClient::FinishUpdateBootstrap()
 	IOHANDLE File = io_open(aPath, IOFLAG_READ);
 	if(!File)
 	{
-		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
+		RetryUpdateDownload(true, TCLocalize("Update rejected: missing bootstrap helper"));
 		return;
 	}
 	const int64_t Length = io_length(File);
 	io_close(File);
-	if(m_UpdateRelease.m_HelperSize > 0 && Length != m_UpdateRelease.m_HelperSize)
+	if(Length != m_UpdateRelease.m_HelperSize)
 	{
-		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
+		RetryUpdateDownload(true, TCLocalize("Update rejected: missing bootstrap helper"));
 		return;
 	}
+	ResetUpdateTasks();
 	BootstrapHelperPending = true;
 	m_UpdateState = EUpdateState::DOWNLOADED;
 	SetUpdateStatus(TCLocalize("Update downloaded, ready to install"));
@@ -1431,127 +1556,72 @@ int CTClient::UpdateDownloadPercent() const
 
 void CTClient::PollUpdateTasks()
 {
-	// Keep the completed manifest while its signature is being retried, and
-	// use this same path for both the initial request and delayed retries.
-	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done() && !m_pUpdateManifestSigTask &&
-		(m_UpdateRetryAt < 0 || Client()->LocalTime() >= m_UpdateRetryAt))
+	// 主动取消立即终止整个链条，不触发镜像回退或延迟重试。
+	if((m_pUpdateManifestTask && m_pUpdateManifestTask->State() == EHttpState::ABORTED) ||
+		(m_pUpdateManifestSigTask && m_pUpdateManifestSigTask->State() == EHttpState::ABORTED) ||
+		(m_pUpdateDownloadTask && m_pUpdateDownloadTask->State() == EHttpState::ABORTED) ||
+		(m_pUpdateHelperTask && m_pUpdateHelperTask->State() == EHttpState::ABORTED))
 	{
-		m_UpdateRetryAt = -1.0f;
-		// 清单下载完成后先拉签名，验签通过才解析
-		if(m_pUpdateManifestTask->State() != EHttpState::DONE)
-		{
-			// 当前源失败：换下一个候选源（raw → release 直链）
-			m_pUpdateManifestTask = nullptr;
-			++m_UpdateManifestSource;
-			if(m_UpdateManifestSource < (int)(sizeof(TCLIENT_UPDATE_MANIFEST_SOURCES) / sizeof(TCLIENT_UPDATE_MANIFEST_SOURCES[0])))
-			{
-				log_warn("tclient-update", "manifest source failed, trying next source");
-				FetchUpdateManifest();
-				return;
-			}
-			UpdateFail(TCLocalize("Update check failed: the manifest could not be downloaded"));
-			ResetUpdateTasks();
-			return;
-		}
-		if(!m_pUpdateManifestSigTask)
-		{
-			char aSigUrl[512];
-			const char *pSiblingBase = TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource];
-			if(pSiblingBase == nullptr)
-				str_format(aSigUrl, (int)sizeof(aSigUrl), "%s%s", TCLIENT_UPDATE_RAW_BASE, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
-			else
-				FormatUpdateAssetUrl(aSigUrl, (int)sizeof(aSigUrl), pSiblingBase, TCLIENT_UPDATE_MANIFEST_SIG_ASSET);
-			m_pUpdateManifestSigTask = HttpGet(aSigUrl);
-			m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
-			m_pUpdateManifestSigTask->MaxResponseSize(1024);
-			m_pUpdateManifestSigTask->FailOnErrorStatus(true);
-			Http()->Run(m_pUpdateManifestSigTask);
-			return;
-		}
-	}
-	if(m_pUpdateHelperTask && m_pUpdateHelperTask->Done())
-	{
-		const bool HelperOk = m_pUpdateHelperTask->State() == EHttpState::DONE;
-		m_pUpdateHelperTask = nullptr;
-		if(HelperOk)
-		{
-			FinishUpdateBootstrap();
-			return;
-		}
-		// helper 很小，失败直接重试一次链条（zip 已在本地，不会重新下载）
-		if(m_UpdateDownloadAttempt < 3)
-		{
-			++m_UpdateDownloadAttempt;
-			char aStatus[128];
-			str_format(aStatus, sizeof(aStatus), TCLocalize("Download failed, retrying (%d/%d)..."), m_UpdateDownloadAttempt, 3);
-			SetUpdateStatus(aStatus);
-			m_UpdateRetryAt = Client()->LocalTime() + 2.0f;
-			return;
-		}
-		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
+		UpdateFail(TCLocalize("Update cancelled"));
 		return;
 	}
-	if(m_UpdateRetryAt > 0 && Client()->LocalTime() >= m_UpdateRetryAt)
+	if(m_pUpdateManifestTask && m_pUpdateManifestTask->Done() && !m_pUpdateManifestSigTask)
 	{
-		m_UpdateRetryAt = -1.0f;
-		if(m_UpdateState == EUpdateState::DOWNLOADING && !m_pUpdateDownloadTask && !m_pUpdateHelperTask)
+		if(m_pUpdateManifestTask->State() != EHttpState::DONE)
 		{
-			// zip 已在本地时 ShouldSkipRequest 会秒过，重试代价极小
-			StartDownloadTask();
+			NextUpdateManifestSource(TCLocalize("Update check failed: the manifest could not be downloaded"));
 			return;
 		}
+		// 签名必须从本次清单的同一入口下载，不保留跨源数据。
+		m_pUpdateManifestSigTask = HttpGet(m_aUpdateManifestSigUrl);
+		m_pUpdateManifestSigTask->Timeout(CTimeout{15000, 0, 800, 10});
+		m_pUpdateManifestSigTask->IpResolve(IPRESOLVE::V4);
+		m_pUpdateManifestSigTask->MaxResponseSize(1024);
+		m_pUpdateManifestSigTask->FailOnErrorStatus(true);
+		Http()->Run(m_pUpdateManifestSigTask);
+		return;
 	}
 	if(m_pUpdateManifestSigTask && m_pUpdateManifestSigTask->Done())
 	{
-		// 注意：不能先把 sig 任务置空再调 Finish —— Finish 内部要用它取签名字节。
 		std::shared_ptr<IHttpRequest> pSigTask = m_pUpdateManifestSigTask;
+		std::shared_ptr<IHttpRequest> pManifestTask = m_pUpdateManifestTask;
 		m_pUpdateManifestSigTask = nullptr;
-		const bool SigOk = pSigTask->State() == EHttpState::DONE;
-		if(SigOk)
-		{
-			// Consume the manifest only once the signature bytes are available.
-			// HTTP failures must retain it for the next signature request.
-			std::shared_ptr<IHttpRequest> pManifestDone = m_pUpdateManifestTask;
-			m_pUpdateManifestTask = nullptr;
-			FinishUpdateManifest(pSigTask, pManifestDone);
-			return;
-		}
-		if(m_UpdateDownloadAttempt < 3)
-		{
-			++m_UpdateDownloadAttempt;
-			char aStatus[128];
-			str_format(aStatus, sizeof(aStatus), TCLocalize("Download failed, retrying (%d/%d)..."), m_UpdateDownloadAttempt, 3);
-			SetUpdateStatus(aStatus);
-			m_UpdateRetryAt = Client()->LocalTime() + 2.0f;
-			return;
-		}
-		UpdateFail(TCLocalize("Update check failed: the manifest signature could not be downloaded"));
+		m_pUpdateManifestTask = nullptr;
+		if(pSigTask->State() != EHttpState::DONE)
+			NextUpdateManifestSource(TCLocalize("Update check failed: the manifest signature could not be downloaded"));
+		else
+			FinishUpdateManifest(pSigTask, pManifestTask);
+		return;
+	}
+	if(m_pUpdateHelperTask && m_pUpdateHelperTask->Done())
+	{
+		if(m_pUpdateHelperTask->State() == EHttpState::DONE)
+			FinishUpdateBootstrap();
+		else
+			RetryUpdateDownload(true, TCLocalize("Update rejected: missing bootstrap helper"));
 		return;
 	}
 	if(m_pUpdateDownloadTask && m_pUpdateDownloadTask->Done())
 	{
-		// 注意顺序：FinishUpdateDownload 会读取任务状态，必须先调用再置空，
-		// 否则下载失败（这条线路很常见）时这里就是必然的空指针闪退。
-		const bool Ok = m_pUpdateDownloadTask->State() == EHttpState::DONE;
-		if(Ok)
+		// Finish 会读取当前任务；不得在调用之前把成员置空。
+		if(m_pUpdateDownloadTask->State() == EHttpState::DONE)
 			FinishUpdateDownload();
-		m_pUpdateDownloadTask = nullptr;
-		if(Ok)
-			return;
-		// 下载失败自动重试：这条 GitHub 大文件线路不稳定，中断是常态。
-		// 断点续传由 HTTP 层负责（AllowResume），这里只管发起下一轮。
-		if(m_UpdateDownloadAttempt < 3)
-		{
-			++m_UpdateDownloadAttempt;
-			char aStatus[128];
-			str_format(aStatus, sizeof(aStatus), TCLocalize("Download failed, retrying (%d/%d)..."), m_UpdateDownloadAttempt, 3);
-			SetUpdateStatus(aStatus);
-			log_warn("tclient-update", "download attempt %d failed, retrying", m_UpdateDownloadAttempt);
-			m_UpdateRetryAt = Client()->LocalTime() + 2.0f;
-			return;
-		}
-		FinishUpdateDownload();
+		else
+			RetryUpdateDownload(false, TCLocalize("Download failed or the file is corrupted"));
 		return;
+	}
+	if(m_UpdateRetryAt >= 0 && Client()->LocalTime() >= m_UpdateRetryAt)
+	{
+		const bool Helper = m_UpdateRetryHelper;
+		m_UpdateRetryAt = -1.0f;
+		m_UpdateRetryHelper = false;
+		if(m_UpdateState == EUpdateState::DOWNLOADING && !m_pUpdateDownloadTask && !m_pUpdateHelperTask)
+		{
+			if(Helper)
+				StartUpdateHelperTask();
+			else
+				StartDownloadTask();
+		}
 	}
 }
 
@@ -1570,7 +1640,7 @@ void CTClient::OnShutdown()
 	{
 		wchar_t aWideInstallDir[IO_MAX_PATH_LENGTH];
 		if(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, aInstallDir, -1, aWideInstallDir, std::size(aWideInstallDir)) > 0)
-			StopOwnHelperProcesses(aWideInstallDir);
+			StopOwnHelperProcesses(aWideInstallDir, true);
 	}
 #endif
 }

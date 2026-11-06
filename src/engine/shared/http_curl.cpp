@@ -251,6 +251,8 @@ void CHttpRequestCurl::OnCompletionInternal(CURL *pHandle, CURLcode Code)
 		State = EHttpState::DONE;
 	}
 
+	if(m_ResumeFrom > 0 && (Code == CURLE_RANGE_ERROR || Code == CURLE_BAD_DOWNLOAD_RESUME))
+		m_AllowResume = false;
 	IHttpRequest::OnCompletionInternal(State);
 }
 

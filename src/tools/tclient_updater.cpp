@@ -1045,6 +1045,45 @@ namespace
 		return Attributes != INVALID_FILE_ATTRIBUTES && (Attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 	}
 
+	// Checks existing components before creating or writing a path. Missing components are
+	// allowed. This does not protect against another process replacing a path concurrently.
+	bool CheckNoReparsePoints(const std::wstring &Path, std::string &Error)
+	{
+		const std::wstring FullPath = LongPath(NormalizePathForComparison(Path));
+		size_t Start = 4;
+		if(StartsWithNoCase(FullPath, L"\\\\?\\UNC\\"))
+		{
+			// Skip the server and share; inspect each component inside the share.
+			Start = FullPath.find(L'\\', 8);
+			if(Start != std::wstring::npos)
+				Start = FullPath.find(L'\\', Start + 1);
+		}
+		else
+			Start = FullPath.find(L'\\', Start);
+
+		while(Start != std::wstring::npos && Start < FullPath.size())
+		{
+			const size_t End = FullPath.find(L'\\', Start + 1);
+			const std::wstring Current = FullPath.substr(0, End);
+			const DWORD Attributes = GetFileAttributesW(Current.c_str());
+			if(Attributes == INVALID_FILE_ATTRIBUTES)
+			{
+				const DWORD LastError = GetLastError();
+				if(LastError == ERROR_FILE_NOT_FOUND || LastError == ERROR_PATH_NOT_FOUND)
+					return true;
+				Error = "could not inspect path '" + Utf8FromWide(Current) + "': " + FormatLastError(LastError);
+				return false;
+			}
+			if((Attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+			{
+				Error = "refusing to follow reparse point '" + Utf8FromWide(Current) + "'";
+				return false;
+			}
+			Start = End;
+		}
+		return true;
+	}
+
 	// Creates Path and all missing parents. Path must be absolute.
 	bool EnsureDirectory(const std::wstring &Path, std::string &Error)
 	{
@@ -1053,6 +1092,8 @@ namespace
 			Error = "empty directory path";
 			return false;
 		}
+		if(!CheckNoReparsePoints(Path, Error))
+			return false;
 		if(DirectoryExists(Path))
 			return true;
 
@@ -1104,7 +1145,31 @@ namespace
 
 	bool RemoveTree(const std::wstring &Path, std::string &Error)
 	{
-		if(!DirectoryExists(Path))
+		if(!CheckNoReparsePoints(PathDirectory(Path), Error))
+			return false;
+		const DWORD Attributes = GetFileAttributesW(LongPath(Path).c_str());
+		if(Attributes == INVALID_FILE_ATTRIBUTES)
+		{
+			const DWORD LastError = GetLastError();
+			if(LastError == ERROR_FILE_NOT_FOUND || LastError == ERROR_PATH_NOT_FOUND)
+				return true;
+			Error = "could not inspect directory '" + Utf8FromWide(Path) + "': " + FormatLastError(LastError);
+			return false;
+		}
+		// Junctions, directory symlinks and other reparse points must never be enumerated.
+		// RemoveDirectory/DeleteFile remove the link itself without touching its target.
+		if((Attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+		{
+			const bool Removed = (Attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ?
+				RemoveDirectoryW(LongPath(Path).c_str()) != 0 : DeleteFileW(LongPath(Path).c_str()) != 0;
+			if(!Removed)
+			{
+				Error = "could not remove reparse point '" + Utf8FromWide(Path) + "': " + FormatLastError(GetLastError());
+				return false;
+			}
+			return true;
+		}
+		if((Attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
 			return true;
 
 		const std::wstring Pattern = JoinPath(Path, L"*");
@@ -2013,6 +2078,14 @@ namespace
 		for(size_t Index = InstalledCount; Index > 0; Index--)
 		{
 			const SInstalledFile &Record = Installed[Index - 1];
+			std::string PathError;
+			if(!CheckNoReparsePoints(Record.m_TargetPath, PathError) ||
+				(Record.m_HadBackup && !CheckNoReparsePoints(Record.m_BackupPath, PathError)))
+			{
+				Complete = false;
+				g_Logger.Error("unsafe rollback path: %s", PathError.c_str());
+				continue;
+			}
 			ClearReadOnly(Record.m_TargetPath);
 			if(Record.m_HadBackup)
 			{
@@ -2044,6 +2117,12 @@ namespace
 		// archive entry. Copying is allowed while this process still executes the renamed image.
 		if(!RenamedOwnExecutable.empty())
 		{
+			std::string PathError;
+			if(!CheckNoReparsePoints(OwnExecutable, PathError) || !CheckNoReparsePoints(RenamedOwnExecutable, PathError))
+			{
+				g_Logger.Error("unsafe fallback helper rollback path: %s", PathError.c_str());
+				return false;
+			}
 			ClearReadOnly(OwnExecutable);
 			if(CopyFileW(LongPath(RenamedOwnExecutable).c_str(), LongPath(OwnExecutable).c_str(), FALSE))
 				g_Logger.Info("restored fallback helper '%s' from '%s'", Utf8FromWide(OwnExecutable).c_str(), Utf8FromWide(RenamedOwnExecutable).c_str());
@@ -2132,6 +2211,12 @@ namespace
 		g_Logger.Info("restart: %s", Utf8FromWide(RestartPath).c_str());
 		g_Logger.Info("pid: %lu", Options.m_Pid);
 
+		std::string FileError;
+		if(!CheckNoReparsePoints(TargetDir, FileError))
+		{
+			g_Logger.Error("unsafe target directory: %s", FileError.c_str());
+			return EXIT_FILE_SYSTEM;
+		}
 		if(!DirectoryExists(TargetDir))
 		{
 			g_Logger.Error("target directory does not exist: %s", Utf8FromWide(TargetDir).c_str());
@@ -2228,6 +2313,15 @@ namespace
 		}
 		g_Logger.Info("planned: %llu entries, %llu skipped, %llu bytes", (unsigned long long)Planned.size(), (unsigned long long)Skipped, (unsigned long long)PlannedBytes);
 
+		for(const SPlannedEntry &Entry : Planned)
+		{
+			if(!CheckNoReparsePoints(JoinPath(TargetDir, Entry.m_RelativePath), FileError))
+			{
+				g_Logger.Error("unsafe installation path: %s", FileError.c_str());
+				return FinishFailure(EXIT_FILE_SYSTEM);
+			}
+		}
+
 		std::vector<std::wstring> PlannedExecutablePaths;
 		bool HelperExecutablePlanned = false;
 		for(const SPlannedEntry &Entry : Planned)
@@ -2243,7 +2337,6 @@ namespace
 
 		// 5. Extract everything into the staging directory first.
 		const std::wstring StagingDir = JoinPath(TargetDir, L"update_staging_" + std::to_wstring(Options.m_Pid));
-		std::string FileError;
 		if(!RemoveTree(StagingDir, FileError))
 		{
 			g_Logger.Error("could not clean the staging directory: %s", FileError.c_str());
@@ -2318,6 +2411,12 @@ namespace
 						return FinishFailure(EXIT_FILE_SYSTEM);
 					}
 				}
+				if(!CheckNoReparsePoints(Record.m_TargetPath, FileError) || !CheckNoReparsePoints(Record.m_BackupPath, FileError))
+				{
+					g_Logger.Error("unsafe backup path: %s", FileError.c_str());
+					RemoveTree(StagingDir, FileError);
+					return FinishFailure(EXIT_FILE_SYSTEM);
+				}
 				if(!CopyFileW(LongPath(Record.m_TargetPath).c_str(), LongPath(Record.m_BackupPath).c_str(), FALSE))
 				{
 					g_Logger.Error("could not back up '%s': %s", Utf8FromWide(Record.m_TargetPath).c_str(), FormatLastError(GetLastError()).c_str());
@@ -2339,6 +2438,13 @@ namespace
 			if(OwnExecutable.empty() || !SamePath(Destination, OwnExecutable))
 				continue;
 			RenamedOwnExecutable = OwnExecutable + L".old_" + TimestampSuffix();
+			if(!CheckNoReparsePoints(OwnExecutable, FileError) || !CheckNoReparsePoints(RenamedOwnExecutable, FileError))
+			{
+				RenamedOwnExecutable.clear();
+				g_Logger.Error("unsafe helper replacement path: %s", FileError.c_str());
+				RemoveTree(StagingDir, FileError);
+				return FinishFailure(EXIT_FILE_SYSTEM);
+			}
 			if(!MoveFileExW(LongPath(OwnExecutable).c_str(), LongPath(RenamedOwnExecutable).c_str(), MOVEFILE_REPLACE_EXISTING))
 			{
 				RenamedOwnExecutable.clear();
@@ -2361,7 +2467,11 @@ namespace
 			const size_t Slash = Destination.find_last_of(L'\\');
 			bool Replaced = false;
 			DWORD MoveError = ERROR_SUCCESS;
-			if(Slash != std::wstring::npos && !EnsureDirectory(Destination.substr(0, Slash), DirectoryError))
+			if(!CheckNoReparsePoints(Source, DirectoryError) || !CheckNoReparsePoints(Destination, DirectoryError))
+			{
+				g_Logger.Error("unsafe replacement path: %s", DirectoryError.c_str());
+			}
+			else if(Slash != std::wstring::npos && !EnsureDirectory(Destination.substr(0, Slash), DirectoryError))
 			{
 				g_Logger.Error("could not create the target directory: %s", DirectoryError.c_str());
 			}
@@ -2514,13 +2624,12 @@ int wmain(int argc, wchar_t **argv)
 	}
 
 	const std::wstring LogPath = GetFullPath(Options.m_LogPath);
-	{
-		std::string LogDirError;
-		const size_t LogSlash = LogPath.find_last_of(L'\\');
-		if(LogSlash != std::wstring::npos)
-			EnsureDirectory(LogPath.substr(0, LogSlash), LogDirError);
-	}
-	if(!g_Logger.Open(LogPath))
+	std::string LogPathError;
+	const size_t LogSlash = LogPath.find_last_of(L'\\');
+	if(!CheckNoReparsePoints(LogPath, LogPathError) ||
+		(LogSlash != std::wstring::npos && !EnsureDirectory(LogPath.substr(0, LogSlash), LogPathError)))
+		fprintf(stderr, "warning: could not prepare log file '%s': %s\n", Utf8FromWide(LogPath).c_str(), LogPathError.c_str());
+	else if(!g_Logger.Open(LogPath))
 		fprintf(stderr, "warning: could not open log file '%s': %s\n", Utf8FromWide(LogPath).c_str(), FormatLastError(GetLastError()).c_str());
 
 	g_Logger.Info("TClientUpdater starting (argv[0]=%s)", argc > 0 ? Utf8FromWide(argv[0]).c_str() : "");

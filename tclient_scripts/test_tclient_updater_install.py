@@ -571,6 +571,117 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         self.assertFalse(list(self.target.glob(".tclient-update-ready-*.tmp")))
         self.passed(zip_deleted=True, new_client_alive=True)
 
+    def make_junction(self, link: Path, destination: Path) -> None:
+        self.assertTrue(link.absolute().is_relative_to(self.temp_root))
+        self.assertTrue(destination.resolve().is_relative_to(self.temp_root))
+        link.parent.mkdir(parents=True, exist_ok=True)
+        batch = self.tools / "create-test-junction.cmd"
+        batch.write_text(
+            f'@echo off\nchcp 65001 >nul\nmklink /J "{link}" "{destination}"\n',
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", batch.name],
+            cwd=self.tools, capture_output=True, timeout=10, creationflags=CREATE_NO_WINDOW,
+        )
+        self.assertEqual(result.returncode, 0, repr(result.stdout + result.stderr))
+        self.assertEqual(link.resolve(), destination.resolve())
+        self.addCleanup(lambda: link.rmdir() if link.is_junction() else None)
+
+    def test_staging_root_junction_preserves_external_files(self) -> None:
+        self.staging_junction_cleanup(root_link=True)
+
+    def test_staging_child_junction_preserves_external_files(self) -> None:
+        self.staging_junction_cleanup(root_link=False)
+
+    def staging_junction_cleanup(self, root_link: bool) -> None:
+        self.install_old()
+        outside = self.case / "outside staging"
+        outside.mkdir()
+        sentinel = outside / "must-survive.txt"
+        sentinel.write_bytes(b"outside staging sentinel")
+        staging = self.target / "update_staging_0"
+        link = staging if root_link else staging / "linked directory"
+        self.make_junction(link, outside)
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes()), ("payload.txt", b"new payload")])
+        self.assert_code(self.run_updater(), 0)
+        self.assertEqual(sentinel.read_bytes(), b"outside staging sentinel")
+        self.assertEqual(sorted(path.name for path in outside.iterdir()), [sentinel.name])
+        self.assertEqual((self.target / "payload.txt").read_bytes(), b"new payload")
+        self.assertFalse(staging.exists())
+        self.assertTrue(self.alive(self.event_pid(self.new_event)))
+        self.passed(root_link=root_link, outside_sentinel_preserved=True)
+
+    def test_backup_pruning_preserves_external_junction_targets(self) -> None:
+        self.install_old()
+        outside = self.case / "outside old backups"
+        outside.mkdir()
+        sentinel = outside / "must-survive.txt"
+        sentinel.write_bytes(b"outside backup sentinel")
+        root_backup = self.target / "update_backup_00000000_000000"
+        child_backup = self.target / "update_backup_00000000_000001"
+        self.make_junction(root_backup, outside)
+        self.make_junction(child_backup / "linked directory", outside)
+        (child_backup / "ordinary.txt").write_bytes(b"discard old backup")
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])
+        self.assert_code(self.run_updater(), 0)
+        self.assertEqual(sentinel.read_bytes(), b"outside backup sentinel")
+        self.assertEqual(sorted(path.name for path in outside.iterdir()), [sentinel.name])
+        self.assertFalse(root_backup.exists())
+        self.assertFalse(child_backup.exists())
+        self.assertEqual(len(list(self.target.glob("update_backup_*"))), 1)
+        self.passed(outside_sentinel_preserved=True, root_and_child_backup_pruned=True)
+
+    def test_installation_parent_junction_is_rejected(self) -> None:
+        original_hash = self.install_old()
+        outside = self.case / "outside installation"
+        outside.mkdir()
+        sentinel = outside / "must-survive.txt"
+        sentinel.write_bytes(b"outside installation sentinel")
+        self.make_junction(self.target / "data", outside)
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes()), ("data/must-survive.txt", b"replacement")])
+        log = self.assert_code(self.run_updater(), 7)
+        self.assertIn("refusing to follow reparse point", log)
+        self.assertEqual(sentinel.read_bytes(), b"outside installation sentinel")
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), original_hash)
+        self.assertTrue(self.archive.exists())
+        self.assertTrue(self.alive(self.event_pid(self.old_event)))
+        self.assertFalse(list(self.target.glob("update_backup_*")))
+        self.passed(outside_sentinel_preserved=True, installation_rejected_before_backup=True)
+
+    def test_existing_backup_junction_is_rejected(self) -> None:
+        self.backup_junction_rejected(root_link=True)
+
+    def test_existing_backup_child_junction_is_rejected(self) -> None:
+        self.backup_junction_rejected(root_link=False)
+
+    def backup_junction_rejected(self, root_link: bool) -> None:
+        from datetime import datetime, timedelta
+
+        original_hash = self.install_old()
+        outside = self.case / "outside new backup"
+        outside.mkdir()
+        sentinel = outside / "must-survive.txt"
+        sentinel.write_bytes(b"outside new backup sentinel")
+        (self.target / "data").mkdir()
+        (self.target / "data" / sentinel.name).write_bytes(b"old installed contents")
+        # The helper uses local time to the second. Pre-create a bounded window of names
+        # so the actual helper deterministically encounters a link, without a timing race.
+        now = datetime.now()
+        for offset in range(-5, 61):
+            backup = self.target / ("update_backup_" + (now + timedelta(seconds=offset)).strftime("%Y%m%d_%H%M%S"))
+            self.make_junction(backup if root_link else backup / "data", outside)
+        write_zip(self.archive, [("data/must-survive.txt", b"replacement")])
+        log = self.assert_code(self.run_updater(), 7)
+        self.assertIn("refusing to follow reparse point", log)
+        self.assertEqual(sentinel.read_bytes(), b"outside new backup sentinel")
+        self.assertEqual(sorted(path.name for path in outside.iterdir()), [sentinel.name])
+        self.assertEqual((self.target / "data" / sentinel.name).read_bytes(), b"old installed contents")
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), original_hash)
+        self.assertTrue(self.archive.exists())
+        self.assertTrue(self.alive(self.event_pid(self.old_event)))
+        self.passed(root_link=root_link, outside_sentinel_preserved=True, backup_write_rejected=True)
+
     def test_success_closes_exact_target_processes_only_and_media_race(self) -> None:
         names = ("DDNet.exe", "DDNet-Server.exe", "island_media_monitor.exe", "netease-watcher.exe", "TClientUpdater.exe.old_fixture")
         for name in names:

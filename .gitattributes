@@ -2,3 +2,7 @@ README.md merge=ours
 
 other/*/include/* linguist-vendored
 src/engine/external/* linguist-vendored
+
+# Signatures cover the manifest's exact bytes on every platform.
+update/TClient-update-win64.json -text
+update/TClient-update-win64.json.sig -text

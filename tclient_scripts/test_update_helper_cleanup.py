@@ -19,7 +19,7 @@ import traceback
 
 
 FUNCTION = re.compile(
-    rb"^static void StopOwnHelperProcesses\(const wchar_t \*pInstallDir\)\r?\n\{.*?^\}",
+    rb"^static void StopOwnHelperProcesses\(const wchar_t \*pInstallDir(?:, bool OnlyIfLastClient = false)?\)\r?\n\{.*?^\}",
     re.MULTILINE | re.DOTALL,
 )
 SOURCE = Path("src/game/client/components/tclient/tclient.cpp")
@@ -126,7 +126,7 @@ def stop_tracked(process, evidence):
         process._handle.Close()
 
 
-def run_case(sandbox, fixture, wrapper, number, name, path_style, baseline, report):
+def run_case(sandbox, fixture, wrapper, number, name, path_style, legacy_prefix, report, variant):
     case_root = sandbox / "spaces 中文" / ("case " + str(number))
     target = case_root / "target"
     locations = {
@@ -135,7 +135,7 @@ def run_case(sandbox, fixture, wrapper, number, name, path_style, baseline, repo
         "nested": target / "nested 子目录",
         "another": case_root / "another 其他安装",
     }
-    case = {"name": name, "variant": "HEAD" if baseline else "current",
+    case = {"name": name, "variant": variant,
             "processes": [], "cleanup_errors": []}
     report["cases"].append(case)
     tracked = []
@@ -177,7 +177,7 @@ def run_case(sandbox, fixture, wrapper, number, name, path_style, baseline, repo
         for process, row in tracked:
             row["exit_code_after_cleanup"] = process.poll()
             row["alive_after_cleanup"] = row["exit_code_after_cleanup"] is None
-            expected_dead = row["role"] == "target" or (baseline and row["role"] in ("target-old", "nested"))
+            expected_dead = row["role"] == "target" or (legacy_prefix and row["role"] in ("target-old", "nested"))
             row["expected_alive"] = not expected_dead
             row["passed"] = row["alive_after_cleanup"] == row["expected_alive"]
             if expected_dead:
@@ -204,6 +204,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--baseline", default="HEAD",
+                        help="Git revision to compare; defaults to the current strict-path HEAD")
+    parser.add_argument("--baseline-legacy-prefix", action="store_true",
+                        help="Expect target-old/nested termination only for a genuinely old prefix-matching revision")
     parser.add_argument("--vcvars", type=Path,
                         default=Path("C:/VS2026/BuildTools/VC/Auxiliary/Build/vcvars64.bat"))
     args = parser.parse_args()
@@ -237,11 +241,13 @@ def main():
             raise FileNotFoundError(args.vcvars)
         current_bytes = (repo / SOURCE).read_bytes()
         current_function, current_line = extract(current_bytes)
-        head = command(["git", "-C", repo, "rev-parse", "HEAD"], repo)
-        baseline = command(["git", "-C", repo, "show", "HEAD:" + SOURCE.as_posix()], repo)
+        head = command(["git", "-C", repo, "rev-parse", args.baseline], repo)
+        baseline = command(["git", "-C", repo, "show", args.baseline + ":" + SOURCE.as_posix()], repo)
         if head.returncode or baseline.returncode:
-            raise RuntimeError("Cannot read HEAD baseline from git")
-        report["head_commit"] = head.stdout.decode("ascii").strip()
+            raise RuntimeError("Cannot read baseline revision from git: " + args.baseline)
+        report["baseline_revision"] = args.baseline
+        report["baseline_commit"] = head.stdout.decode("ascii").strip()
+        report["baseline_legacy_prefix_expected"] = args.baseline_legacy_prefix
         baseline_function, baseline_line = extract(baseline.stdout)
         for name, function, line in (("current", current_function, current_line),
                                      ("head", baseline_function, baseline_line)):
@@ -289,9 +295,12 @@ def main():
         )
         for number, (name, style) in enumerate(cases, start=1):
             run_case(sandbox, build / "fixture.exe", build / "current.exe", number,
-                     name, style, False, report)
+                     name, style, False, report, "current")
+        baseline_name = ("legacy prefix collision reproduction" if args.baseline_legacy_prefix
+                         else "strict full-image-path isolation")
         run_case(sandbox, build / "fixture.exe", build / "head.exe", 5,
-                 "HEAD prefix collision regression", "native", True, report)
+                 args.baseline + " " + baseline_name, "native", args.baseline_legacy_prefix,
+                 report, args.baseline)
         report["production_function_unchanged_during_test"] = (
             extract((repo / SOURCE).read_bytes())[0] == current_function)
         if not report["production_function_unchanged_during_test"]:

@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag for the release (e.g., v1.0.0). Did you remember to bump the version.h?'
+        description: 'Existing release tag matching the build commit and version.h (e.g., v1.7.8.55)'
         required: true
       release_name:
         description: 'Name of the release'
@@ -14,41 +14,302 @@ on:
         description: 'Release description'
         required: false
       run_id:
-        description: 'Run ID of the build workflow to download artifacts from'
+        description: 'Successful push build run containing the complete Windows package and other OS artifacts'
         required: true
 
+permissions:
+  contents: read
+
+env:
+  BUILD_PREFIX: ddnet
+  CLIENT_NAME: TClient
+  TARGET_REPOSITORY: ${{ github.repository }}
+
 jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - name: Bind the existing tag to the successful build source
+        id: source
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ inputs.tag_name }}
+          BUILD_RUN_ID: ${{ inputs.run_id }}
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const runId = process.env.BUILD_RUN_ID;
+            if (!/^v\d+\.\d+\.\d+\.\d+$/.test(tag) || !/^[1-9]\d*$/.test(runId)) {
+              throw new Error('Use an existing vA.B.C.D tag and a numeric build run ID.');
+            }
+            const repo = context.repo;
+            const {data: run} = await github.rest.actions.getWorkflowRun({...repo, run_id: runId});
+            const repository = `${repo.owner}/${repo.repo}`;
+            const allowedWorkflows = ['.github/workflows/build.yml', '.github/workflows/fast-build.yml'];
+            if (run.status !== 'completed' || run.conclusion !== 'success' || run.event !== 'push' ||
+                run.head_repository?.full_name !== repository || run.repository?.full_name !== repository ||
+                !allowedWorkflows.includes(run.path?.split('@')[0])) {
+              throw new Error('Build run must be a successful completed push in this repository using build.yml or fast-build.yml.');
+            }
+            const {data: ref} = await github.rest.git.getRef({...repo, ref: `tags/${tag}`});
+            let object = ref.object;
+            for (let depth = 0; object.type === 'tag' && depth < 8; depth++) {
+              const {data: annotated} = await github.rest.git.getTag({...repo, tag_sha: object.sha});
+              object = annotated.object;
+            }
+            if (object.type !== 'commit' || object.sha !== run.head_sha) {
+              throw new Error('Release tag and artifact build must refer to exactly the same commit.');
+            }
+            core.setOutput('commit', object.sha);
+            core.setOutput('version', tag.slice(1));
+            core.info(`Release source verified: ${tag} at ${object.sha}`);
+
+  windows-assets:
+    needs: source
+    runs-on: windows-2022
+    environment: release
+    permissions:
+      actions: read
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout the verified release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check release tools and signing material before processing artifacts
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+          TCLIENT_UPDATE_ED25519_PRIVATE_KEY: ${{ secrets.TCLIENT_UPDATE_ED25519_PRIVATE_KEY }}
+          TCLIENT_WINDOWS_PFX_BASE64: ${{ secrets.TCLIENT_WINDOWS_PFX_BASE64 }}
+          TCLIENT_WINDOWS_PFX_PASSWORD: ${{ secrets.TCLIENT_WINDOWS_PFX_PASSWORD }}
+          TCLIENT_WINDOWS_CERT_THUMBPRINT: ${{ secrets.TCLIENT_WINDOWS_CERT_THUMBPRINT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('TCLIENT_UPDATE_ED25519_PRIVATE_KEY', 'TCLIENT_WINDOWS_PFX_BASE64', 'TCLIENT_WINDOWS_PFX_PASSWORD', 'TCLIENT_WINDOWS_CERT_THUMBPRINT')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing release environment secret: $name. Official Windows assets require a trusted code-signing certificate and the matching Ed25519 key."
+            }
+          }
+          if (($env:TCLIENT_WINDOWS_CERT_THUMBPRINT -replace '\s', '') -notmatch '^[0-9A-Fa-f]{40}$') {
+            throw 'TCLIENT_WINDOWS_CERT_THUMBPRINT must explicitly identify the PFX code-signing certificate.'
+          }
+          $header = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'src/game/version.h') -Raw
+          $version = [regex]::Match($header, '(?m)^#define\s+TCLIENT_APP_VERSION\s+"([^"]+)"').Groups[1].Value
+          if ($version -ne $env:RELEASE_VERSION) { throw 'Release tag does not match TCLIENT_APP_VERSION in the selected commit.' }
+          foreach ($script in @('prepare_release_stage.py', 'windows_sign_release.ps1', 'make_release_assets.py')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "tclient_scripts/$script") -PathType Leaf)) {
+              throw "The selected release commit is missing tclient_scripts/$script."
+            }
+          }
+          $work = Join-Path $env:RUNNER_TEMP ("tclient-release-" + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $work, (Join-Path $work 'input') | Out-Null
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "TCLIENT_RELEASE_WORK=$work"
+
+      - name: Set up release Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install manifest signing dependency
+        run: python -I -m pip install --disable-pip-version-check cryptography
+
+      - name: Download the verified Windows build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.BUILD_PREFIX }}-windows-latest
+          path: ${{ env.TCLIENT_RELEASE_WORK }}/input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ env.TARGET_REPOSITORY }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Prepare a clean stage and external provenance inventory
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archives = @(Get-ChildItem -LiteralPath (Join-Path $env:TCLIENT_RELEASE_WORK 'input') -File -Recurse)
+          if ($archives.Count -ne 1 -or $archives[0].Extension -ne '.zip') {
+            throw 'The Windows build artifact must contain exactly one complete packaged-build ZIP.'
+          }
+          $extracted = Join-Path $env:TCLIENT_RELEASE_WORK 'extracted'
+          New-Item -ItemType Directory -Path $extracted | Out-Null
+          $archive = [IO.Compression.ZipFile]::OpenRead($archives[0].FullName)
+          try {
+            foreach ($entry in $archive.Entries) {
+              $name = $entry.FullName -replace '\\', '/'
+              if ([IO.Path]::IsPathRooted($name) -or $name.Contains(':') -or $name.Split('/') -contains '..' -or
+                  (($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
+                throw 'Windows build ZIP contains an unsafe path or symbolic link.'
+              }
+            }
+          } finally { $archive.Dispose() }
+          [IO.Compression.ZipFile]::ExtractToDirectory($archives[0].FullName, $extracted)
+          $clients = @(Get-ChildItem -LiteralPath $extracted -Filter DDNet.exe -File -Recurse)
+          if ($clients.Count -ne 1) { throw 'Windows build ZIP must contain exactly one packaged DDNet.exe.' }
+          $build = $clients[0].Directory.FullName
+          foreach ($file in @('island_media_monitor.exe', 'netease-watcher.exe', 'wndhok.dll', 'steam_api.dll', 'discord_game_sdk.dll', 'vulkan-1.dll')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $build $file) -PathType Leaf)) {
+              throw "Incomplete Windows build artifact: missing root $file. Supply the complete reviewed package; historical hosted builds may omit the music helpers."
+            }
+          }
+          # Only the first-party updater may be rebuilt, from the exact verified source.
+          if (-not (Test-Path -LiteralPath (Join-Path $build 'TClientUpdater.exe') -PathType Leaf)) {
+            $helperBuild = Join-Path $env:TCLIENT_RELEASE_WORK 'updater-build'
+            cmake -S $env:GITHUB_WORKSPACE -B $helperBuild -G 'Visual Studio 17 2022' -A x64 -DCLIENT=OFF -DSERVER=OFF -DTOOLS=OFF -DDOWNLOAD_GTEST=OFF -DPREFER_BUNDLED_LIBS=ON -DDEV=ON
+            if ($LASTEXITCODE -ne 0) { throw 'Native Windows updater configuration failed.' }
+            cmake --build $helperBuild --config Release --target TClientUpdater --parallel 2
+            if ($LASTEXITCODE -ne 0) { throw 'Native Windows updater build failed.' }
+            Copy-Item -LiteralPath (Join-Path $helperBuild 'Release/TClientUpdater.exe') -Destination (Join-Path $build 'TClientUpdater.exe')
+          }
+          $stage = Join-Path $env:TCLIENT_RELEASE_WORK 'stage'
+          $inventory = Join-Path $env:TCLIENT_RELEASE_WORK 'stage-inventory.json'
+          $assets = Join-Path $env:TCLIENT_RELEASE_WORK 'assets'
+          New-Item -ItemType Directory -Path $assets | Out-Null
+          python -I (Join-Path $env:GITHUB_WORKSPACE 'tclient_scripts/prepare_release_stage.py') `
+            --build-dir $build --output $stage --report $inventory --resources $build `
+            --data-dir (Join-Path $env:GITHUB_WORKSPACE 'data') `
+            --monitor (Join-Path $build 'island_media_monitor.exe') `
+            --watcher (Join-Path $build 'netease-watcher.exe') --hook-dll (Join-Path $build 'wndhok.dll')
+          if ($LASTEXITCODE -ne 0) { throw 'Clean release stage preparation failed.' }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "TCLIENT_RELEASE_STAGE=$stage"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "TCLIENT_RELEASE_INVENTORY=$inventory"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "TCLIENT_RELEASE_ASSETS=$assets"
+
+      - name: Sign first-party executables, verify all PE files, then package
+        env:
+          RELEASE_VERSION: ${{ needs.source.outputs.version }}
+          RELEASE_BODY: ${{ inputs.body }}
+          TCLIENT_UPDATE_ED25519_PRIVATE_KEY: ${{ secrets.TCLIENT_UPDATE_ED25519_PRIVATE_KEY }}
+          TCLIENT_WINDOWS_PFX_BASE64: ${{ secrets.TCLIENT_WINDOWS_PFX_BASE64 }}
+          TCLIENT_WINDOWS_PFX_PASSWORD: ${{ secrets.TCLIENT_WINDOWS_PFX_PASSWORD }}
+          TCLIENT_WINDOWS_CERT_THUMBPRINT: ${{ secrets.TCLIENT_WINDOWS_CERT_THUMBPRINT }}
+          TCLIENT_WINDOWS_TIMESTAMP_URL: ${{ vars.TCLIENT_WINDOWS_TIMESTAMP_URL || 'https://timestamp.digicert.com' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfxPath = Join-Path $env:TCLIENT_RELEASE_WORK 'code-signing.pfx'
+          $keyPath = Join-Path $env:TCLIENT_RELEASE_WORK 'manifest-signing.pem'
+          $notesPath = Join-Path $env:TCLIENT_RELEASE_WORK 'release-notes.txt'
+          $store = 'Cert:\CurrentUser\My'
+          $before = @(Get-ChildItem -Path $store | ForEach-Object { $_.Thumbprint })
+          $pfxThumbprints = @()
+          $password = $null
+          try {
+            $thumbprint = ($env:TCLIENT_WINDOWS_CERT_THUMBPRINT -replace '\s', '').ToUpperInvariant()
+            $timestamp = [uri]$env:TCLIENT_WINDOWS_TIMESTAMP_URL
+            if (-not $timestamp.IsAbsoluteUri -or $timestamp.Scheme -ne 'https') { throw 'Timestamp URL must be absolute HTTPS.' }
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:TCLIENT_WINDOWS_PFX_BASE64))
+            $password = ConvertTo-SecureString -String $env:TCLIENT_WINDOWS_PFX_PASSWORD -AsPlainText -Force
+            $pfxData = Get-PfxData -FilePath $pfxPath -Password $password
+            $pfxThumbprints = @(@($pfxData.EndEntityCertificates) + @($pfxData.OtherCertificates) | Where-Object { $null -ne $_ } | ForEach-Object { $_.Thumbprint })
+            if ($thumbprint -notin @($pfxData.EndEntityCertificates | ForEach-Object { $_.Thumbprint })) {
+              throw 'The explicitly configured signing certificate is absent from the supplied PFX.'
+            }
+            Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation $store -Password $password | Out-Null
+            $certificate = Get-Item -LiteralPath "$store\$thumbprint"
+            if (-not $certificate.HasPrivateKey) { throw 'The selected code-signing certificate has no private key.' }
+            $utf8 = [Text.UTF8Encoding]::new($false)
+            [IO.File]::WriteAllText($keyPath, $env:TCLIENT_UPDATE_ED25519_PRIVATE_KEY, $utf8)
+            [IO.File]::WriteAllText($notesPath, $env:RELEASE_BODY, $utf8)
+            foreach ($name in @('TCLIENT_UPDATE_ED25519_PRIVATE_KEY', 'TCLIENT_WINDOWS_PFX_BASE64', 'TCLIENT_WINDOWS_PFX_PASSWORD')) {
+              [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+            }
+            $signer = Join-Path $env:GITHUB_WORKSPACE 'tclient_scripts/windows_sign_release.ps1'
+            powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $signer `
+              -Directory $env:TCLIENT_RELEASE_STAGE -Mode Sign -CertificateThumbprint $thumbprint `
+              -CertificateStoreLocation CurrentUser -TimestampUrl $timestamp.AbsoluteUri
+            if ($LASTEXITCODE -ne 0) { throw 'Trusted timestamped Authenticode signing failed.' }
+            $packager = Join-Path $env:GITHUB_WORKSPACE 'tclient_scripts/make_release_assets.py'
+            $fullZip = Join-Path $env:TCLIENT_RELEASE_ASSETS 'TClient-windows.zip'
+            $raw = Join-Path $env:GITHUB_WORKSPACE 'update'
+            python -I $packager --source $env:TCLIENT_RELEASE_STAGE --stage-inventory $env:TCLIENT_RELEASE_INVENTORY `
+              --version $env:RELEASE_VERSION --output $env:TCLIENT_RELEASE_ASSETS --private-key $keyPath `
+              --full-zip $fullZip --raw-manifest-dir $raw --notes-file $notesPath --quiet
+            if ($LASTEXITCODE -ne 0) { throw 'Strict Windows release packaging failed.' }
+            python -I $packager --verify --require-authenticode --stage-inventory $env:TCLIENT_RELEASE_INVENTORY `
+              --version $env:RELEASE_VERSION --output $env:TCLIENT_RELEASE_ASSETS --full-zip $fullZip --raw-manifest-dir $raw
+            if ($LASTEXITCODE -ne 0) { throw 'Final signed Windows assets failed read-only verification.' }
+            foreach ($file in @('TClient-windows.zip', 'TClient-update-win64.zip', 'TClient-update-win64.json', 'TClient-update-win64.json.sig', 'TClientUpdater.exe', 'DDNet.exe')) {
+              $asset = Get-Item -LiteralPath (Join-Path $env:TCLIENT_RELEASE_ASSETS $file)
+              if ($asset.Length -eq 0) { throw "Required signed release asset is empty: $file" }
+            }
+            if ((Get-Item -LiteralPath (Join-Path $env:TCLIENT_RELEASE_ASSETS 'TClient-update-win64.json.sig')).Length -ne 64) {
+              throw 'Ed25519 manifest signature must contain exactly 64 raw bytes.'
+            }
+            foreach ($file in @('DDNet.exe', 'TClientUpdater.exe')) {
+              if ((Get-FileHash -LiteralPath (Join-Path $env:TCLIENT_RELEASE_ASSETS $file) -Algorithm SHA256).Hash -ne
+                  (Get-FileHash -LiteralPath (Join-Path $env:TCLIENT_RELEASE_STAGE $file) -Algorithm SHA256).Hash) {
+                throw "Standalone $file differs from its verified signed stage copy."
+              }
+            }
+            $audit = Join-Path $env:TCLIENT_RELEASE_WORK 'audit'
+            New-Item -ItemType Directory -Path $audit, (Join-Path $audit 'update') | Out-Null
+            Copy-Item -LiteralPath $env:TCLIENT_RELEASE_INVENTORY -Destination (Join-Path $audit 'stage-inventory.json')
+            foreach ($file in @('TClient-update-win64.json', 'TClient-update-win64.json.sig')) {
+              Copy-Item -LiteralPath (Join-Path $raw $file) -Destination (Join-Path $audit "update/$file")
+            }
+          } finally {
+            $cleanupFailed = $false
+            foreach ($path in @($keyPath, $pfxPath)) {
+              if (Test-Path -LiteralPath $path) {
+                try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop } catch { $cleanupFailed = $true }
+              }
+            }
+            # Includes partial imports; never remove a pre-existing or unrelated certificate.
+            foreach ($importedThumbprint in $pfxThumbprints | Select-Object -Unique) {
+              $path = "$store\$importedThumbprint"
+              if ($importedThumbprint -notin $before -and (Test-Path -LiteralPath $path)) {
+                try { Remove-Item -LiteralPath $path -DeleteKey -Force -ErrorAction Stop } catch { $cleanupFailed = $true }
+              }
+            }
+            if ($null -ne $password) { $password.Dispose() }
+            if ($cleanupFailed) { throw 'Temporary release signing material could not be completely removed.' }
+          }
+
+      - name: Keep the provenance inventory and exact raw manifest pair for internal audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-audit
+          path: ${{ env.TCLIENT_RELEASE_WORK }}/audit/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Hand off only the six verified Windows release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-windows-release
+          path: |
+            ${{ env.TCLIENT_RELEASE_ASSETS }}/TClient-windows.zip
+            ${{ env.TCLIENT_RELEASE_ASSETS }}/TClient-update-win64.zip
+            ${{ env.TCLIENT_RELEASE_ASSETS }}/TClient-update-win64.json
+            ${{ env.TCLIENT_RELEASE_ASSETS }}/TClient-update-win64.json.sig
+            ${{ env.TCLIENT_RELEASE_ASSETS }}/TClientUpdater.exe
+            ${{ env.TCLIENT_RELEASE_ASSETS }}/DDNet.exe
+          if-no-files-found: error
+          retention-days: 7
+
   release:
+    needs: [source, windows-assets]
     runs-on: ubuntu-latest
     environment: release
     permissions:
       actions: read
       contents: write
-
-    env:
-      BUILD_PREFIX: ddnet
-      CLIENT_NAME: TClient
-      TARGET_REPOSITORY: ${{ github.repository }} 
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout the verified release source
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
-
-      - name: Check release signing material
-        env:
-          TCLIENT_UPDATE_ED25519_PRIVATE_KEY: ${{ secrets.TCLIENT_UPDATE_ED25519_PRIVATE_KEY }}
-        run: |
-          if [ -z "$TCLIENT_UPDATE_ED25519_PRIVATE_KEY" ]; then
-            echo "::error::Missing release environment secret TCLIENT_UPDATE_ED25519_PRIVATE_KEY (unencrypted Ed25519 PEM matching update_public_key.h)"
-            exit 1
-          fi
-
-      - name: Install release tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-mingw-w64-x86-64-posix python3-cryptography
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
 
       - name: Download Ubuntu artifact
         uses: actions/download-artifact@v4
@@ -57,16 +318,7 @@ jobs:
           path: ./artifacts/ubuntu
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ env.TARGET_REPOSITORY }}
-          run-id: ${{ github.event.inputs.run_id }}
-
-      - name: Download Windows artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.BUILD_PREFIX }}-windows-latest
-          path: ./artifacts/windows
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ env.TARGET_REPOSITORY }}
-          run-id: ${{ github.event.inputs.run_id }}
+          run-id: ${{ inputs.run_id }}
 
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
@@ -75,7 +327,7 @@ jobs:
           path: ./artifacts/macOS
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ env.TARGET_REPOSITORY }}
-          run-id: ${{ github.event.inputs.run_id }}
+          run-id: ${{ inputs.run_id }}
 
       - name: Download Android artifact
         uses: actions/download-artifact@v4
@@ -84,93 +336,35 @@ jobs:
           path: ./artifacts/android
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ env.TARGET_REPOSITORY }}
-          run-id: ${{ github.event.inputs.run_id }}
+          run-id: ${{ inputs.run_id }}
 
-      - name: Rename and Move Artifacts
-        run: |
-          declare -a multi_ext=("tar.gz" "tar.bz2" "tar.xz" "tar.Z")
+      - name: Download the final signed Windows assets from this release run
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-windows-release
+          path: ./artifacts
 
-          for dir in ./artifacts/*/ ; do
-            os=$(basename "$dir")
-            # Find the single file in the OS directory
-            file=$(find "$dir" -type f | head -n 1)
-
-            if [ -z "$file" ]; then
-              echo "No artifact found in directory $dir. Skipping."
-              continue
-            fi
-            filename=$(basename "$file")
-            extension=""
-            for ext in "${multi_ext[@]}"; do
-              if [[ "$filename" == *.$ext ]]; then
-                extension="$ext"
-                break
-              fi
-            done
-            if [ -z "$extension" ]; then
-              extension="${filename##*.}"
-            fi
-            new_name="${CLIENT_NAME}-${os}.${extension}"
-            echo "Renaming $file to $new_name"
-            mv "$file" "./artifacts/$new_name"
-            echo "Moved $new_name to ./artifacts/"
-          done
-
-      - name: List artifacts directory
-        run: |
-          echo "Listing ./artifacts directory:"
-          ls -R ./artifacts
-
-      # The client requires a signed manifest and a separately downloadable helper.
-      - name: Generate autoupdate assets
-        env:
-          RELEASE_BODY: ${{ github.event.inputs.body }}
-          RELEASE_TAG: ${{ github.event.inputs.tag_name }}
-          TCLIENT_UPDATE_ED25519_PRIVATE_KEY: ${{ secrets.TCLIENT_UPDATE_ED25519_PRIVATE_KEY }}
+      - name: Rename other platform packages and check every release asset
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          package_dir=$(mktemp -d "$RUNNER_TEMP/tclient-update-package.XXXXXX")
-          helper_build=$(mktemp -d "$RUNNER_TEMP/tclient-helper-build.XXXXXX")
-          key_file=$(mktemp "$RUNNER_TEMP/tclient-signing-key.XXXXXX")
-          trap 'rm -f "$key_file"; rm -rf "$package_dir" "$helper_build"' EXIT
-          chmod 600 "$key_file"
-          printf '%s' "$TCLIENT_UPDATE_ED25519_PRIVATE_KEY" > "$key_file"
-          unset TCLIENT_UPDATE_ED25519_PRIVATE_KEY
-          unzip -q "./artifacts/${CLIENT_NAME}-windows.zip" -d "$package_dir"
-          mapfile -d '' clients < <(find "$package_dir" -type f -name DDNet.exe -print0)
-          if [ "${#clients[@]}" -ne 1 ]; then
-            echo "::error::Windows artifact must contain exactly one packaged DDNet.exe"
-            exit 1
-          fi
-          source_dir=$(dirname "${clients[0]}")
-          # Build the existing standalone helper target in its own cross-build tree.
-          cmake -S "$GITHUB_WORKSPACE" -B "$helper_build" \
-            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/mingw64.toolchain" \
-            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc-posix \
-            -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++-posix \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS=-static \
-            -DCLIENT=OFF -DSERVER=OFF -DTOOLS=OFF -DDOWNLOAD_GTEST=OFF \
-            -DPREFER_BUNDLED_LIBS=ON -DDEV=ON
-          cmake --build "$helper_build" --target TClientUpdater --parallel 2
-          install -m 755 "$helper_build/TClientUpdater.exe" "$source_dir/TClientUpdater.exe"
-          printf '%s\n' "$RELEASE_BODY" > "$RUNNER_TEMP/update-notes.txt"
-          /usr/bin/python3 -I tclient_scripts/make_release_assets.py \
-            --source "$source_dir" \
-            --version "$version" \
-            --output ./artifacts \
-            --private-key "$key_file" \
-            --full-zip "./artifacts/${CLIENT_NAME}-windows.zip" \
-            --notes-file "$RUNNER_TEMP/update-notes.txt" \
-            --quiet
-          for asset in TClient-update-win64.zip TClient-update-win64.json TClient-update-win64.json.sig TClientUpdater.exe; do
-            if [ ! -s "./artifacts/$asset" ]; then
-              echo "::error::Required autoupdate asset missing or empty: $asset"
+          for spec in ubuntu:tar.xz macOS:dmg android:apk; do
+            os="${spec%%:*}"
+            extension="${spec#*:}"
+            mapfile -d '' files < <(find "./artifacts/$os" -type f -name "*.$extension" -print0)
+            if [ "${#files[@]}" -ne 1 ]; then
+              echo "::error::Expected exactly one $os .$extension package"
+              exit 1
+            fi
+            mv -- "${files[0]}" "./artifacts/${CLIENT_NAME}-${os}.${extension}"
+          done
+          for file in TClient-ubuntu.tar.xz TClient-macOS.dmg TClient-android.apk TClient-windows.zip TClient-update-win64.zip TClient-update-win64.json TClient-update-win64.json.sig TClientUpdater.exe DDNet.exe; do
+            if [ ! -s "./artifacts/$file" ]; then
+              echo "::error::Required release asset missing or empty: $file"
               exit 1
             fi
           done
           if [ "$(wc -c < ./artifacts/TClient-update-win64.json.sig)" -ne 64 ]; then
-            echo "::error::Autoupdate manifest signature must contain 64 raw bytes"
+            echo '::error::Ed25519 manifest signature must contain exactly 64 raw bytes'
             exit 1
           fi
 
@@ -180,9 +374,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.event.inputs.tag_name }}
-          release_name: ${{ github.event.inputs.release_name }}
-          body: ${{ github.event.inputs.body }}
+          tag_name: ${{ inputs.tag_name }}
+          release_name: ${{ inputs.release_name }}
+          body: ${{ inputs.body }}
           draft: false
           prerelease: false
 
@@ -195,7 +389,6 @@ jobs:
           asset_path: ./artifacts/${{ env.CLIENT_NAME }}-ubuntu.tar.xz
           asset_name: ${{ env.CLIENT_NAME }}-ubuntu.tar.xz
           asset_content_type: application/tar.xz
-          
 
       - name: Upload Windows
         uses: actions/upload-release-asset@v1
@@ -245,6 +438,16 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./artifacts/TClientUpdater.exe
           asset_name: TClientUpdater.exe
+          asset_content_type: application/octet-stream
+
+      - name: Upload signed Windows client
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/DDNet.exe
+          asset_name: DDNet.exe
           asset_content_type: application/octet-stream
 
       - name: Upload macOS

@@ -1,15 +1,15 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.43",
+  "version": "1.7.8.54",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 18058889,
-  "sha256": "5e239cd0301cf5b3e71abd8daf6d6f6c8444f5c2eea5babd65f7c5c576b31868",
-  "notes": "Asset editor becomes two-pane with drag-and-drop, right-click reset and persistent dye; vote HUD shows yes/no/pass/total and the scoreboard marks your own vote; hardening for background drawing files, translation backends, warlist, statusbar and trails.",
+  "size": 18101908,
+  "sha256": "9aaad473b4ce00a7f857e91d25d307b00a6a2d5d42b18db5faeeb8cec8c5a175",
+  "notes": "退出游戏时自动终止当前安装目录中的音乐监控进程，解决退出后安装目录仍被占用的问题；下次启动会自动恢复音乐监控链路。",
   "helper": {
     "name": "TClientUpdater.exe",
-    "size": 306688,
-    "sha256": "b993343fee69aaa1a127273883e717b998e6efa03119747841c21acecbaaa39e"
+    "size": 344576,
+    "sha256": "072a312630c1111cb97454251074d8872aa3fa4138e1b3be7c8412e2bc90a8a8"
   }
 }

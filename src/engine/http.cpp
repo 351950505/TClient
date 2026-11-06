@@ -337,6 +337,7 @@ size_t IHttpRequest::OnData(const char *pData, size_t DataSize)
 
 void IHttpRequest::OnCompletionInternal(EHttpState State)
 {
+	bool KeepPartialDownload = m_AllowResume && m_StatusCode != 416;
 	if(State == EHttpState::DONE)
 	{
 		m_ActualSha256 = sha256_finish(&m_ActualSha256Ctx);
@@ -351,6 +352,7 @@ void IHttpRequest::OnCompletionInternal(EHttpState State)
 				log_error("http", "SHA256 mismatch: got=%s, expected=%s, url=%s", aActualSha256, aExpectedSha256, m_aUrl);
 			}
 			State = EHttpState::ERROR;
+			KeepPartialDownload = false;
 		}
 	}
 
@@ -360,13 +362,14 @@ void IHttpRequest::OnCompletionInternal(EHttpState State)
 		{
 			log_error("http", "i/o error, cannot close file: %s", m_aDest);
 			State = EHttpState::ERROR;
+			KeepPartialDownload = false;
 		}
 		m_File = nullptr;
 
 		if(State == EHttpState::ERROR || State == EHttpState::ABORTED)
 		{
-			// 允许续传的任务保留 .tmp 供下次断点续传；其余照旧删除
-			if(!m_AllowResume)
+			// Preserve interrupted transfers, but never resume known corrupt or rejected data.
+			if(!KeepPartialDownload)
 				(void)fs_remove(m_aDestAbsoluteTmp);
 		}
 		else if(m_IfModifiedSince >= 0 && m_StatusCode == 304) // 304 Not Modified

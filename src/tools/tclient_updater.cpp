@@ -1902,7 +1902,7 @@ namespace
 
 	bool StartProcess(const std::wstring &Executable, const std::wstring &WorkingDirectory, const std::wstring *pReadyPath, const std::wstring *pReadyToken, PROCESS_INFORMATION &OutProcessInfo, std::string &Error)
 	{
-		std::wstring CommandLine = L"\"" + Executable + L"\"";
+		std::wstring CommandLine = L"\"" + Executable + L"\" --silent";
 		std::vector<wchar_t> CommandLineBuffer(CommandLine.begin(), CommandLine.end());
 		CommandLineBuffer.push_back(L'\0');
 
@@ -1913,7 +1913,7 @@ namespace
 
 		std::vector<wchar_t> Environment;
 		LPVOID pEnvironment = nullptr;
-		DWORD CreationFlags = 0;
+		DWORD CreationFlags = DETACHED_PROCESS;
 		if(pReadyPath != nullptr && pReadyToken != nullptr)
 		{
 			if(!BuildReadyEnvironment(*pReadyPath, *pReadyToken, Environment, Error))

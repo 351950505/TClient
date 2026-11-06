@@ -25,6 +25,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_TERMINATE = 0x0001
 SYNCHRONIZE = 0x00100000
@@ -81,6 +82,80 @@ static bool WritePid(const std::wstring &Path)
 static bool WriteEvent(const wchar_t *pName)
 {
 	return WritePid(Environment(pName));
+}
+
+static std::string ConsoleState()
+{
+	std::vector<DWORD> Processes(16);
+	SetLastError(ERROR_SUCCESS);
+	DWORD Count = GetConsoleProcessList(Processes.data(), (DWORD)Processes.size());
+	if(Count > Processes.size())
+	{
+		Processes.resize(Count);
+		Count = GetConsoleProcessList(Processes.data(), (DWORD)Processes.size());
+	}
+	const DWORD Error = Count == 0 ? GetLastError() : ERROR_SUCCESS;
+	std::string Result = "{\"window\":" + std::to_string((unsigned long long)(UINT_PTR)GetConsoleWindow()) + ",\"error\":" + std::to_string(Error) + ",\"pids\":[";
+	for(DWORD i = 0; i < Count && i < Processes.size(); ++i)
+	{
+		if(i)
+			Result += ",";
+		Result += std::to_string(Processes[i]);
+	}
+	return Result + "]}";
+}
+
+static std::string JsonString(const wchar_t *pText)
+{
+	std::string Result = "\"";
+	for(; *pText; ++pText)
+	{
+		char aEscape[7];
+		std::snprintf(aEscape, sizeof(aEscape), "\\u%04x", (unsigned int)*pText);
+		Result += aEscape;
+	}
+	return Result + "\"";
+}
+
+static bool InitializeConsole(int argc, wchar_t **argv, const wchar_t *pEventName)
+{
+	if(Environment(L"TCLIENT_FIXTURE_CONSOLE_REPORT").empty())
+		return true;
+	bool Silent = false;
+	std::string Arguments = "[";
+	for(int i = 0; i < argc; ++i)
+	{
+		if(i)
+			Arguments += ",";
+		Arguments += JsonString(argv[i]);
+		if(std::wstring(argv[i]) == L"-s" || std::wstring(argv[i]) == L"--silent")
+			Silent = true;
+	}
+	Arguments += "]";
+	const std::string Before = ConsoleState();
+	const DWORD StdoutType = GetFileType(GetStdHandle(STD_OUTPUT_HANDLE));
+	// Match client.cpp's --silent gate and log.cpp's explicit parent attachment.
+	const bool AttachAttempted = !Silent && StdoutType == FILE_TYPE_UNKNOWN;
+	const bool Attached = AttachAttempted && AttachConsole(ATTACH_PARENT_PROCESS);
+	const std::string Report = "{\"argv\":" + Arguments + ",\"silent\":" + (Silent ? "true" : "false") + ",\"stdout_type\":" + std::to_string(StdoutType) + ",\"attach_attempted\":" + (AttachAttempted ? "true" : "false") + ",\"attached\":" + (Attached ? "true" : "false") + ",\"before\":" + Before + ",\"after\":" + ConsoleState() + "}";
+	return WriteBytes(Environment(pEventName) + L".console.json", Report);
+}
+
+static void AwaitConsoleProbe(const wchar_t *pEventName)
+{
+	if(Environment(L"TCLIENT_FIXTURE_CONSOLE_REPORT").empty())
+		return;
+	const std::wstring Event = Environment(pEventName);
+	const ULONGLONG Deadline = GetTickCount64() + 30000;
+	while(GetTickCount64() < Deadline)
+	{
+		if(GetFileAttributesW((Event + L".probe").c_str()) != INVALID_FILE_ATTRIBUTES)
+		{
+			WriteBytes(Event + L".after.json", ConsoleState());
+			return;
+		}
+		Sleep(10);
+	}
 }
 
 static bool WriteReadyMarker()
@@ -145,6 +220,8 @@ int wmain(int argc, wchar_t **argv)
 #if FIXTURE_KIND == 1 || FIXTURE_KIND == 6
 	if(!WriteEvent(L"TCLIENT_FIXTURE_NEW_EVENT"))
 		return 40;
+	if(!InitializeConsole(argc, argv, L"TCLIENT_FIXTURE_NEW_EVENT"))
+		return 55;
 	if(!WriteReadyMarker())
 		return 41;
 #if FIXTURE_KIND == 6
@@ -153,6 +230,7 @@ int wmain(int argc, wchar_t **argv)
 	Sleep(100);
 	return 24;
 #else
+	AwaitConsoleProbe(L"TCLIENT_FIXTURE_NEW_EVENT");
 	Sleep(120000);
 	return 0;
 #endif
@@ -165,6 +243,9 @@ int wmain(int argc, wchar_t **argv)
 		return 49;
 	if(!WriteEvent(L"TCLIENT_FIXTURE_OLD_EVENT"))
 		return 42;
+	if(!InitializeConsole(argc, argv, L"TCLIENT_FIXTURE_OLD_EVENT"))
+		return 55;
+	AwaitConsoleProbe(L"TCLIENT_FIXTURE_OLD_EVENT");
 	Sleep(120000);
 	return 0;
 #elif FIXTURE_KIND == 4
@@ -294,10 +375,16 @@ def compile_fixture(source: Path, output: Path, kind: int) -> None:
     cl = shutil.which("cl")
     mingw = next((path for name in ("g++", "x86_64-w64-mingw32-g++", "clang++") if (path := shutil.which(name))), None)
     flags = ["/nologo", "/std:c++17", "/EHsc", "/O2", "/MT", "/utf-8", "/DUNICODE", "/D_UNICODE", f"/DFIXTURE_KIND={kind}"]
+    # The healthy and recovered clients match DDNet's GUI subsystem: no initial
+    # console inheritance, but log_logger_stdout can explicitly attach later.
+    gui_client = kind in (1, 3)
+    link_flags = ["/SUBSYSTEM:WINDOWS", "/ENTRY:wmainCRTStartup"] if gui_client else ["/SUBSYSTEM:CONSOLE"]
     if cl:
-        command = [cl, *flags, str(source), f"/Fe:{output}", "/link", "/SUBSYSTEM:CONSOLE", "user32.lib"]
+        command = [cl, *flags, str(source), f"/Fe:{output}", "/link", *link_flags, "user32.lib"]
     elif mingw:
         command = [mingw, "-std=c++17", "-O2", "-municode", "-static", f"-DFIXTURE_KIND={kind}", str(source), "-o", str(output), "-luser32"]
+        if gui_client:
+            command += ["-mwindows", "-Wl,-e,wmainCRTStartup"]
     elif (vcvars := find_vcvars()) is not None:
         # cmd.exe receives unescaped batch text, not subprocess's CRT quote rules.
         batch = output.parent / "compile-fixture.cmd"
@@ -305,7 +392,7 @@ def compile_fixture(source: Path, output: Path, kind: int) -> None:
             "@echo off\nchcp 65001 >nul\n"
             f'call "{vcvars}" >nul\n'
             "if errorlevel 1 exit /b 1\n"
-            f'cl {" ".join(flags)} "{source}" /Fe:"{output}" /link /SUBSYSTEM:CONSOLE user32.lib\n',
+            f'cl {" ".join(flags)} "{source}" /Fe:"{output}" /link {" ".join(link_flags)} user32.lib\n',
             encoding="utf-8",
         )
         command = ["cmd.exe", "/d", "/c", batch.name]
@@ -507,7 +594,7 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         shutil.copy2(self.old_client, self.target / "DDNet.exe")
         return file_sha256(self.target / "DDNet.exe")
 
-    def run_updater(self, executable: Path | None = None, sha256: str | None = None, timeout_ms: int = 3000, restart: Path | None = None) -> int:
+    def run_updater(self, executable: Path | None = None, sha256: str | None = None, timeout_ms: int = 3000, restart: Path | None = None, with_console: bool = False) -> int:
         self.log.parent.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
         for name in READY_NAMES:
@@ -520,9 +607,17 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         capture = self.case / "helper-output.log"
         self.record["command"] = command
         self.record["cwd"] = str(self.target)
+        startup = None
+        if with_console:
+            env["TCLIENT_FIXTURE_CONSOLE_REPORT"] = "1"
+            startup = subprocess.STARTUPINFO()
+            startup.dwFlags = subprocess.STARTF_USESHOWWINDOW
+            startup.wShowWindow = subprocess.SW_HIDE
         started = time.monotonic()
         with capture.open("wb") as stream:
-            process = subprocess.Popen(command, cwd=self.target, env=env, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT, creationflags=CREATE_NO_WINDOW)
+            process = subprocess.Popen(command, cwd=self.target, env=env, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT, creationflags=CREATE_NEW_CONSOLE if with_console else CREATE_NO_WINDOW, startupinfo=startup)
+            self.record["updater_pid"] = process.pid
+            self.record["with_console"] = with_console
             try:
                 # Wait for the helper handle only. Its surviving client may inherit standard
                 # handles on Windows; reading PIPE to EOF would wait for that client too.
@@ -570,6 +665,50 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         self.assertIn("startup health ready marker accepted", log)
         self.assertFalse(list(self.target.glob(".tclient-update-ready-*.tmp")))
         self.passed(zip_deleted=True, new_client_alive=True)
+
+    def assert_client_has_no_console(self, event: Path) -> None:
+        pid = self.event_pid(event)
+        self.assertTrue(self.alive(pid), "client must survive the updater")
+        # Confirm the fixture really uses DDNet's Windows GUI subsystem.
+        image = self.events[event].read_bytes()
+        pe_offset = int.from_bytes(image[0x3C:0x40], "little")
+        self.assertEqual(int.from_bytes(image[pe_offset + 92:pe_offset + 94], "little"), 2)
+        # run_updater already waited for the helper handle. Ask the still-running
+        # client to sample its console now, without attaching the test runner.
+        Path(str(event) + ".probe").touch()
+        snapshots = {}
+        for suffix in (".console.json", ".after.json"):
+            path = Path(str(event) + suffix)
+            deadline = time.monotonic() + 5
+            while True:
+                try:
+                    snapshots[suffix] = json.loads(path.read_text(encoding="ascii"))
+                    break
+                except (OSError, json.JSONDecodeError):
+                    if time.monotonic() >= deadline:
+                        self.fail(f"client did not report console state: {path}")
+                    time.sleep(0.01)
+        self.record["client_console"] = {"pid": pid, **snapshots}
+        initial = snapshots[".console.json"]
+        after_exit = snapshots[".after.json"]
+        self.assertTrue(self.alive(pid), "console probe must leave the client running")
+        self.assertEqual(after_exit["pids"], [], "client retained a console after updater exit")
+        self.assertEqual(after_exit["window"], 0)
+        self.assertIn("--silent", initial["argv"])
+        self.assertTrue(initial["silent"])
+        self.assertFalse(initial["attach_attempted"])
+        self.assertFalse(initial["attached"])
+        self.assertEqual(initial["before"]["pids"], [], "client inherited its parent's console")
+        self.assertEqual(initial["after"]["pids"], [])
+
+    def test_success_releases_updater_console_while_client_lives(self) -> None:
+        self.install_old()
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])
+        log = self.assert_code(self.run_updater(with_console=True), 0)
+        self.assertIn("startup health ready marker accepted", log)
+        self.assertFalse(self.old_event.exists())
+        self.assert_client_has_no_console(self.new_event)
+        self.passed(new_client_alive=True, client_console_detached=True)
 
     def make_junction(self, link: Path, destination: Path) -> None:
         self.assertTrue(link.absolute().is_relative_to(self.temp_root))
@@ -755,14 +894,14 @@ class TClientUpdaterInstallTest(unittest.TestCase):
     def test_fallback_rename_restored_before_helper_replacement(self) -> None:
         self.replacement_failure("after")
 
-    def health_failure(self, fixture: Path) -> tuple[int, str]:
+    def health_failure(self, fixture: Path, with_console: bool = False) -> tuple[int, str]:
         old_hash = self.install_old()
         (self.target / "version.dat").write_bytes(b"old data")
         entries = [("DDNet.exe", fixture.read_bytes()), ("version.dat", b"new data")]
         if fixture == self.timeout_client:
             entries.append(("netease-watcher.exe", self.runner.read_bytes()))
         write_zip(self.archive, entries)
-        log = self.assert_code(self.run_updater(), 9)
+        log = self.assert_code(self.run_updater(with_console=with_console), 9)
         new_pid = self.event_pid(self.new_event)
         self.assertFalse(self.alive(new_pid))
         self.assert_recovered(old_hash)
@@ -773,6 +912,12 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         new_pid, log = self.health_failure(self.failing)
         self.assertIn("code 23", log)
         self.passed(failed_new_pid=new_pid)
+
+    def test_rollback_releases_updater_console_while_old_client_lives(self) -> None:
+        new_pid, log = self.health_failure(self.failing, with_console=True)
+        self.assertIn("code 23", log)
+        self.assert_client_has_no_console(self.old_event)
+        self.passed(failed_new_pid=new_pid, old_client_alive=True, client_console_detached=True)
 
     def test_ready_marker_then_immediate_exit_rolls_back(self) -> None:
         marker_event = self.event("marker-written.pid", self.target / "DDNet.exe")

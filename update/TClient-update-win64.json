@@ -1,15 +1,15 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.43",
+  "version": "1.7.8.55",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 18058889,
-  "sha256": "5e239cd0301cf5b3e71abd8daf6d6f6c8444f5c2eea5babd65f7c5c576b31868",
-  "notes": "Asset editor becomes two-pane with drag-and-drop, right-click reset and persistent dye; vote HUD shows yes/no/pass/total and the scoreboard marks your own vote; hardening for background drawing files, translation backends, warlist, statusbar and trails.",
+  "size": 17183889,
+  "sha256": "db97b5c59d103dfcf1788ffa1ae579124a4a9bc74cd8bde9dba372bec791c777",
+  "notes": "修复更新器目录链接边界、坏断点恢复和完整镜像故障转移；协调同目录多客户端退出时的音乐监控清理；修复计分板企鹅徽章重叠；使用 VS2026 构建并保留原厂 DLL 签名。自研 EXE 暂无 Authenticode 签名，更新清单已用 Ed25519 签名。",
   "helper": {
     "name": "TClientUpdater.exe",
-    "size": 306688,
-    "sha256": "b993343fee69aaa1a127273883e717b998e6efa03119747841c21acecbaaa39e"
+    "size": 351232,
+    "sha256": "c1c6e203a02b4ca083a4861397597c3d4bd17a6dec2ea4805c9f080120f1d704"
   }
 }

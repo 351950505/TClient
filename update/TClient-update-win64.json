@@ -1,15 +1,15 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.55",
+  "version": "1.7.8.56",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17183889,
-  "sha256": "db97b5c59d103dfcf1788ffa1ae579124a4a9bc74cd8bde9dba372bec791c777",
-  "notes": "修复更新器目录链接边界、坏断点恢复和完整镜像故障转移；协调同目录多客户端退出时的音乐监控清理；修复计分板企鹅徽章重叠；使用 VS2026 构建并保留原厂 DLL 签名。自研 EXE 暂无 Authenticode 签名，更新清单已用 Ed25519 签名。",
+  "size": 17183899,
+  "sha256": "46a7e57b627a73611adcbb3fb29d56fe4bfd4ecfb69007c1cf8826a42fd155eb",
+  "notes": "修复更新成功或失败回滚后，重启的游戏继续占用更新助手控制台导致窗口残留的问题。游戏继续正常运行，文件日志和首帧健康检查保留。VS2026 构建；自研 EXE 尚无 Windows 代码签名，更新清单已使用 Ed25519 签名。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 351232,
-    "sha256": "c1c6e203a02b4ca083a4861397597c3d4bd17a6dec2ea4805c9f080120f1d704"
+    "sha256": "5dc81f4a7d1d9220b0e85697e06bc5ffe31946b87811c56c08ce0402680ef873"
   }
 }

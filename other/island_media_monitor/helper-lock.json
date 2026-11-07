@@ -1,0 +1,18 @@
+{
+	"comment": "第三方助手哈希锁：发布 preflight 强制校验，防止错误/被篡改的 helper 进入发布包。monitor 是第一方预构建件，不在此锁内（其来源由 spec 的 monitor_path 与 stage inventory 记录）。",
+	"lock_version": 1,
+	"files": {
+		"netease-watcher.exe": {
+			"size": 3418112,
+			"sha256": "1be5313339c596f15d93f51b02abd7556f9e9feea84dd884c9f63ce1f3617f09",
+			"upstream": "YUCLing/netease-watcher v0.7.1 (netease-watcher-no-tui.zip, sha256 6508785469931bc4d5bf15064d53b44b1d3106c7727f2439cc9a52b1a0579a74)",
+			"modified": false
+		},
+		"wndhok.dll": {
+			"size": 116224,
+			"sha256": "08a7f97927e949cacfb3be7d495cfa077a8f8d04bf77142b1a5aacdbdfa9654e",
+			"upstream": "YUCLing/netease-watcher v0.7.1 (netease-watcher-no-tui.zip, sha256 6508785469931bc4d5bf15064d53b44b1d3106c7727f2439cc9a52b1a0579a74)",
+			"modified": false
+		}
+	}
+}

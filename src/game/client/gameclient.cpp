@@ -165,9 +165,10 @@ void CGameClient::OnConsoleInit()
 					      &m_FreezeBars,
 					      &m_DamageInd,
 					      &m_PlayerIndicator, // TClient
-					      &m_Mod, // TClient
-					      &m_CustomCommunities, // TClient
-					      &m_Hud,
+		      &m_Mod, // TClient
+		      &m_CustomCommunities, // TClient
+		      &m_Optimizer, // TClient: FPS 雾/渲染削减（世界与 HUD 之间；render_rect 的 scissor 在此解除）
+		      &m_Hud,
 					      &m_Spectator,
 					      &m_Emoticon,
 					      &m_BindChat, // TClient
@@ -880,6 +881,7 @@ void CGameClient::OnRender()
 	UpdateSpectatorCursor();
 
 	// render all systems
+	m_Optimizer.ClipWorld(); // TClient: render_rect 把世界渲染 scissor 到雾矩形（COptimizer::OnRender 解除）
 	for(auto &pComponent : m_vpAll)
 		pComponent->OnRender();
 

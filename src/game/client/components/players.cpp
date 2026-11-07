@@ -1231,12 +1231,16 @@ void CPlayers::OnRender()
 
 	// render everyone else's hook, then our own
 	const int LocalClientId = GameClient()->m_Snap.m_LocalClientId;
+	const int RenderLastId = (GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW && GameClient()->m_Snap.m_SpecInfo.m_Active) ? GameClient()->m_Snap.m_SpecInfo.m_SpectatorId : LocalClientId;
 	for(int ClientId = 0; ClientId < MAX_CLIENTS; ClientId++)
 	{
 		if(ClientId == LocalClientId || !IsPlayerInfoAvailable(ClientId))
 		{
 			continue;
 		}
+		// TClient: 渲染优化——雾外非焦点玩家的钩子跳过
+		if(GameClient()->m_Optimizer.CullWorldPos(vec2(GameClient()->m_aClients[ClientId].m_RenderCur.m_X, GameClient()->m_aClients[ClientId].m_RenderCur.m_Y), 96.0f))
+			continue;
 		RenderHook(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &aRenderCharacters[ClientId], &aRenderInfo[ClientId], ClientId);
 	}
 	if(LocalClientId != -1 && IsPlayerInfoAvailable(LocalClientId))
@@ -1261,18 +1265,23 @@ void CPlayers::OnRender()
 		}
 		if(!ScreenRect.Inside(Client.m_SpecChar))
 			continue;
+		// TClient: 渲染优化——雾外观战幽灵跳过
+		if(GameClient()->m_Optimizer.CullWorldPos(Client.m_SpecChar, 64.0f))
+			continue;
 		RenderTools()->RenderTee(CAnimState::GetIdle(), &SpectatorTeeRenderInfo()->TeeRenderInfo(), EMOTE_BLINK, vec2(1, 0), Client.m_SpecChar, Alpha);
 	}
 
 	// render everyone else's tee, then either our own or the tee we are spectating.
-	const int RenderLastId = (GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW && GameClient()->m_Snap.m_SpecInfo.m_Active) ? GameClient()->m_Snap.m_SpecInfo.m_SpectatorId : LocalClientId;
-
 	for(int ClientId = 0; ClientId < MAX_CLIENTS; ClientId++)
 	{
 		if(ClientId == RenderLastId || !IsPlayerInfoAvailable(ClientId))
 		{
 			continue;
 		}
+
+		// TClient: 渲染优化——雾外非焦点 tee 跳过
+		if(GameClient()->m_Optimizer.CullWorldPos(vec2(GameClient()->m_aClients[ClientId].m_RenderCur.m_X, GameClient()->m_aClients[ClientId].m_RenderCur.m_Y), 96.0f))
+			continue;
 
 		RenderHookCollLine(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &GameClient()->m_aClients[ClientId].m_RenderCur, ClientId);
 

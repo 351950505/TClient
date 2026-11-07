@@ -191,6 +191,10 @@ bool CParticles::ParticleIsVisibleOnScreen(const vec2 &CurPos, float CurSize) co
 
 void CParticles::RenderGroup(int Group)
 {
+	// TClient: 渲染优化——粒子渲染总开关
+	if(GameClient()->m_Optimizer.ParticlesDisabled())
+		return;
+
 	IGraphics::CTextureHandle *aParticles = GameClient()->m_ParticlesSkin.m_aSpriteParticles;
 	int FirstParticleOffset = SPRITE_PART_SLICE;
 	int ParticleQuadContainerIndex = m_ParticleQuadContainerIndex;
@@ -249,7 +253,8 @@ void CParticles::RenderGroup(int Group)
 			}
 
 			// the current position, respecting the size, is inside the viewport, render it, else ignore
-			if(ParticleIsVisibleOnScreen(p, Size))
+			// TClient: 渲染优化——雾外粒子跳过
+			if(ParticleIsVisibleOnScreen(p, Size) && !GameClient()->m_Optimizer.CullWorldPos(p, Size))
 			{
 				if((size_t)CurParticleRenderCount == GRAPHICS_MAX_PARTICLES_RENDER_COUNT || LastColor.r != m_aParticles[i].m_Color.r || LastColor.g != m_aParticles[i].m_Color.g || LastColor.b != m_aParticles[i].m_Color.b || LastColor.a != Alpha || LastQuadOffset != QuadOffset)
 				{
@@ -307,7 +312,8 @@ void CParticles::RenderGroup(int Group)
 			}
 
 			// the current position, respecting the size, is inside the viewport, render it, else ignore
-			if(ParticleIsVisibleOnScreen(p, Size))
+			// TClient: 渲染优化——雾外粒子跳过
+			if(ParticleIsVisibleOnScreen(p, Size) && !GameClient()->m_Optimizer.CullWorldPos(p, Size))
 			{
 				Graphics()->TextureSet(aParticles[m_aParticles[i].m_Spr - FirstParticleOffset]);
 				Graphics()->QuadsBegin();

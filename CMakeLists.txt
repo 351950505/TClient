@@ -2942,6 +2942,8 @@ if(CLIENT)
     components/tclient/rainbow.h
     components/tclient/relay_client.cpp
     components/tclient/relay_client.h
+    components/tclient/optimizer.cpp
+    components/tclient/optimizer.h
     components/tclient/scripting.cpp
     components/tclient/scripting.h
     components/tclient/scripting/impl.cpp

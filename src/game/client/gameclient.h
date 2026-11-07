@@ -88,6 +88,7 @@
 #include "components/tclient/statusbar.h"
 #include "components/tclient/island_music.h"
 #include "components/tclient/assets_editor.h"
+#include "components/tclient/optimizer.h"
 #include "components/tclient/tclient.h"
 #include "components/tclient/trails.h"
 #include "components/tclient/translate.h"
@@ -245,6 +246,7 @@ public:
 	CClientBadge m_ClientBadge; // TClient: 记分板企鹅徽标（ddnet-custom-clients 皮肤颜色法）
 	CTClientGradient m_Gradient;
 	CTrails m_Trails;
+	COptimizer m_Optimizer; // TClient: FPS 雾/渲染削减（注册序在世界与 HUD 之间）
 	CTranslate m_Translate;
 	CPet m_Pet;
 	CPlayerIndicator m_PlayerIndicator;

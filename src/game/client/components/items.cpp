@@ -19,6 +19,22 @@
 #include <game/client/projectile_data.h>
 #include <game/mapitems.h>
 
+// TClient 特效裁剪：弹道拖尾归属判定。m_ExtraInfo 为真时 m_Owner 才有效；
+// 服务器没给归属数据(非 DDNet 扩展协议)时不裁剪，保持原视觉。
+static bool TcTrailAllowed(CGameClient *pGameClient, const CProjectileData *pCurrent, bool IsGrenade)
+{
+	const int LocalCfg = IsGrenade ? g_Config.m_TcDisableLocalGrenadeTrail : g_Config.m_TcDisableLocalBulletTrail;
+	const int OthersCfg = IsGrenade ? g_Config.m_TcDisableOthersGrenadeTrail : g_Config.m_TcDisableOthersBulletTrail;
+	if(!LocalCfg && !OthersCfg)
+		return true;
+	if(LocalCfg && OthersCfg)
+		return false;
+	if(!(pCurrent->m_ExtraInfo && pCurrent->m_Owner >= 0 && pCurrent->m_Owner < MAX_CLIENTS))
+		return true;
+	const bool IsLocal = pGameClient->m_aClients[pCurrent->m_Owner].m_IsPredictedLocal;
+	return IsLocal ? !LocalCfg : !OthersCfg;
+}
+
 void CItems::RenderProjectile(const CProjectileData *pCurrent, int ItemId, const CScreenRect &ScreenRect)
 {
 	int CurWeapon = std::clamp(pCurrent->m_Type, 0, NUM_WEAPONS - 1);
@@ -101,7 +117,8 @@ void CItems::RenderProjectile(const CProjectileData *pCurrent, int ItemId, const
 	// don't check for validity of the projectile for the current weapon here, so particle effects are rendered for mod compatibility
 	if(CurWeapon == WEAPON_GRENADE)
 	{
-		GameClient()->m_Effects.SmokeTrail(Pos, Vel * -1, Alpha, 0.0f);
+		if(TcTrailAllowed(GameClient(), pCurrent, true))
+			GameClient()->m_Effects.SmokeTrail(Pos, Vel * -1, Alpha, 0.0f);
 		static float s_Time = 0.0f;
 		static float s_LastLocalTime = LocalTime();
 		s_Time += (LocalTime() - s_LastLocalTime) * GameClient()->GetAnimationPlaybackSpeed();
@@ -110,7 +127,8 @@ void CItems::RenderProjectile(const CProjectileData *pCurrent, int ItemId, const
 	}
 	else
 	{
-		GameClient()->m_Effects.BulletTrail(Pos, Alpha, 0.0f);
+		if(TcTrailAllowed(GameClient(), pCurrent, false))
+			GameClient()->m_Effects.BulletTrail(Pos, Alpha, 0.0f);
 
 		if(length(Vel) > 0.00001f)
 			Graphics()->QuadsSetRotation(angle(Vel));
@@ -773,8 +791,14 @@ void CItems::ReconstructSmokeTrail(const CProjectileData *pCurrent, int DestroyT
 			TimePassed = std::min(TimePassed, (TimePassed - MinTrailSpan) / (Pt - MinTrailSpan) * (MinTrailSpan * 0.5f) + MinTrailSpan);
 		// add particle for this projectile
 		if(pCurrent->m_Type == WEAPON_GRENADE)
-			GameClient()->m_Effects.SmokeTrail(Pos, Vel * -1, Alpha, TimePassed);
+		{
+			if(TcTrailAllowed(GameClient(), pCurrent, true))
+				GameClient()->m_Effects.SmokeTrail(Pos, Vel * -1, Alpha, TimePassed);
+		}
 		else
-			GameClient()->m_Effects.BulletTrail(Pos, Alpha, TimePassed);
+		{
+			if(TcTrailAllowed(GameClient(), pCurrent, false))
+				GameClient()->m_Effects.BulletTrail(Pos, Alpha, TimePassed);
+		}
 	}
 }

@@ -443,3 +443,22 @@ MACRO_CONFIG_INT(TcScoreboardMedia, tc_scoreboard_media, 1, 0, 1, CFGFLAG_CLIENT
 // 控制台(F1)日志分类筛选掩码：SYSTEM|PLAYER|COMMAND|BINDS 位标志，15=全显
 MACRO_CONFIG_INT(TcConsoleFilterMask, tc_console_filter_mask, 15, 0, 15, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Local console log category filter mask (bit flags: 1=system 2=players 4=commands 8=binds)")
 MACRO_CONFIG_INT(TcProcessPriority, tc_process_priority, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Process priority class (0 = normal, 1 = above normal, 2 = high; keeps the game smooth when background apps spike the CPU; restart to apply)")
+// 特效裁剪(学习 MeowClient 的 disable_local/others 系列)：按归属(自己含 dummy / 他人)关闭客户端粒子特效，
+// 降低高人数房间的渲染负载。名字与 meow_disable_* 对应；无归属数据的网络事件只受 others 开关控制。
+MACRO_CONFIG_INT(TcDisableLocalAirJump, tc_disable_local_air_jump, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable own air jump particles (incl. dummy)")
+MACRO_CONFIG_INT(TcDisableOthersAirJump, tc_disable_others_air_jump, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable other players' air jump particles")
+MACRO_CONFIG_INT(TcDisableLocalExplosion, tc_disable_local_explosion, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable own explosion effect (predicted events, incl. dummy)")
+MACRO_CONFIG_INT(TcDisableOthersExplosion, tc_disable_others_explosion, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable explosion effects from server events (no owner data: also own explosions when prediction is off)")
+MACRO_CONFIG_INT(TcDisableLocalHammerHit, tc_disable_local_hammer_hit, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable own hammer hit effect (predicted events, incl. dummy)")
+MACRO_CONFIG_INT(TcDisableOthersHammerHit, tc_disable_others_hammer_hit, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable hammer hit effects from server events (no owner data)")
+MACRO_CONFIG_INT(TcDisableOthersSpawnEffect, tc_disable_others_spawn_effect, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable spawn effects from server events (no owner data: also affects own respawn effect)")
+MACRO_CONFIG_INT(TcDisableLocalDeathEffect, tc_disable_local_death_effect, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable own death effect (incl. dummy)")
+MACRO_CONFIG_INT(TcDisableOthersDeathEffect, tc_disable_others_death_effect, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable other players' death effect")
+MACRO_CONFIG_INT(TcDisableLocalGrenadeTrail, tc_disable_local_grenade_trail, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable own grenade smoke trail (incl. dummy; needs server projectile owner data)")
+MACRO_CONFIG_INT(TcDisableOthersGrenadeTrail, tc_disable_others_grenade_trail, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable other players' grenade smoke trail (needs server projectile owner data)")
+MACRO_CONFIG_INT(TcDisableLocalBulletTrail, tc_disable_local_bullet_trail, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable own bullet trail (incl. dummy; needs server projectile owner data)")
+MACRO_CONFIG_INT(TcDisableOthersBulletTrail, tc_disable_others_bullet_trail, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable other players' bullet trail (needs server projectile owner data)")
+MACRO_CONFIG_INT(TcDisableLocalSkidTrail, tc_disable_local_skid_trail, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable own skid trail (incl. dummy)")
+MACRO_CONFIG_INT(TcDisableOthersSkidTrail, tc_disable_others_skid_trail, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable other players' skid trail")
+MACRO_CONFIG_INT(TcDisableLocalSnowflakes, tc_disable_local_snowflakes, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable own freeze snowflake particles (incl. dummy)")
+MACRO_CONFIG_INT(TcDisableOthersSnowflakes, tc_disable_others_snowflakes, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Disable other players' freeze snowflake particles")

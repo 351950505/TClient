@@ -1553,7 +1553,9 @@ void CGameClient::ProcessEvents()
 			vec2 ExplosionPos = vec2(pEvent->m_X, pEvent->m_Y);
 			if(!m_PredictedWorld.CheckPredictedEventHandled(CGameWorld::CPredictedEvent(Item.m_Type, ExplosionPos, -1, Client()->GameTick(g_Config.m_ClDummy))))
 			{
-				m_Effects.Explosion(ExplosionPos, Alpha);
+				// TClient 特效裁剪：服务器爆炸事件不带归属，走 others 开关
+				if(!g_Config.m_TcDisableOthersExplosion)
+					m_Effects.Explosion(ExplosionPos, Alpha);
 			}
 		}
 		else if(Item.m_Type == NETEVENTTYPE_HAMMERHIT)
@@ -1563,7 +1565,9 @@ void CGameClient::ProcessEvents()
 			vec2 HammerHitPos = vec2(pEvent->m_X, pEvent->m_Y);
 			if(!m_PredictedWorld.CheckPredictedEventHandled(CGameWorld::CPredictedEvent(Item.m_Type, HammerHitPos, -1, Client()->GameTick(g_Config.m_ClDummy))))
 			{
-				m_Effects.HammerHit(HammerHitPos, Alpha, Volume);
+				// TClient 特效裁剪：服务器锤击事件不带归属，走 others 开关
+				if(!g_Config.m_TcDisableOthersHammerHit)
+					m_Effects.HammerHit(HammerHitPos, Alpha, Volume);
 			}
 		}
 		else if(Item.m_Type == NETEVENTTYPE_BIRTHDAY)
@@ -1579,12 +1583,18 @@ void CGameClient::ProcessEvents()
 		else if(Item.m_Type == NETEVENTTYPE_SPAWN)
 		{
 			const CNetEvent_Spawn *pEvent = (const CNetEvent_Spawn *)Item.m_pData;
-			m_Effects.PlayerSpawn(vec2(pEvent->m_X, pEvent->m_Y), Alpha, Volume);
+			// TClient 特效裁剪：出生事件不带归属，走 others 开关（开 own 出生特效也会被关）
+			if(!g_Config.m_TcDisableOthersSpawnEffect)
+				m_Effects.PlayerSpawn(vec2(pEvent->m_X, pEvent->m_Y), Alpha, Volume);
 		}
 		else if(Item.m_Type == NETEVENTTYPE_DEATH)
 		{
 			const CNetEvent_Death *pEvent = (const CNetEvent_Death *)Item.m_pData;
-			m_Effects.PlayerDeath(vec2(pEvent->m_X, pEvent->m_Y), pEvent->m_ClientId, Alpha);
+			// TClient 特效裁剪：死亡事件带 ClientId，可以精确区分自己(含 dummy)/他人
+			const bool IsLocalDeath = pEvent->m_ClientId == m_Snap.m_LocalClientId ||
+				(Client()->DummyConnected() && pEvent->m_ClientId == m_aLocalIds[!g_Config.m_ClDummy]);
+			if(IsLocalDeath ? !g_Config.m_TcDisableLocalDeathEffect : !g_Config.m_TcDisableOthersDeathEffect)
+				m_Effects.PlayerDeath(vec2(pEvent->m_X, pEvent->m_Y), pEvent->m_ClientId, Alpha);
 		}
 		else if(Item.m_Type == NETEVENTTYPE_SOUNDWORLD)
 		{
@@ -2549,10 +2559,14 @@ void CGameClient::OnNewSnapshot(bool DummySwapped)
 					Alpha = g_Config.m_ClShowOthersAlpha / 100.0f;
 				const float Volume = 1.0f; // TODO snd_game_volume_others
 
-				const bool Grounded = Collision()->IsOnGround(vec2(m_Snap.m_aCharacters[i].m_Prev.m_X, m_Snap.m_aCharacters[i].m_Prev.m_Y), CCharacterCore::PhysicalSize());
-				if(!Grounded)
+				// TClient 特效裁剪：快照探测的空中跳跃，按本地(含 dummy)/他人分流
+				if((IsLocalPlayer || IsDummy) ? !g_Config.m_TcDisableLocalAirJump : !g_Config.m_TcDisableOthersAirJump)
 				{
-					m_Effects.AirJump(Pos, Alpha, Volume);
+					const bool Grounded = Collision()->IsOnGround(vec2(m_Snap.m_aCharacters[i].m_Prev.m_X, m_Snap.m_aCharacters[i].m_Prev.m_Y), CCharacterCore::PhysicalSize());
+					if(!Grounded)
+					{
+						m_Effects.AirJump(Pos, Alpha, Volume);
+					}
 				}
 			}
 		}
@@ -2950,7 +2964,7 @@ void CGameClient::OnPredict()
 			vec2 Pos = pLocalChar->Core()->m_Pos;
 			int Events = pLocalChar->Core()->m_TriggeredEvents;
 
-			if(g_Config.m_ClPredict && !m_SuppressEvents)
+			if(g_Config.m_ClPredict && !m_SuppressEvents && !g_Config.m_TcDisableLocalAirJump)
 				if(Events & COREEVENT_AIR_JUMP)
 					m_Effects.AirJump(Pos, 1.0f, 1.0f);
 			if(g_Config.m_SndGame && !m_SuppressEvents)
@@ -2974,7 +2988,7 @@ void CGameClient::OnPredict()
 			m_aLastNewPredictedTick[!Dummy] = Tick;
 			vec2 Pos = pDummyChar->Core()->m_Pos;
 			int Events = pDummyChar->Core()->m_TriggeredEvents;
-			if(g_Config.m_ClPredict && !m_SuppressEvents)
+			if(g_Config.m_ClPredict && !m_SuppressEvents && !g_Config.m_TcDisableLocalAirJump)
 				if(Events & COREEVENT_AIR_JUMP)
 					m_Effects.AirJump(Pos, 1.0f, 1.0f);
 		}
@@ -4398,11 +4412,14 @@ void CGameClient::HandlePredictedEvents(const int Tick)
 			}
 			else if(EventsIterator->m_EventId == NETEVENTTYPE_EXPLOSION)
 			{
-				m_Effects.Explosion(EventsIterator->m_Pos, Alpha);
+				// TClient 特效裁剪：预测事件来自本地角色，走 local 开关
+				if(!g_Config.m_TcDisableLocalExplosion)
+					m_Effects.Explosion(EventsIterator->m_Pos, Alpha);
 			}
 			else if(EventsIterator->m_EventId == NETEVENTTYPE_HAMMERHIT)
 			{
-				m_Effects.HammerHit(EventsIterator->m_Pos, Alpha, Volume);
+				if(!g_Config.m_TcDisableLocalHammerHit)
+					m_Effects.HammerHit(EventsIterator->m_Pos, Alpha, Volume);
 			}
 			else if(EventsIterator->m_EventId == NETEVENTTYPE_DAMAGEIND)
 			{

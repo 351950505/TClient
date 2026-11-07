@@ -793,7 +793,10 @@ void CPlayers::RenderPlayer(
 		State.Add(&g_pData->m_aAnimations[ANIM_NINJA_SWING], std::clamp(LastAttackTime * 2.0f, 0.0f, 1.0f), 1.0f);
 
 	// do skidding
-	if(!InAir && WantOtherDir && length(Vel * 50) > 500.0f)
+	if(!InAir && WantOtherDir && length(Vel * 50) > 500.0f &&
+		// TClient 特效裁剪：ClientId < 0 是本地幽灵 tee，按自己算
+		((ClientId < 0 || GameClient()->m_aClients[ClientId].m_IsPredictedLocal) ?
+			!g_Config.m_TcDisableLocalSkidTrail : !g_Config.m_TcDisableOthersSkidTrail))
 		GameClient()->m_Effects.SkidTrail(Position, Vel, Player.m_Direction, Alpha, Volume);
 
 	// draw gun
@@ -1046,7 +1049,10 @@ void CPlayers::RenderPlayer(
 	vec2 BodyPos = Position + vec2(State.GetBody()->m_X, State.GetBody()->m_Y) * TeeAnimScale;
 	if(RenderInfo.m_TeeRenderFlags & TEE_EFFECT_FROZEN)
 	{
-		GameClient()->m_Effects.FreezingFlakes(BodyPos, vec2(32, 32), Alpha);
+		// TClient 特效裁剪：ClientId < 0 是本地幽灵 tee，按自己算
+		if((ClientId < 0 || GameClient()->m_aClients[ClientId].m_IsPredictedLocal) ?
+			!g_Config.m_TcDisableLocalSnowflakes : !g_Config.m_TcDisableOthersSnowflakes)
+			GameClient()->m_Effects.FreezingFlakes(BodyPos, vec2(32, 32), Alpha);
 	}
 	if(RenderInfo.m_TeeRenderFlags & TEE_EFFECT_SPARKLE)
 	{

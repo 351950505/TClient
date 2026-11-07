@@ -116,11 +116,13 @@ void COptimizer::DrawFog()
 				const float a1 = Tau * (s + 1) / Sectors;
 				const float c0 = std::cos(a0), s0 = std::sin(a0);
 				const float c1 = std::cos(a1), s1 = std::sin(a1);
+				// CFreeformItem 的几何环序是 v0→v1→v3→v2（后端两条路径一致），
+				// 内/外弧必须放在 v0/v3，v1/v2 放径向对角，否则三角化成交叉尖三角。
 				const IGraphics::CFreeformItem Item(
 					Center.x + c0 * r0, Center.y + s0 * r0,
 					Center.x + c0 * r1, Center.y + s0 * r1,
-					Center.x + c1 * r1, Center.y + s1 * r1,
-					Center.x + c1 * r0, Center.y + s1 * r0);
+					Center.x + c1 * r0, Center.y + s1 * r0,
+					Center.x + c1 * r1, Center.y + s1 * r1);
 				Graphics()->SetColor(0.0f, 0.0f, 0.0f, Alpha);
 				Graphics()->QuadsDrawFreeform(&Item, 1);
 			}

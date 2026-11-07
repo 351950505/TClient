@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.58",
+  "version": "1.7.8.59",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17268068,
-  "sha256": "d1d4a3dd16fc133c82a1991ca2d62084d85560fba0b81b1e4d6848c54e5b520a",
-  "notes": "TClient 1.7.8.58: FPS fog renderer optimizer ported from MeowClient (tc_optimizer_*: clear-area fog with circle/rectangle shapes, culls particles and non-focus players outside the fog, optional rectangle scissor; master switch and fog default on) plus renderer-level rendering reduction, verified bit-compatible fast input.",
+  "size": 17268074,
+  "sha256": "05d2001003f44d387ccca319b1a35ec1800af545c5bc0a3a5873ee629ef8ec37",
+  "notes": "TClient 1.7.8.59: hotfix for the 1.7.8.58 FPS fog rendering (ring quads rendered as black spikes caused by a vertex-order mismatch in the freeform quad path); fog visuals now render correctly.",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 351232,

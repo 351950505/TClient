@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.57",
+  "version": "1.7.8.58",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17265124,
-  "sha256": "443f472de03d20d904dff817072b877658c0cb7cc6d3827e87d8aacb4b20df50",
-  "notes": "TClient 1.7.8.57: effect culling (17 tc_disable_local/others_* switches) and Vulkan backend restored; default backend follows upstream DDNet (Vulkan) with automatic OpenGL fallback.",
+  "size": 17268068,
+  "sha256": "d1d4a3dd16fc133c82a1991ca2d62084d85560fba0b81b1e4d6848c54e5b520a",
+  "notes": "TClient 1.7.8.58: FPS fog renderer optimizer ported from MeowClient (tc_optimizer_*: clear-area fog with circle/rectangle shapes, culls particles and non-focus players outside the fog, optional rectangle scissor; master switch and fog default on) plus renderer-level rendering reduction, verified bit-compatible fast input.",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 351232,

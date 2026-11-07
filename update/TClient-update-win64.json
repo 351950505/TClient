@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.56",
+  "version": "1.7.8.57",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17183899,
-  "sha256": "46a7e57b627a73611adcbb3fb29d56fe4bfd4ecfb69007c1cf8826a42fd155eb",
-  "notes": "修复更新成功或失败回滚后，重启的游戏继续占用更新助手控制台导致窗口残留的问题。游戏继续正常运行，文件日志和首帧健康检查保留。VS2026 构建；自研 EXE 尚无 Windows 代码签名，更新清单已使用 Ed25519 签名。",
+  "size": 17265124,
+  "sha256": "443f472de03d20d904dff817072b877658c0cb7cc6d3827e87d8aacb4b20df50",
+  "notes": "TClient 1.7.8.57: effect culling (17 tc_disable_local/others_* switches) and Vulkan backend restored; default backend follows upstream DDNet (Vulkan) with automatic OpenGL fallback.",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 351232,

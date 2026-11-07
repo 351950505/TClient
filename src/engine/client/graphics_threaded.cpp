@@ -2242,8 +2242,15 @@ void CGraphics_Threaded::SetForcedAspect(bool Force)
 	if(g_GraphicsForcedAspect == Force)
 		return;
 	g_GraphicsForcedAspect = Force;
+	const int PrevViewportX = m_ViewportX;
+	const int PrevScreenWidth = m_ScreenWidth;
+	const int PrevScreenHeight = m_ScreenHeight;
 	m_pBackend->GetViewportSize(m_ScreenWidth, m_ScreenHeight);
 	AdjustViewport(false);
+	// 宽屏下 force 翻转不改变有效视口（AdjustViewport 只裁高）；此时跳过
+	// UpdateViewport/GPU idle/resize 级联，避免快照期同步闪烁的浪费来源之一。
+	if(m_ViewportX == PrevViewportX && m_ScreenWidth == PrevScreenWidth && m_ScreenHeight == PrevScreenHeight)
+		return;
 	UpdateViewport(m_ViewportX, 0, m_ScreenWidth, m_ScreenHeight, false);
 
 	// kick the command buffer and wait

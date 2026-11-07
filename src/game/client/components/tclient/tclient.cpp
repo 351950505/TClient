@@ -602,7 +602,7 @@ void CTClient::OnConsoleInit()
 	Console()->Chain(
 		"tc_allow_any_res", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
 			pfnCallback(pResult, pCallbackUserData);
-			((CTClient *)pUserData)->SetForcedAspect();
+			((CTClient *)pUserData)->QueueForcedAspectUpdate();
 		},
 		this);
 
@@ -1645,9 +1645,15 @@ void CTClient::OnShutdown()
 #endif
 }
 
-void CTClient::SetForcedAspect()
+void CTClient::QueueForcedAspectUpdate()
 {
-	// TODO: Fix flashing on windows
+	m_ForcedAspectQueued = true;
+}
+
+void CTClient::ApplyForcedAspect()
+{
+	// TODO: portrait 视口切换本身仍会闪（5:4 强制是设计行为）；
+	// 本修复消除的是“快照分发内同步 flush + 宽屏无谓重建”。
 	int State = Client()->State();
 	bool Force = true;
 	if(g_Config.m_TcAllowAnyRes == 0)
@@ -1659,16 +1665,26 @@ void CTClient::SetForcedAspect()
 	Graphics()->SetForcedAspect(Force);
 }
 
+void CTClient::OnUpdate()
+{
+	// 在常规更新阶段统一应用排队的视口策略，绝不从快照分发内联触发。
+	if(m_ForcedAspectQueued)
+	{
+		m_ForcedAspectQueued = false;
+		ApplyForcedAspect();
+	}
+}
+
 void CTClient::OnStateChange(int OldState, int NewState)
 {
-	SetForcedAspect();
+	QueueForcedAspectUpdate();
 	for(auto &AirRescuePositions : m_aAirRescuePositions)
 		AirRescuePositions = {};
 }
 
 void CTClient::OnNewSnapshot()
 {
-	SetForcedAspect();
+	QueueForcedAspectUpdate();
 	// Update volleyball
 	bool IsVolleyBall = false;
 	if(g_Config.m_TcVolleyBallBetterBall > 0 && g_Config.m_TcVolleyBallBetterBallSkin[0] != '\0')

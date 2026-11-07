@@ -127,6 +127,7 @@ public:
 	CTClient();
 	int Sizeof() const override { return sizeof(*this); }
 	void OnInit() override;
+	void OnUpdate() override;
 	void OnMessage(int MsgType, void *pRawMsg) override;
 	void OnConsoleInit() override;
 	void OnRender() override;
@@ -134,7 +135,10 @@ public:
 	void OnStateChange(int OldState, int NewState) override;
 	void OnNewSnapshot() override;
 	void OnShutdown() override;
-	void SetForcedAspect();
+	// 快照/状态/配置变化只排队，OnUpdate 统一应用一次：避免在快照分发内
+	// 同步触发 graphics 线程 flush + 全组件 resize 级联（Windows 闪烁 TODO 的根因）。
+	void QueueForcedAspectUpdate();
+	void ApplyForcedAspect();
 
 	std::shared_ptr<IHttpRequest> m_pTClientInfoTask = nullptr;
 	void FetchTClientInfo();
@@ -165,6 +169,8 @@ public:
 	char m_aVersionStr[10] = "0";
 
 	Regex m_RegexChatIgnore;
+	// 强制视口策略的待应用标志； true 时 OnUpdate 应用一次并清零。
+	bool m_ForcedAspectQueued = false;
 };
 
 #endif

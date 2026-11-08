@@ -884,7 +884,6 @@ No changes since last save
 Failed to save background drawing; unsaved changes retained
 == 背景绘图保存失败；未保存的更改已保留
 
-[Outlines]
 Kill
 == 即死轮廓
 
@@ -1823,3 +1822,55 @@ Water hammer highlight
 
 Highlight frozen teammates holding hammer fire
 == 高亮冻结时持锤并按住开火的队友
+
+Steam
+== Steam
+
+Hide from Steam (don't connect Steam, friends can't see you playing)
+== 对 Steam 隐藏（不连接 Steam，好友看不到你在玩）
+
+Unchecking takes effect at the next client start (Steam won't reconnect while running).
+== 取消勾选将在下次启动客户端时生效（运行中不会重新连接 Steam）。
+
+Resolving update source...
+== 正在解析更新源……
+
+Update cancelled
+== 更新已取消
+
+Tater
+== Tater
+
+Ancient
+== Ancient
+
+Next
+== Next
+
+Meow
+== Meow
+
+Snow
+== Snow
+
+Salatik
+== Salatik
+
+F
+== F
+
+Best
+== Best
+
+Saiko
+== Saiko
+
+Delta
+== Delta
+
+Cloud
+== Cloud
+
+[data_version.txt]
+%s not found
+== %s 未找到

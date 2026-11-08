@@ -120,8 +120,11 @@ def phase_build(spec, paths, state):
     env = dict(os.environ)
     for sub in ("sqlite3", "curl", "freetype", "opus", "opusfile", "png", "sdl", "zlib"):
         env["PATH"] = str(libs / sub / "windows" / "lib64") + os.pathsep + env["PATH"]
-    result = subprocess.run([str(build_dir / "Release" / "testrunner.exe")], capture_output=True, timeout=1800, env=env)
-    require(result.returncode == 0, f"testrunner failed: {result.returncode}")
+    result = subprocess.run([str(build_dir / "Release" / "testrunner.exe")], capture_output=True, timeout=1800, env=env, cwd=str(repo))
+    if result.returncode != 0:
+        tail = (result.stdout or b"")[-1500:].decode(errors="replace")
+        err = (result.stderr or b"")[-1500:].decode(errors="replace")
+        raise RuntimeError(f"testrunner failed: {result.returncode}\nSTDOUT:{tail}\nSTDERR:{err}")
     client = build_dir / "Release" / "DDNet.exe"
     data = client.read_bytes()
     require(f'{spec["version"]}\0'.encode() in data, "client does not embed the release version")
@@ -241,8 +244,8 @@ def phase_package(spec, paths, state):
 
 
 def signatures(root, directory):
-    script = Path(root) / "scripts" / "check_signatures.ps1"
-    require(script.is_file(), f"missing {script}; copy check_signatures.ps1 from the previous release scripts directory")
+    script = Path(root) / "tclient_scripts" / "check_signatures.ps1"
+    require(script.is_file(), f"missing {script}")
     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(script), "-Directory", str(directory)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     require(result.returncode == 0, "Authenticode evidence failed: " + result.stderr)
     return json.loads(result.stdout)
@@ -313,7 +316,7 @@ def main():
         spec.setdefault(key, default)
     publish = args.publish or spec.get("publish")
 
-    version_suffix = spec["version"].rsplit(".", 1)[1]
+    version_suffix = spec["version"].replace(".", "")  # 1.7.8.60 -> 17860（沿用 v17859-stage 命名惯例）
     root = Path(spec["work_root"]) / f"release-{version_suffix}"
     paths = {
         "root": root,

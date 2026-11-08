@@ -184,13 +184,13 @@ def phase_package(spec, paths, state):
     require(f"{version}\0".encode() in client and f"{previous}\0".encode() not in client, "stage client version is wrong")
     require(git(repo, "rev-parse", "--short", spec["target_commit"]).encode() in client, "stage client lacks the release commit")
 
-    before = signatures(paths["root"], stage)
+    before = signatures(Path(spec["repo"]), stage)
     if spec.get("signed_expected"):
         thumbprint = os.environ.get("TCLIENT_CERT_THUMBPRINT", "")
         require(thumbprint, "TCLIENT_CERT_THUMBPRINT required for signed releases")
         sign = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(repo / "tclient_scripts" / "windows_sign_release.ps1"), "-Directory", str(stage), "-Mode", "Sign", "-CertificateThumbprint", thumbprint, "-CertificateStoreLocation", "CurrentUser"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         require(sign.returncode == 0, "Authenticode signing failed: " + sign.stderr)
-    after = signatures(paths["root"], stage)
+    after = signatures(Path(spec["repo"]), stage)
 
     private_key = assets.load_signing_key(Path(spec["private_key"]))
     metadata = {"product": "TClient", "channel": "stable", "version": version, "platform": "win64"}
@@ -244,7 +244,7 @@ def phase_package(spec, paths, state):
 
 
 def signatures(root, directory):
-    script = Path(root) / "tclient_scripts" / "check_signatures.ps1"
+    script = Path(root) / "tclient_scripts" / "check_signatures.ps1"  # root here = repo
     require(script.is_file(), f"missing {script}")
     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(script), "-Directory", str(directory)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     require(result.returncode == 0, "Authenticode evidence failed: " + result.stderr)

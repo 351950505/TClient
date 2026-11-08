@@ -465,7 +465,7 @@ MACRO_CONFIG_INT(TcDisableOthersSnowflakes, tc_disable_others_snowflakes, 0, 0, 
 // 渲染优化(移植 MeowClient 的 meow_optimizer* 系，参数语义/边界取自 alpha 帮助串实测；
 // alpha 全系默认关，这里总开关与雾默认开是用户决策 2026-11-07)：
 // 清晰区外渐隐成雾，雾外粒子与非焦点玩家跳过渲染；矩形雾可再把世界渲染 scissor 到雾矩形。
-MACRO_CONFIG_INT(TcOptimizer, tc_optimizer, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Renderer optimizer master switch (FPS fog & particle culling)")
+MACRO_CONFIG_INT(TcOptimizer, tc_optimizer, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Renderer optimizer master switch (FPS fog & particle culling; default off — fog can block vision)")
 MACRO_CONFIG_INT(TcOptimizerFpsFog, tc_optimizer_fps_fog, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "FPS fog: fade out and cull entities/particles outside the clear area")
 MACRO_CONFIG_INT(TcOptimizerFpsFogMode, tc_optimizer_fps_fog_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "FPS fog shape (0 = circle, 1 = rectangle)")
 MACRO_CONFIG_INT(TcOptimizerFpsFogRadiusTiles, tc_optimizer_fps_fog_radius_tiles, 40, 5, 300, CFGFLAG_CLIENT | CFGFLAG_SAVE, "FPS fog cull radius in tiles (5-300, default 40; 1 tile = 32px)")

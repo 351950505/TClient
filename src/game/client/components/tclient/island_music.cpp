@@ -517,8 +517,8 @@ public:
 	bool m_CoverDirty = false;          // set by worker when new bytes arrive
 
 	static constexpr size_t COVER_MAX_BYTES = 16u * 1024u * 1024u;
-	static constexpr int COVER_MAX_DIMENSION = 4096;
-	static constexpr size_t COVER_MAX_PIXELS = 16u * 1024u * 1024u;
+	static constexpr int COVER_MAX_DIMENSION = 2048;
+	static constexpr size_t COVER_MAX_PIXELS = 4u * 1024u * 1024u; // 2048x2048 RGBA：解码/遮罩/上传峰值降 4 倍（换歌卡顿治理 2026-11-08）
 
 	// render-thread side texture cache
 	std::string m_LoadedCoverKey;       // key currently decoded into m_CoverTexture
@@ -1083,15 +1083,21 @@ public:
 		_snwprintf(aMonitorPath, std::size(aMonitorPath), L"%s\\island_media_monitor.exe", aClientPath);
 		aMonitorPath[std::size(aMonitorPath) - 1] = L'\0';
 
-		STARTUPINFOW Si;
-		memset(&Si, 0, sizeof(Si));
-		Si.cb = sizeof(Si);
-		PROCESS_INFORMATION Pi;
-		memset(&Pi, 0, sizeof(Pi));
-		if(!CreateProcessW(aMonitorPath, nullptr, nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &Si, &Pi))
-			return;
-		CloseHandle(Pi.hThread);
-		CloseHandle(Pi.hProcess);
+		// 拉起进程移出渲染线程：CreateProcessW 可能被杀软拦截阻塞数十毫秒，
+		// 在渲染线程上会变成周期性单帧卡顿（2026-11-08 卡顿调查）。
+		std::thread(
+			[MonitorPath = std::wstring(aMonitorPath)]() {
+				STARTUPINFOW Si;
+				memset(&Si, 0, sizeof(Si));
+				Si.cb = sizeof(Si);
+				PROCESS_INFORMATION Pi;
+				memset(&Pi, 0, sizeof(Pi));
+				if(!CreateProcessW(MonitorPath.c_str(), nullptr, nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &Si, &Pi))
+					return;
+				CloseHandle(Pi.hThread);
+				CloseHandle(Pi.hProcess);
+			})
+			.detach();
 	}
 
 	// launches / refreshes the helper and keeps the mapping open

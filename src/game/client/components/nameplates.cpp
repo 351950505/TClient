@@ -369,7 +369,9 @@ protected:
 
 		bool NeedsUpdate = m_FontSize != Data.m_FontSize || str_comp(m_aText, Data.m_aName) != 0;
 		const bool UseGradient = !HasWarColor && g_Config.m_TcGradientName && (!Data.m_InGame || CTClientGradient::AppliesTo(Data.m_ClientId, &This));
-		const int PhaseBucket = UseGradient ? CTClientGradient::PhaseBucket(CTClientGradient::AnimatePhase(This.Client()->GlobalTime())) : -1;
+		// 按 ClientId 错相重建桶：避免所有可见渐变名牌在同一帧集中重建（卡顿治理 2026-11-08）。
+		const int Stagger = Data.m_ClientId > 0 ? Data.m_ClientId % 64 : 0;
+		const int PhaseBucket = UseGradient ? (CTClientGradient::PhaseBucket(CTClientGradient::AnimatePhase(This.Client()->GlobalTime())) + Stagger) % 64 : -1;
 		if(m_Gradient != UseGradient || m_LastPhaseBucket != PhaseBucket)
 			NeedsUpdate = true;
 		m_Gradient = UseGradient;
@@ -387,7 +389,9 @@ protected:
 		if(m_Gradient)
 		{
 			const float Phase = CTClientGradient::AnimatePhase(This.Client()->GlobalTime());
-			m_LastPhaseBucket = CTClientGradient::PhaseBucket(Phase);
+			// 与 NeedsUpdate 同款错相：两个存储点必须一致，否则每帧重建。
+			const int Stagger = Data.m_ClientId > 0 ? Data.m_ClientId % 64 : 0;
+			m_LastPhaseBucket = (CTClientGradient::PhaseBucket(Phase) + Stagger) % 64;
 			Cursor.m_vColorSplits = CTClientGradient::BuildAnimatedTextSplits(m_aText, Data.m_ClientId, &This, Phase);
 			const unsigned OldFlags = This.TextRender()->GetRenderFlags();
 			This.TextRender()->SetRenderFlags(OldFlags | TEXT_RENDER_FLAG_ONE_TIME_USE);
@@ -445,7 +449,9 @@ protected:
 
 		bool NeedsUpdate = m_FontSize != Data.m_FontSizeClan || str_comp(m_aText, Data.m_aClan) != 0;
 		const bool UseGradient = !HasWarColor && g_Config.m_TcGradientClan && (!Data.m_InGame || CTClientGradient::AppliesTo(Data.m_ClientId, &This));
-		const int PhaseBucket = UseGradient ? CTClientGradient::PhaseBucket(CTClientGradient::AnimatePhase(This.Client()->GlobalTime())) : -1;
+		// 与名牌渐变同款错相：避免氏族渐变全员同帧重建（卡顿治理 2026-11-08）。
+		const int Stagger = Data.m_ClientId > 0 ? Data.m_ClientId % 64 : 0;
+		const int PhaseBucket = UseGradient ? (CTClientGradient::PhaseBucket(CTClientGradient::AnimatePhase(This.Client()->GlobalTime())) + Stagger) % 64 : -1;
 		if(m_Gradient != UseGradient || m_LastPhaseBucket != PhaseBucket)
 			NeedsUpdate = true;
 		m_Gradient = UseGradient;
@@ -463,7 +469,9 @@ protected:
 		if(m_Gradient)
 		{
 			const float Phase = CTClientGradient::AnimatePhase(This.Client()->GlobalTime());
-			m_LastPhaseBucket = CTClientGradient::PhaseBucket(Phase);
+			// 与 NeedsUpdate 同款错相：两个存储点必须一致，否则每帧重建。
+			const int Stagger = Data.m_ClientId > 0 ? Data.m_ClientId % 64 : 0;
+			m_LastPhaseBucket = (CTClientGradient::PhaseBucket(Phase) + Stagger) % 64;
 			Cursor.m_vColorSplits = CTClientGradient::BuildAnimatedTextSplits(m_aText, Data.m_ClientId, &This, Phase);
 			const unsigned OldFlags = This.TextRender()->GetRenderFlags();
 			This.TextRender()->SetRenderFlags(OldFlags | TEXT_RENDER_FLAG_ONE_TIME_USE);

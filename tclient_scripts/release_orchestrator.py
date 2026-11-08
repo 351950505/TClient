@@ -102,6 +102,13 @@ def phase_preflight(spec, paths, state):
     version_h = (repo / "src/game/version.h").read_text(encoding="utf-8")
     require(f'#define TCLIENT_APP_VERSION "{spec["version"]}"' in version_h, "version.h does not declare the spec version")
     check_helper_lock(spec)
+    translation_gate = Path(__file__).resolve().parent / "check_translations.py"
+    require(translation_gate.is_file(), f"translation gate missing: {translation_gate}")
+    gate = subprocess.run(
+        [sys.executable, "-I", str(translation_gate), "--repo", str(repo)],
+        capture_output=True, text=True, timeout=300,
+    )
+    require(gate.returncode == 0, "translation gate failed:\n" + gate.stdout[-2000:] + gate.stderr[-2000:])
     notes = Path(spec["notes_path"])
     require(notes.is_file() and notes.read_text(encoding="utf-8").strip(), "release notes missing or empty")
     require(Path(spec["monitor_path"]).is_file(), "monitor exe missing")
@@ -260,23 +267,54 @@ def github_token(repo):
     return values[b"password"].decode()
 
 
-def gh(repo, *args, token):
+def gh(repo, *args, token, input_text=None):
     require(GH_EXE.is_file(), f"gh.exe not found: {GH_EXE}")
     env = dict(os.environ, GH_HOST="github.com", GH_TOKEN=token, GH_PROMPT_DISABLED="1")
     # gh api 没有 --repo（endpoint 写成 repos/owner/repo/...）；--repo 只对 release 等子命令合法
     cmd = [str(GH_EXE), *args]
     if args[0] != "api":
         cmd += ["--repo", GITHUB_REPO]
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300)
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, input=input_text, timeout=300)
     require(result.returncode == 0, "gh failed: " + (result.stderr or result.stdout))
     return result.stdout
+
+
+def release_body(repo, notes_path):
+    """Release 正文的原始文本。
+
+    v1.7.8.61/62 的正文在 GitHub 上是一串 ``\\u2014`` 字面量，根因是旧代码用
+    ``json.dumps()``（默认 ensure_ascii=True）拼 ``-F body=...``：中文被转义成
+    ``\\uXXXX``，换行被转义成字面 ``\\n``，还多出一层引号，gh 把整串当纯字符串提交。
+    现在改为把整个 payload 以 UTF-8 JSON 从 stdin 交给 ``gh api --input -``，
+    shell 与参数层都不再参与转义。
+    """
+    text = Path(notes_path).read_text(encoding="utf-8").strip()
+    require(bool(text), "release notes are empty")
+    return text
+
+
+def gh_api_json(repo, endpoint, token, method, payload):
+    """以 JSON body 调用 GitHub API，返回解析后的响应。
+
+    正文按原字节提交：``json.dumps(ensure_ascii=False)`` 保证中文与换行保持
+    可见字符，``--input -`` 保证不经 shell/argv 二次转义。
+    """
+    body = json.dumps(payload, ensure_ascii=False)
+    out = gh(repo, "api", endpoint, "-X", method, "--input", "-", token=token, input_text=body)
+    return json.loads(out) if out.strip() else {}
 
 
 def phase_publish(spec, paths, state):
     token = github_token(Path(spec["repo"]))
     assets_record = json.loads((paths["root"] / "local-assets.json").read_text(encoding="utf-8-sig"))
     asset_paths = {record["name"]: Path(record["path"]) for record in assets_record["assets"]}
-    release = json.loads(gh(paths["root"], "api", "repos/" + GITHUB_REPO + "/releases", "-f", f'tag_name=v{spec["version"]}', "-f", f'target_commitish={spec["target_commit"]}', "-f", f'name=TClient-v{spec["version"]}', "-F", "draft=true", "-F", f'body={json.dumps(Path(spec["notes_path"]).read_text(encoding="utf-8").strip())}', token=token))
+    release = gh_api_json(paths["root"], "repos/" + GITHUB_REPO + "/releases", token, "POST", {
+        "tag_name": f'v{spec["version"]}',
+        "target_commitish": spec["target_commit"],
+        "name": f'TClient-v{spec["version"]}',
+        "draft": True,
+        "body": release_body(paths["root"], spec["notes_path"]),
+    })
     release_id = release["id"]
     for name, path in asset_paths.items():
         digest = sha256_of(path)
@@ -298,7 +336,7 @@ def phase_master_sync(spec, paths, state):
     require(script_path.is_file(), f"missing {script_path}; generate it from the previous release scripts directory")
     result = subprocess.run([sys.executable, str(script_path), "--target", spec["target_commit"]], capture_output=True, text=True, timeout=600)
     require(result.returncode == 0, "master manifest sync failed: " + result.stdout[-2000:] + result.stderr[-2000:])
-    return json.loads(result.stdout.strip().splitlines()[-1]) if result.stdout.strip().startswith("{") else {"synced": True}
+    return json.loads(result.stdout) if result.stdout.strip().startswith("{") else {"synced": True}
 
 
 PHASES = ("preflight", "build", "stage", "package", "publish", "master_sync")

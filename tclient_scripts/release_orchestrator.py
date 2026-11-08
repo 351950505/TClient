@@ -162,7 +162,9 @@ def phase_stage(spec, paths, state):
     if Path(spec["repo"]).joinpath("data").is_dir():
         command += ["--data-dir", str(Path(spec["repo"]) / "data")]
     subprocess.run(command, check=True, timeout=1800)
-    return {"stage_files": sum(1 for _ in stage.rglob("*") if stage.joinpath(Path(_).name).is_file())}
+    # 递归计数必须是「每个 rglob 命中是否普通文件」；旧写法用 Path(_).name 拼回
+    # stage 根目录，嵌套文件全部被判为不存在，1031 个文件会报成 31。
+    return {"stage_files": sum(1 for path in stage.rglob("*") if path.is_file())}
 
 
 def phase_package(spec, paths, state):

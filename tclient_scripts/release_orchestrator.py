@@ -107,7 +107,7 @@ def phase_preflight(spec, paths, state):
     require(translation_gate.is_file(), f"translation gate missing: {translation_gate}")
     gate = subprocess.run(
         [sys.executable, "-I", str(translation_gate), "--repo", str(repo)],
-        capture_output=True, text=True, timeout=300,
+        capture_output=True, text=True, encoding="utf-8", timeout=300,
     )
     require(gate.returncode == 0, "translation gate failed:\n" + gate.stdout[-2000:] + gate.stderr[-2000:])
     notes = Path(spec["notes_path"])
@@ -275,7 +275,11 @@ def gh(repo, *args, token, input_text=None):
     cmd = [str(GH_EXE), *args]
     if args[0] != "api":
         cmd += ["--repo", GITHUB_REPO]
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True, input=input_text, timeout=300)
+    # 必须显式指定 UTF-8。Windows 上 text=True 走 locale（cp936/GBK），中文 payload
+    # 会被 GBK 编码后交给 gh，gh 按 UTF-8 解析就报 "Problems parsing JSON"；
+    # 读取响应时 GBK 解码同样会在中文字节上抛 UnicodeDecodeError。
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, encoding="utf-8",
+                            input=input_text, timeout=300)
     require(result.returncode == 0, "gh failed: " + (result.stderr or result.stdout))
     return result.stdout
 
@@ -319,13 +323,13 @@ def phase_publish(spec, paths, state):
     release_id = release["id"]
     for name, path in asset_paths.items():
         digest = sha256_of(path)
-        upload = subprocess.run([str(GH_EXE), "release", "upload", f'v{spec["version"]}', "--repo", GITHUB_REPO, "--clobber", str(path)], env=dict(os.environ, GH_TOKEN=token, GH_HOST="github.com"), capture_output=True, text=True, timeout=1800)
+        upload = subprocess.run([str(GH_EXE), "release", "upload", f'v{spec["version"]}', "--repo", GITHUB_REPO, "--clobber", str(path)], env=dict(os.environ, GH_TOKEN=token, GH_HOST="github.com"), capture_output=True, text=True, encoding="utf-8", timeout=1800)
         require(upload.returncode == 0, f"asset upload failed: {name}: " + upload.stderr)
         remote = json.loads(gh(paths["root"], "api", f"repos/{GITHUB_REPO}/releases/{release_id}/assets?per_page=100", token=token))
         match = [a for a in remote if a["name"] == name]
         require(match and match[0]["size"] == path.stat().st_size, f"remote asset size differs: {name}")
         state.setdefault("remote_digests", {})[name] = digest
-    publish = subprocess.run([str(GH_EXE), "release", "edit", f'v{spec["version"]}', "--repo", GITHUB_REPO, "--draft=false", "--latest"], env=dict(os.environ, GH_TOKEN=token), capture_output=True, text=True, timeout=300)
+    publish = subprocess.run([str(GH_EXE), "release", "edit", f'v{spec["version"]}', "--repo", GITHUB_REPO, "--draft=false", "--latest"], env=dict(os.environ, GH_TOKEN=token), capture_output=True, text=True, encoding="utf-8", timeout=300)
     require(publish.returncode == 0, "publishing the release failed: " + publish.stderr)
     return {"release_id": release_id, "published": True}
 
@@ -349,7 +353,7 @@ def phase_master_sync(spec, paths, state):
     ]
     if spec.get("expected_master"):
         command += ["--expected-master", spec["expected_master"]]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=900)
+    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=900)
     require(result.returncode == 0, "master manifest sync failed: " + result.stdout[-2000:] + result.stderr[-2000:])
     return json.loads(result.stdout) if result.stdout.strip().startswith("{") else {"synced": True}
 

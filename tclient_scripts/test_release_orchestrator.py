@@ -139,6 +139,23 @@ class ReleaseBodyEncodingTests(unittest.TestCase):
         # 换行在 JSON 字符串里必须是转义序列（合法 JSON），解码后要还原成真实换行
         self.assertEqual(json.loads(sent)["body"], self.NOTES)
 
+    def test_gh_forces_utf8_not_locale(self):
+        """Windows 上 text=True 默认用 cp936；中文 payload 会被 GBK 编码，gh 报
+        "Problems parsing JSON"，而且读响应时 GBK 解码还会抛 UnicodeDecodeError。
+        所有与 gh 的交互都必须显式指定 utf-8。
+        """
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(cmd, 0, stdout='{"ok": true}', stderr="")
+
+        with mock.patch.object(release_orchestrator, "GH_EXE", Path(sys.executable)), \
+             mock.patch.object(release_orchestrator.subprocess, "run", side_effect=fake_run):
+            release_orchestrator.gh("repo", "api", "repos/x/y/releases", token="t", input_text="{}")
+
+        self.assertEqual(seen.get("encoding"), "utf-8")
+
 
 class MasterSyncParsingTests(unittest.TestCase):
     """v1.7.8.62：master_sync 子脚本输出 pretty JSON，父进程只解析最后一行 ``}``。"""

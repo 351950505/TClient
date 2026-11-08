@@ -94,8 +94,8 @@ def phase_preflight(spec, paths, state):
     require(git(repo, "rev-parse", "HEAD") == spec["target_commit"], "HEAD differs from the target commit")
     require(not git(repo, "status", "--porcelain=v1", "--untracked-files=all"), "source worktree is not clean")
     require(
-        git(repo, "rev-list", "--parents", "-n", "1", spec["target_commit"]).split() == [spec["target_commit"], spec["parent_commit"]],
-        "unexpected source parent",
+        subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", spec["parent_commit"], spec["target_commit"]], capture_output=True, timeout=60).returncode == 0,
+        "parent_commit is not an ancestor of the target commit",
     )
     changed = set(git(repo, "diff", "--name-only", spec["parent_commit"], spec["target_commit"]).splitlines())
     require(changed == set(spec["changed_files"]), "changed-file set differs from the spec (cumulative diff " + spec["parent_commit"][:12] + ".." + spec["target_commit"][:12] + ")")

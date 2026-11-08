@@ -230,6 +230,7 @@ def phase_package(spec, paths, state):
     record = {
         "version": version,
         "source_commit": spec["target_commit"],
+        "source_tree": git(Path(spec["repo"]), "rev-parse", spec["target_commit"] + "^{tree}"),
         "parent": spec["parent_commit"],
         "helper_lock": "passed",
         "assets": [

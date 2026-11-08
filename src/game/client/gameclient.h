@@ -246,7 +246,7 @@ public:
 	CClientBadge m_ClientBadge; // TClient: 记分板企鹅徽标（ddnet-custom-clients 皮肤颜色法）
 	CTClientGradient m_Gradient;
 	CTrails m_Trails;
-	COptimizer m_Optimizer; // TClient: FPS 雾/渲染削减（注册序在世界与 HUD 之间）
+	COptimizer m_Optimizer; // TClient: 渲染削减开关（粒子总开关；雾已于 1.7.8.63 移除）
 	CTranslate m_Translate;
 	CPet m_Pet;
 	CPlayerIndicator m_PlayerIndicator;

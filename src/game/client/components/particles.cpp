@@ -253,8 +253,7 @@ void CParticles::RenderGroup(int Group)
 			}
 
 			// the current position, respecting the size, is inside the viewport, render it, else ignore
-			// TClient: 渲染优化——雾外粒子跳过
-			if(ParticleIsVisibleOnScreen(p, Size) && !GameClient()->m_Optimizer.CullWorldPos(p, Size))
+			if(ParticleIsVisibleOnScreen(p, Size))
 			{
 				if((size_t)CurParticleRenderCount == GRAPHICS_MAX_PARTICLES_RENDER_COUNT || LastColor.r != m_aParticles[i].m_Color.r || LastColor.g != m_aParticles[i].m_Color.g || LastColor.b != m_aParticles[i].m_Color.b || LastColor.a != Alpha || LastQuadOffset != QuadOffset)
 				{
@@ -312,8 +311,7 @@ void CParticles::RenderGroup(int Group)
 			}
 
 			// the current position, respecting the size, is inside the viewport, render it, else ignore
-			// TClient: 渲染优化——雾外粒子跳过
-			if(ParticleIsVisibleOnScreen(p, Size) && !GameClient()->m_Optimizer.CullWorldPos(p, Size))
+			if(ParticleIsVisibleOnScreen(p, Size))
 			{
 				Graphics()->TextureSet(aParticles[m_aParticles[i].m_Spr - FirstParticleOffset]);
 				Graphics()->QuadsBegin();

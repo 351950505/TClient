@@ -275,7 +275,7 @@ def phase_publish(spec, paths, state):
     token = github_token(Path(spec["repo"]))
     assets_record = json.loads((paths["root"] / "local-assets.json").read_text(encoding="utf-8-sig"))
     asset_paths = {record["name"]: Path(record["path"]) for record in assets_record["assets"]}
-    release = json.loads(gh(paths["root"], "api", "repos/" + GITHUB_REPO + "/releases", "-f", f'tag_name=v{spec["version"]}', "-f", f'target_commitish={spec["target_commit"]}', "-f", f'name=TClient-v{spec["version"]}', "-f", "draft=true", "-F", f'body={json.dumps(Path(spec["notes_path"]).read_text(encoding="utf-8").strip())}', token=token))
+    release = json.loads(gh(paths["root"], "api", "repos/" + GITHUB_REPO + "/releases", "-f", f'tag_name=v{spec["version"]}', "-f", f'target_commitish={spec["target_commit"]}', "-f", f'name=TClient-v{spec["version"]}', "-F", "draft=true", "-F", f'body={json.dumps(Path(spec["notes_path"]).read_text(encoding="utf-8").strip())}', token=token))
     release_id = release["id"]
     for name, path in asset_paths.items():
         digest = sha256_of(path)

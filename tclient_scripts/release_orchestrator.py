@@ -262,7 +262,11 @@ def github_token(repo):
 def gh(repo, *args, token):
     require(GH_EXE.is_file(), f"gh.exe not found: {GH_EXE}")
     env = dict(os.environ, GH_HOST="github.com", GH_TOKEN=token, GH_PROMPT_DISABLED="1")
-    result = subprocess.run([str(GH_EXE), "api" if args[0] == "api" else args[0], "--repo", GITHUB_REPO, *args[1:]], env=env, capture_output=True, text=True, timeout=300)
+    # gh api 没有 --repo（endpoint 写成 repos/owner/repo/...）；--repo 只对 release 等子命令合法
+    cmd = [str(GH_EXE), *args]
+    if args[0] != "api":
+        cmd += ["--repo", GITHUB_REPO]
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300)
     require(result.returncode == 0, "gh failed: " + (result.stderr or result.stdout))
     return result.stdout
 

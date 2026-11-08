@@ -97,8 +97,8 @@ def phase_preflight(spec, paths, state):
         git(repo, "rev-list", "--parents", "-n", "1", spec["target_commit"]).split() == [spec["target_commit"], spec["parent_commit"]],
         "unexpected source parent",
     )
-    changed = set(git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", spec["target_commit"]).splitlines())
-    require(changed == set(spec["changed_files"]), "changed-file set differs from the spec")
+    changed = set(git(repo, "diff", "--name-only", spec["parent_commit"], spec["target_commit"]).splitlines())
+    require(changed == set(spec["changed_files"]), "changed-file set differs from the spec (cumulative diff " + spec["parent_commit"][:12] + ".." + spec["target_commit"][:12] + ")")
     version_h = (repo / "src/game/version.h").read_text(encoding="utf-8")
     require(f'#define TCLIENT_APP_VERSION "{spec["version"]}"' in version_h, "version.h does not declare the spec version")
     check_helper_lock(spec)

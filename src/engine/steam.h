@@ -21,8 +21,12 @@ public:
 
 	virtual void ClearGameInfo() = 0;
 	virtual void SetGameInfo(const NETADDR &ServerAddr, const char *pMapName, bool AnnounceAddr) = 0;
+
+	// [STEAM-HIDE] 运行中隐藏：立即断开 Steam（重新启用需重启客户端）
+	virtual void HideFromSteam() = 0;
 };
 
-ISteam *CreateSteam();
+// HideFromSteam=true 时不调用 SteamAPI_Init，返回 Stub（Steam 好友看不到"正在玩"）
+ISteam *CreateSteam(bool HideFromSteam);
 
 #endif // ENGINE_STEAM_H

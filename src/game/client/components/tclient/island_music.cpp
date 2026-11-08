@@ -1526,8 +1526,11 @@ public:
 		m_RequestKey.clear();
 		SCacheEntry Entry;
 		Entry.m_State = ELyricsState::NOTFOUND;
-		const int StatusCode = pFinished->StatusCode();
-		if(pFinished->State() != EHttpState::DONE || StatusCode == 0)
+		// [HTTP-ASSERT] 请求可能以 ERROR/ABORTED 结束（超时/断网），此时先取 StatusCode
+		// 会触发 http.cpp 的 "Request not done" 断言弹窗；先看状态再取码，失败一律按离线处理
+		const EHttpState FinishedState = pFinished->State();
+		const int StatusCode = FinishedState == EHttpState::DONE ? pFinished->StatusCode() : 0;
+		if(FinishedState != EHttpState::DONE || StatusCode == 0)
 			Entry.m_State = ELyricsState::OFFLINE;
 		else if(StatusCode >= 200 && StatusCode < 300)
 		{

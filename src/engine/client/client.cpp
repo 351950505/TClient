@@ -56,6 +56,7 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeEndPeriod(unsigned i
 #include <engine/shared/demo.h>
 #include <engine/shared/fifo.h>
 #include <engine/shared/filecollection.h>
+#include <engine/shared/linereader.h>
 #include <engine/shared/masterserver.h>
 #include <engine/shared/network.h>
 #include <engine/shared/packer.h>
@@ -5589,7 +5590,28 @@ int main(int argc, const char **argv)
 	IDiscord *pDiscord = CreateDiscord();
 	pKernel->RegisterInterface(pDiscord);
 
-	ISteam *pSteam = CreateSteam();
+	// [STEAM-HIDE] 配置域文件在下方 ExecuteFile 时才加载，而 Steam 必须现在初始化；
+	// 先直接读 settings_tclient.cfg 里的开关，避免开启后启动瞬间仍短暂连上 Steam
+	bool SteamHidden = false;
+	{
+		IOHANDLE SteamHideFile = pStorage->OpenFile(s_aConfigDomains[ConfigDomain::TCLIENT].m_aConfigPath, IOFLAG_READ, IStorage::TYPE_ALL);
+		if(SteamHideFile)
+		{
+			CLineReader SteamHideReader;
+			SteamHideReader.OpenFile(SteamHideFile);
+			while(const char *pLine = SteamHideReader.Get())
+			{
+				if(str_startswith(pLine, "me_steam_hide"))
+				{
+					SteamHidden = str_toint(pLine + str_length("me_steam_hide")) != 0;
+					break;
+				}
+			}
+			io_close(SteamHideFile);
+		}
+	}
+
+	ISteam *pSteam = CreateSteam(SteamHidden);
 	pKernel->RegisterInterface(pSteam);
 
 	INotifications *pNotifications = CreateNotifications();

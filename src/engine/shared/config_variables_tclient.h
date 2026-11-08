@@ -399,6 +399,9 @@ MACRO_CONFIG_INT(MeStreamerHideSkins, me_streamer_hide_skins, 0, 0, 1, CFGFLAG_C
 MACRO_CONFIG_INT(MeStreamerDefaultFlags, me_streamer_default_flags, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Streamer mode: hide country flags everywhere (no flag is drawn)")
 MACRO_CONFIG_STR(MeStreamerWordsFile, me_streamer_words_file, 1024, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Streamer mode: extra word list file (one word per line)")
 
+// ME page: [STEAM-HIDE] 不连 Steam（1=启动不调 SteamAPI_Init，Steam 好友看不到正在玩；运行中开启立即断开，重新开启需重启）
+MACRO_CONFIG_INT(MeSteamHide, me_steam_hide, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: hide from Steam (don't connect Steam; friends won't see you playing)")
+
 // ME page: per-category message muting
 MACRO_CONFIG_INT(MeMuteTeamChat, me_mute_team_chat, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: hide team chat messages")
 MACRO_CONFIG_INT(MeMuteWhisper, me_mute_whisper, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: hide whisper messages")

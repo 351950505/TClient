@@ -15,6 +15,8 @@ class CSteam : public ISteam
 	char m_aPlayerName[16];
 	bool m_GotConnectAddr;
 	NETADDR m_ConnectAddr;
+	// [STEAM-HIDE] 运行中隐藏后不再调用任何 SteamAPI 函数（句柄已失效）
+	bool m_Hidden = false;
 
 public:
 	CSteam()
@@ -90,6 +92,8 @@ public:
 
 	void Update() override
 	{
+		if(m_Hidden)
+			return;
 		SteamAPI_ManualDispatch_RunFrame(m_SteamPipe);
 		CallbackMsg_t Callback;
 		while(SteamAPI_ManualDispatch_GetNextCallback(m_SteamPipe, &Callback))
@@ -113,10 +117,14 @@ public:
 	}
 	void ClearGameInfo() override
 	{
+		if(m_Hidden)
+			return;
 		SteamAPI_ISteamFriends_ClearRichPresence(m_pSteamFriends);
 	}
 	void SetGameInfo(const NETADDR &ServerAddr, const char *pMapName, bool AnnounceAddr) override
 	{
+		if(m_Hidden)
+			return;
 		if(AnnounceAddr)
 		{
 			char aServerAddr[NETADDR_MAXSTRSIZE];
@@ -129,6 +137,14 @@ public:
 		SteamAPI_ISteamFriends_SetRichPresence(m_pSteamFriends, "status", pMapName);
 		SteamAPI_ISteamFriends_SetRichPresence(m_pSteamFriends, "steam_display", "#Status");
 	}
+	void HideFromSteam() override
+	{
+		if(m_Hidden)
+			return;
+		m_Hidden = true;
+		SteamAPI_ISteamFriends_ClearRichPresence(m_pSteamFriends);
+		SteamAPI_Shutdown();
+	}
 };
 
 class CSteamStub : public ISteam
@@ -139,11 +155,12 @@ class CSteamStub : public ISteam
 	void Update() override {}
 	void ClearGameInfo() override {}
 	void SetGameInfo(const NETADDR &ServerAddr, const char *pMapName, bool AnnounceAddr) override {}
+	void HideFromSteam() override {}
 };
 
-ISteam *CreateSteam()
+ISteam *CreateSteam(bool HideFromSteam)
 {
-	if(!SteamAPI_Init())
+	if(HideFromSteam || !SteamAPI_Init())
 	{
 		return new CSteamStub();
 	}

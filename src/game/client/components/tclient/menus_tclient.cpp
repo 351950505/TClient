@@ -9,6 +9,7 @@
 #include <engine/shared/linereader.h>
 #include <engine/shared/localization.h>
 #include <engine/shared/protocol7.h>
+#include <engine/steam.h>
 #include <engine/storage.h>
 #include <engine/textrender.h>
 #include <engine/updater.h>
@@ -4058,6 +4059,23 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeClientBadge, TCLocalize("Show a penguin next to TClient players on the scoreboard"), &g_Config.m_MeClientBadge, &LeftView, LineSize);
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("TClient identity is always broadcast so other TClient users can recognise you; this option only controls whether you see the penguin."), EditBoxFontSize, TEXTALIGN_TL);
+
+	// [STEAM-HIDE] Steam 隐藏：不连 Steam，好友列表不再显示"正在玩"
+	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Steam"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	if(DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeSteamHide, TCLocalize("Hide from Steam (don't connect Steam, friends can't see you playing)"), &g_Config.m_MeSteamHide, &LeftView, LineSize))
+	{
+		if(g_Config.m_MeSteamHide)
+		{
+			// 勾选时立即断开；取消勾选需要重启客户端才能重新连上 Steam
+			if(ISteam *pSteam = Kernel()->RequestInterface<ISteam>())
+				pSteam->HideFromSteam();
+		}
+	}
+	LeftView.HSplitTop(LineSize, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Unchecking takes effect at the next client start (Steam won't reconnect while running)."), EditBoxFontSize, TEXTALIGN_TL);
 
 		// 地图图层
 		LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);

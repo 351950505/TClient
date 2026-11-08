@@ -354,7 +354,9 @@ def phase_master_sync(spec, paths, state):
     return json.loads(result.stdout) if result.stdout.strip().startswith("{") else {"synced": True}
 
 
-PHASES = ("preflight", "build", "stage", "package", "publish", "master_sync")
+LOCAL_PHASES = ("preflight", "build", "stage", "package")
+PUBLISH_PHASES = ("publish", "master_sync")
+PHASES = LOCAL_PHASES + PUBLISH_PHASES
 
 
 def main():
@@ -389,13 +391,14 @@ def main():
     state_path = root / "orchestrator-state.json"
     state = json.loads(state_path.read_text(encoding="utf-8-sig")) if args.resume and state_path.exists() else {}
 
+    completed = set(state.get("completed", []))
+    plan = list(LOCAL_PHASES) + (list(PUBLISH_PHASES) if publish else [])
+
     if args.dry_run:
         phase_preflight(spec, paths, state)
-        print(json.dumps({"dry_run": True, "phases_planned": list(PHASES) + (["publish", "master_sync"] if publish else [])}, indent=2))
+        print(json.dumps({"dry_run": True, "phases_planned": plan}, indent=2))
         return 0
 
-    completed = set(state.get("completed", []))
-    plan = ["preflight", "build", "stage", "package"] + (["publish", "master_sync"] if publish else [])
     for phase in plan:
         if args.resume and phase in completed:
             print(f"[skip] {phase}")

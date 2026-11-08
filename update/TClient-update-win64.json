@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.61",
+  "version": "1.7.8.62",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17269825,
-  "sha256": "768101aba6b537e81991d693b329076c01fc3c6b83860ad50b040c5bbcc2ec4e",
-  "notes": "# TClient v1.7.8.61 — Steam 隐藏开关 + 弹窗修复\n\n## 变更\n- **ME 页新增\"Steam\"区块**：`me_steam_hide` 开关（默认关）。开启后客户端**不再连接 Steam**，Steam 好友列表不会显示\"正在玩 Teeworlds\"，也不会有服务器 rich presence\n  - 勾选后**立即断开**（几秒内 Steam 显示下线）；取消勾选需要**重启客户端**才能重新连上 Steam\n  - 开关状态在下次启动时同样生效（独立读取，不受配置加载顺序影响）\n- 本区块与 BestClient 的 Steam 行为同类；Steam 里显示的名字仍是游戏本体（Teeworlds），任何客户端都无法改成自己的名字\n\n## 修复\n- **\"Request not done\" 断言弹窗**（`http.cpp(170)`）：v1.7.8.56 / v1.7.8.60 反馈的弹窗，根因是灵动岛歌词请求（lrclib.net）超时/失败时代码先取状态码后查状态。本版起请求失败一律静默降级为\"离线\"，不再弹窗（加速器通道下换歌最易触发，独占全屏只是巧合场景）\n\n## 附件\n- 更新包 / 完整包 / 独立 DDNet.exe / 更新器 / 清单与 Ed25519 签名，全部经逐字节校验\n- 自研 EXE 仍未签名（无代码签名证书），如遇杀软提示请选择信任或向我们反馈完整截图",
+  "size": 17270380,
+  "sha256": "592104b3dcb04b15b9f5d9eb4da8753a9de9c918094f491f7ffb68a41b2081b1",
+  "notes": "# TClient v1.7.8.62 — 更新通道大修\n\n## 背景\n2026-11-08 起 GitHub 的 `github.com/.../releases/download` 入口大范围 504，旧更新源全部共用这一条入口（ghfast 加速、自建镜像的回源、GitHub 直链），玩家更新下载进度长期停在 0% 后报失败。资产本身没问题，是入口挂了。\n\n## 变更\n- **更新源结构重排**（新顺序，自动逐个换源）：\n  1. ghfast.top 加速\n  2. **自建镜像 github1.me3.dpdns.org**（原 fast1，Worker 回源已改为 api.github.com，不再碰挂掉的入口）\n  3. **自建镜像 github2.me3.dpdns.org**（原 fast2，同上）\n  4. GitHub 直链\n  5. **api.github.com 直连（新增兜底）**：客户端自己解析 release 资产地址后经官方资产 CDN 下载，即使 github.com 入口全挂也能下\n- 镜像 Worker 对客户端**永远直出 200/206，不再出现 302 跳转链**，断点续传（Range）透传保留\n- Worker 已加 GitHub token 提额（api 匿名限速 60/h/IP → 5000/h）\n- Worker 源码入库 `other/github-mirror-worker/`（可审查、可复部署）\n\n## 附带（.61 内容重申）\n- ME 页 Steam 隐藏开关（`me_steam_hide`）：勾选立即断开 Steam\n- \"Request not done\" 断言弹窗修复（歌词请求失败静默降级）\n\n## 附件\n- 更新包 / 完整包 / 独立 DDNet.exe / 更新器 / 清单与 Ed25519 签名，全部经逐字节校验\n- 自研 EXE 仍未签名（无代码签名证书），如遇杀软提示请选择信任或向我们反馈完整截图",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 351232,

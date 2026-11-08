@@ -392,7 +392,6 @@ def main():
         "stage_inventory": root / "stage-inventory.json",
     }
     root.mkdir(parents=True, exist_ok=True)
-    (root / "scripts").mkdir(exist_ok=True)
 
     state_path = root / "orchestrator-state.json"
     state = json.loads(state_path.read_text(encoding="utf-8-sig")) if args.resume and state_path.exists() else {}

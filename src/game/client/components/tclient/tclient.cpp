@@ -56,28 +56,39 @@ static constexpr const char *TCLIENT_UPDATE_LATEST_URL = "https://github.com/351
 // Release；只有它返回的新版本能形成候选，不能单独证明本机已是最新。
 static constexpr const char *TCLIENT_UPDATE_RAW_BASE = "https://raw.githubusercontent.com/351950505/TClient/master/update/";
 static constexpr const char *TCLIENT_UPDATE_GH_BASE = "https://github.com/351950505/TClient/releases/download/";
-// 候选清单源，按顺序尝试：ghfast 加速 → 自建优选镜像（fast1/fast2，同一优选
-// 边缘 104.17.147.66）→ github 直链 → raw 仓库。
+static constexpr const char *TCLIENT_UPDATE_GH_REPO_PATH = "351950505/TClient";
+// 2026-11-08：github.com 的 releases/download 入口大面积 504（ghfast 与自建镜像的
+// 回源都走它，一起挂），唯一稳定的官方通道是 api.github.com（octet-stream 302 到
+// release-assets Azure blob，实测可用）。自建镜像已换名 fast1/fast2 → github1/github2
+// 并把回源改为 api.github.com 解析（不再碰 releases/download 入口）。
+// 候选清单源，按顺序尝试：ghfast 加速 → 自建镜像 github1/github2 → github 直链 → raw 仓库。
 static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {
 	"https://ghfast.top/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
-	"https://fast1.me3.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
-	"https://fast2.me3.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
+	"https://github1.me3.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
+	"https://github2.me3.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://raw.githubusercontent.com/351950505/TClient/master/update/TClient-update-win64.json",
 };
-// 与清单源一一对应的下载前缀："" = releases 直链，nullptr = raw。
+// 与清单源一一对应的下载前缀："" = releases 直链，"@api" = api.github.com
+// （先解析 release-by-tag 拿 asset url 再下载），nullptr = raw。
 // 下载换源只改变前缀；版本、哈希和大小始终来自同一份已验签清单。
 static const char *const TCLIENT_UPDATE_SOURCE_SIBLING_BASES[] = {
 	"https://ghfast.top/",
-	"https://fast1.me3.dpdns.org/",
-	"https://fast2.me3.dpdns.org/",
+	"https://github1.me3.dpdns.org/",
+	"https://github2.me3.dpdns.org/",
 	"",
+	"@api",
 	nullptr,
 };
-static_assert(std::size(TCLIENT_UPDATE_MANIFEST_SOURCES) == std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES));
-// raw 不托管大文件；前四个 Release 入口每个阶段最多尝试一次。
-static constexpr int TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT = 4;
+// @api 不是清单源（api 不回 manifest），下载入口比清单源多一个。
+static_assert(std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES) == std::size(TCLIENT_UPDATE_MANIFEST_SOURCES) + 1);
+// raw 不托管大文件；前五个 Release 入口每个阶段最多尝试一次。
+static constexpr int TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT = 5;
 static_assert(std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES) == TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT + 1);
+static bool UpdateSourceIsApi(const char *pBase)
+{
+	return pBase && str_comp(pBase, "@api") == 0;
+}
 
 static void FormatUpdateAssetUrl(char *pBuf, int BufSize, const char *pBase, const char *pTag, const char *pAsset)
 {
@@ -995,6 +1006,11 @@ void CTClient::ResetUpdateTasks()
 		m_pUpdateHelperTask->Abort();
 		m_pUpdateHelperTask = nullptr;
 	}
+	if(m_pUpdateApiResolveTask)
+	{
+		m_pUpdateApiResolveTask->Abort();
+		m_pUpdateApiResolveTask = nullptr;
+	}
 }
 
 // 更新清单 Ed25519 验签：公钥内嵌（update_public_key.h），签名由发布脚本
@@ -1334,7 +1350,85 @@ void CTClient::UpdateStartDownload()
 		return;
 	m_UpdateDownloadAttempt = 0;
 	m_UpdateDownloadSource = TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource] == nullptr ? TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT - 1 : m_UpdateManifestSource;
+	m_UpdateRelease.m_aApiZipUrl[0] = '\0';
+	m_aUpdateApiHelperUrl[0] = '\0';
 	StartDownloadTask();
+}
+
+// "@api" 源第一步：api.github.com 的 release-by-tag JSON（匿名，响应很小），
+// 解析出 zip/helper 两个 asset 的 api url（octet-stream 时 302 到 release-assets）。
+void CTClient::StartApiResolveTask(bool Helper)
+{
+	ResetUpdateTasks();
+	m_UpdateState = EUpdateState::DOWNLOADING;
+	m_ApiResolvePending = Helper;
+	SetUpdateStatus(TCLocalize("Resolving update source..."));
+	char aUrl[256];
+	str_format(aUrl, sizeof(aUrl), "https://api.github.com/repos/%s/releases/tags/%s", TCLIENT_UPDATE_GH_REPO_PATH, m_UpdateRelease.m_aTag);
+	log_info("tclient-update", "resolving release assets via api.github.com (helper=%d)", Helper ? 1 : 0);
+	m_pUpdateApiResolveTask = HttpGet(aUrl);
+	m_pUpdateApiResolveTask->Timeout(CTimeout{15000, 0, 800, 10});
+	m_pUpdateApiResolveTask->IpResolve(IPRESOLVE::V4);
+	m_pUpdateApiResolveTask->MaxResponseSize(2 * 1024 * 1024);
+	m_pUpdateApiResolveTask->FailOnErrorStatus(true);
+	m_pUpdateApiResolveTask->LogProgress(HTTPLOG::NONE);
+	Http()->Run(m_pUpdateApiResolveTask);
+}
+
+void CTClient::FinishApiResolve()
+{
+	std::shared_ptr<IHttpRequest> pTask = m_pUpdateApiResolveTask;
+	const bool Helper = m_ApiResolvePending;
+	m_pUpdateApiResolveTask = nullptr;
+	m_ApiResolvePending = false;
+	const char *pResolveFail = TCLocalize("Download failed or the file is corrupted");
+	if(!pTask || pTask->State() != EHttpState::DONE)
+	{
+		RetryUpdateDownload(Helper, pResolveFail);
+		return;
+	}
+	json_value *pRoot = pTask->ResultJson();
+	if(pRoot == nullptr || pRoot == &json_value_none || pRoot->type != json_object)
+	{
+		RetryUpdateDownload(Helper, pResolveFail);
+		return;
+	}
+	const json_value *pAssets = json_object_get(pRoot, "assets");
+	bool GotZip = false, GotHelper = false;
+	if(pAssets && pAssets->type == json_array)
+	{
+		for(unsigned i = 0; i < json_array_length(pAssets); ++i)
+		{
+			const json_value *pAsset = json_array_get(pAssets, i);
+			if(!pAsset || pAsset->type != json_object)
+				continue;
+			const json_value *pName = json_object_get(pAsset, "name");
+			const json_value *pUrl = json_object_get(pAsset, "url");
+			if(!pName || pName->type != json_string || !pUrl || pUrl->type != json_string)
+				continue;
+			if(str_comp(pName->u.string.ptr, TCLIENT_UPDATE_ZIP_ASSET) == 0)
+			{
+				str_copy(m_UpdateRelease.m_aApiZipUrl, pUrl->u.string.ptr);
+				GotZip = true;
+			}
+			else if(str_comp(pName->u.string.ptr, TCLIENT_UPDATE_HELPER_ASSET) == 0)
+			{
+				str_copy(m_aUpdateApiHelperUrl, pUrl->u.string.ptr);
+				GotHelper = true;
+			}
+		}
+	}
+	json_value_free(pRoot);
+	if(!GotZip || !GotHelper)
+	{
+		log_warn("tclient-update", "api resolve incomplete (zip=%d helper=%d)", GotZip ? 1 : 0, GotHelper ? 1 : 0);
+		RetryUpdateDownload(Helper, pResolveFail);
+		return;
+	}
+	if(Helper)
+		StartUpdateHelperTask();
+	else
+		StartDownloadTask();
 }
 
 void CTClient::StartDownloadTask()
@@ -1345,9 +1439,17 @@ void CTClient::StartDownloadTask()
 		UpdateFail(TCLocalize("Update rejected: missing or malformed SHA-256"));
 		return;
 	}
+	if(UpdateSourceIsApi(TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource]) && !m_UpdateRelease.m_aApiZipUrl[0])
+	{
+		StartApiResolveTask(false);
+		return;
+	}
 	ResetUpdateTasks();
 	m_UpdateState = EUpdateState::DOWNLOADING;
-	FormatUpdateAssetUrl(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource], m_UpdateRelease.m_aTag, TCLIENT_UPDATE_ZIP_ASSET);
+	if(UpdateSourceIsApi(TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource]))
+		str_copy(m_UpdateRelease.m_aZipUrl, m_UpdateRelease.m_aApiZipUrl);
+	else
+		FormatUpdateAssetUrl(m_UpdateRelease.m_aZipUrl, sizeof(m_UpdateRelease.m_aZipUrl), TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource], m_UpdateRelease.m_aTag, TCLIENT_UPDATE_ZIP_ASSET);
 	SetUpdateStatus(TCLocalize("Downloading update..."));
 	log_info("tclient-update", "downloading %s (%lld bytes)", m_UpdateRelease.m_aZipUrl, (long long)m_UpdateRelease.m_Size);
 
@@ -1355,6 +1457,8 @@ void CTClient::StartDownloadTask()
 	m_pUpdateDownloadTask->Timeout(CTimeout{20000, 0, 800, 60});
 	m_pUpdateDownloadTask->IpResolve(IPRESOLVE::V4);
 	m_pUpdateDownloadTask->FailOnErrorStatus(true);
+	if(UpdateSourceIsApi(TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource]))
+		m_pUpdateDownloadTask->HeaderString("Accept", "application/octet-stream");
 	m_pUpdateDownloadTask->ExpectSha256(Expected);
 	// 注意不能开 ValidateBeforeOverwrite：开了之后文件停在 .tmp，必须再调
 	// OnValidation(true) 才落盘，而这里没有回调链。ExpectSha256 已经保证
@@ -1403,12 +1507,24 @@ void CTClient::StartUpdateHelperTask()
 		UpdateFail(TCLocalize("Update rejected: missing bootstrap helper"));
 		return;
 	}
-	FormatUpdateAssetUrl(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource], m_UpdateRelease.m_aTag, TCLIENT_UPDATE_HELPER_ASSET);
+	if(UpdateSourceIsApi(TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource]) && !m_aUpdateApiHelperUrl[0])
+	{
+		StartApiResolveTask(true);
+		return;
+	}
+	ResetUpdateTasks();
+	m_UpdateState = EUpdateState::DOWNLOADING;
+	if(UpdateSourceIsApi(TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource]))
+		str_copy(m_aUpdateHelperUrl, m_aUpdateApiHelperUrl);
+	else
+		FormatUpdateAssetUrl(m_aUpdateHelperUrl, sizeof(m_aUpdateHelperUrl), TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource], m_UpdateRelease.m_aTag, TCLIENT_UPDATE_HELPER_ASSET);
 	Storage()->GetCompletePath(IStorage::TYPE_SAVE, TCLIENT_UPDATE_BOOTSTRAP_PATH, m_aUpdateBootstrapPath, sizeof(m_aUpdateBootstrapPath));
 	m_pUpdateHelperTask = HttpGetFile(m_aUpdateHelperUrl, Storage(), TCLIENT_UPDATE_BOOTSTRAP_PATH, IStorage::TYPE_SAVE);
 	m_pUpdateHelperTask->Timeout(CTimeout{20000, 0, 800, 60});
 	m_pUpdateHelperTask->IpResolve(IPRESOLVE::V4);
 	m_pUpdateHelperTask->FailOnErrorStatus(true);
+	if(UpdateSourceIsApi(TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource]))
+		m_pUpdateHelperTask->HeaderString("Accept", "application/octet-stream");
 	m_pUpdateHelperTask->ExpectSha256(HelperDigest);
 	m_pUpdateHelperTask->ValidateBeforeOverwrite(false);
 	m_pUpdateHelperTask->AllowResume(true);
@@ -1560,7 +1676,8 @@ void CTClient::PollUpdateTasks()
 	if((m_pUpdateManifestTask && m_pUpdateManifestTask->State() == EHttpState::ABORTED) ||
 		(m_pUpdateManifestSigTask && m_pUpdateManifestSigTask->State() == EHttpState::ABORTED) ||
 		(m_pUpdateDownloadTask && m_pUpdateDownloadTask->State() == EHttpState::ABORTED) ||
-		(m_pUpdateHelperTask && m_pUpdateHelperTask->State() == EHttpState::ABORTED))
+		(m_pUpdateHelperTask && m_pUpdateHelperTask->State() == EHttpState::ABORTED) ||
+		(m_pUpdateApiResolveTask && m_pUpdateApiResolveTask->State() == EHttpState::ABORTED))
 	{
 		UpdateFail(TCLocalize("Update cancelled"));
 		return;
@@ -1591,6 +1708,11 @@ void CTClient::PollUpdateTasks()
 			NextUpdateManifestSource(TCLocalize("Update check failed: the manifest signature could not be downloaded"));
 		else
 			FinishUpdateManifest(pSigTask, pManifestTask);
+		return;
+	}
+	if(m_pUpdateApiResolveTask && m_pUpdateApiResolveTask->Done())
+	{
+		FinishApiResolve();
 		return;
 	}
 	if(m_pUpdateHelperTask && m_pUpdateHelperTask->Done())

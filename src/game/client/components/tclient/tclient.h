@@ -42,6 +42,7 @@ public:
 		char m_aHelperSha256[65] = "";
 		int64_t m_HelperSize = 0;
 		char m_aZipUrl[512] = "";
+		char m_aApiZipUrl[512] = ""; // api.github.com 源解析出的 asset url（octet-stream）
 	};
 
 private:
@@ -98,6 +99,8 @@ private:
 	void FinishUpdateDownload();
 	void StartDownloadTask();
 	void StartUpdateHelperTask();
+	void StartApiResolveTask(bool Helper);
+	void FinishApiResolve();
 	void RetryUpdateDownload(bool Helper, const char *pReason);
 	void FinishUpdateBootstrap();
 	void ResetUpdateTasks();
@@ -113,6 +116,10 @@ private:
 	int m_UpdateManifestSource = 0;
 	bool m_UpdateFoundCurrentRelease = false;
 	std::shared_ptr<IHttpRequest> m_pUpdateHelperTask = nullptr;
+	// "@api" 源（api.github.com 直连）：先解析 release-by-tag JSON 再下载
+	std::shared_ptr<IHttpRequest> m_pUpdateApiResolveTask = nullptr;
+	bool m_ApiResolvePending = false;
+	char m_aUpdateApiHelperUrl[512] = "";
 	int m_UpdateDownloadSource = 0;
 	int m_UpdateDownloadAttempt = 0;
 	bool m_UpdateRetryHelper = false;

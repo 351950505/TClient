@@ -61,11 +61,15 @@ static constexpr const char *TCLIENT_UPDATE_GH_REPO_PATH = "351950505/TClient";
 // 回源都走它，一起挂），唯一稳定的官方通道是 api.github.com（octet-stream 302 到
 // release-assets Azure blob，实测可用）。自建镜像已换名 fast1/fast2 → github1/github2
 // 并把回源改为 api.github.com 解析（不再碰 releases/download 入口）。
-// 候选清单源，按顺序尝试：ghfast 加速 → 自建镜像 github1/github2 → github 直链 → raw 仓库。
+// 候选清单源，按顺序尝试：自建镜像 github1/github2（回源走 api，最稳）→ ghfast 加速
+// → github 直链 → raw 仓库。
+// 2026-11-08 晚：ghfast 从首位下移。它在故障期间持续超时，放在第一位会让每次检查
+// 都先白等一整个 15 秒超时；镜像已验证可用且走 api 回源，先试它们能把最常见的
+// 「有更新」路径缩短到一次请求。
 static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {
-	"https://ghfast.top/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://github1.me3.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://github2.me3.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
+	"https://ghfast.top/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://raw.githubusercontent.com/351950505/TClient/master/update/TClient-update-win64.json",
 };
@@ -73,9 +77,9 @@ static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {
 // （先解析 release-by-tag 拿 asset url 再下载），nullptr = raw。
 // 下载换源只改变前缀；版本、哈希和大小始终来自同一份已验签清单。
 static const char *const TCLIENT_UPDATE_SOURCE_SIBLING_BASES[] = {
-	"https://ghfast.top/",
 	"https://github1.me3.dpdns.org/",
 	"https://github2.me3.dpdns.org/",
+	"https://ghfast.top/",
 	"",
 	"@api",
 	nullptr,

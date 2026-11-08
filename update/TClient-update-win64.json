@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.59",
+  "version": "1.7.8.60",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17268074,
-  "sha256": "05d2001003f44d387ccca319b1a35ec1800af545c5bc0a3a5873ee629ef8ec37",
-  "notes": "TClient 1.7.8.59: hotfix for the 1.7.8.58 FPS fog rendering (ring quads rendered as black spikes caused by a vertex-order mismatch in the freeform quad path); fog visuals now render correctly.",
+  "size": 17269215,
+  "sha256": "42e01c3af202a9422d3842c04ee7b931add527329e999999060d78fe9eb2453a",
+  "notes": "# TClient v1.7.8.60 — 卡顿治理 + 优化器默认关闭\n\n## 变更\n- **优化器默认关闭**：v1.7.8.58 起默认开启的 FPS 雾玩家反馈挡视野，本版起 `tc_optimizer` 默认 **0**（整体关闭）。需要雾的玩家执行 `tc_optimizer 1` 重新开启；子开关保持不变\n- **换歌单帧卡顿治理**：灵动岛封面图最大解码尺寸 4096→2048、像素上限 16MB→4MB，换歌瞬间渲染线程的解码/圆裁/GPU 上传峰值降低约 4 倍（island_music.cpp）\n- **监控进程拉起移出渲染线程**：island_media_monitor 不在时，`CreateProcessW` 改在独立线程执行，不再阻塞渲染帧（此前杀软拦截时会造成周期性单帧卡顿）\n- **渐变名牌错相重建**：开启 `tc_gradient_name/tc_gradient_clan` 时，所有可见玩家的渐变文字容器不再集中在同一帧重建，按 ClientId 错相到不同帧，消除满员服务器上的周期性尖峰\n\n## 修复\n- **自定义社区下载加固**：损坏的下载响应不再覆盖磁盘缓存（last-known-good 保留）；新增响应大小上限与内容变化去重\n- **Windows 界面闪烁**：视口宽高比策略改为常规更新阶段统一应用，不再在快照分发内同步触发 GPU 等待和全组件重建；宽屏下无谓的重建路径已移除\n\n## 其他\n- 发布流水线新增一键编排器与第三方组件哈希锁（不影响客户端运行）\n- v1.7.8.58 / v1.7.8.59 的更新说明已补全中文详情\n\n## 附件\n- 更新包 / 完整包 / 独立 DDNet.exe / 更新器 / 清单与 Ed25519 签名，全部经逐字节校验\n- 自研 EXE 仍未签名（无代码签名证书），如遇杀软提示请选择信任或向我们反馈完整截图",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 351232,

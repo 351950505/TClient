@@ -1,8 +1,9 @@
 """Unit tests for the TClient release orchestrator (offline; no network, no builds).
 
 Covers: spec validation, helper-lock enforcement, dry-run planning, two-phase
-plan selection, and state resume behavior. Build/stage/package/publish phases
-are deliberately not executed here; they require the real toolchain.
+plan selection, state resume, release-body encoding, master-sync invocation and
+the translation gate. Build/stage/package/publish phases are deliberately not
+executed here; they require the real toolchain.
 """
 import json
 from pathlib import Path
@@ -145,27 +146,25 @@ class MasterSyncParsingTests(unittest.TestCase):
     SPEC = {
         "version": "1.7.8.63",
         "target_commit": "a" * 40,
+        "parent_commit": "b" * 40,
         "repo": "D:/TaterClient-src",
     }
 
+    def make_paths(self, tmp):
+        root = Path(tmp) / "release-17863"
+        root.mkdir()
+        return {"root": root, "assets": root / "assets"}
+
     def test_pretty_printed_subprocess_output_is_parsed(self):
         pretty = json.dumps({"before": "1" * 40, "after": "2" * 40, "force_push": False}, indent=2) + "\n"
+        # 这正是 .62 崩溃的形状：末行只是 "}"
         self.assertTrue(pretty.rstrip().endswith("}"))
-        self.assertEqual(len(pretty.strip().splitlines()) > 1, True)
-
-        def fake_run(cmd, **kwargs):
-            return subprocess.CompletedProcess(cmd, 0, stdout=pretty, stderr="")
+        self.assertGreater(len(pretty.strip().splitlines()), 1)
 
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "scripts").mkdir()
-            (root / "scripts" / "sync_master_manifest.py").write_text("# stub\n", encoding="utf-8")
-            paths = {"root": root}
-            with mock.patch.object(release_orchestrator, "git", lambda *a, **k: "3" * 40), \
-                 mock.patch.object(release_orchestrator.subprocess, "run", side_effect=[
-                     subprocess.CompletedProcess([], 0, stdout="", stderr=""),
-                     subprocess.CompletedProcess([], 0, stdout=pretty, stderr=""),
-                 ]):
+            paths = self.make_paths(tmp)
+            with mock.patch.object(release_orchestrator.subprocess, "run",
+                                   return_value=subprocess.CompletedProcess([], 0, stdout=pretty, stderr="")):
                 result = release_orchestrator.phase_master_sync(self.SPEC, paths, {})
 
         self.assertEqual(result["after"], "2" * 40)
@@ -174,17 +173,35 @@ class MasterSyncParsingTests(unittest.TestCase):
     def test_single_line_output_still_parses(self):
         one_line = json.dumps({"synced": True})
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "scripts").mkdir()
-            (root / "scripts" / "sync_master_manifest.py").write_text("# stub\n", encoding="utf-8")
-            paths = {"root": root}
-            with mock.patch.object(release_orchestrator, "git", lambda *a, **k: "3" * 40), \
-                 mock.patch.object(release_orchestrator.subprocess, "run", side_effect=[
-                     subprocess.CompletedProcess([], 0, stdout="", stderr=""),
-                     subprocess.CompletedProcess([], 0, stdout=one_line, stderr=""),
-                 ]):
+            paths = self.make_paths(tmp)
+            with mock.patch.object(release_orchestrator.subprocess, "run",
+                                   return_value=subprocess.CompletedProcess([], 0, stdout=one_line, stderr="")):
                 result = release_orchestrator.phase_master_sync(self.SPEC, paths, {})
         self.assertEqual(result, {"synced": True})
+
+    def test_command_carries_release_identity(self):
+        """参数化脚本必须拿到 tag/version/target/parent，不能再有每版硬编码。"""
+        captured = {}
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            return subprocess.CompletedProcess(command, 0, stdout='{"synced": true}\n', stderr="")
+
+        spec = dict(self.SPEC, expected_master="c" * 40)
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = self.make_paths(tmp)
+            with mock.patch.object(release_orchestrator.subprocess, "run", side_effect=fake_run):
+                release_orchestrator.phase_master_sync(spec, paths, {})
+
+        command = captured["command"]
+        script = command[command.index("-I") + 1]
+        self.assertTrue(script.endswith("sync_master_manifest.py"))
+        self.assertIn("--tag", command)
+        self.assertEqual(command[command.index("--tag") + 1], "v1.7.8.63")
+        self.assertEqual(command[command.index("--version") + 1], "1.7.8.63")
+        self.assertEqual(command[command.index("--target") + 1], "a" * 40)
+        self.assertEqual(command[command.index("--parent") + 1], "b" * 40)
+        self.assertEqual(command[command.index("--expected-master") + 1], "c" * 40)
 
 
 if __name__ == "__main__":

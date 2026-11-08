@@ -52,6 +52,7 @@ OPTIONAL_SPEC_DEFAULTS = {
     "resources_dir": "",  # required: previous version stage directory
     "signed_expected": False,
     "publish": False,
+    "expected_master": "",  # optional: assert master at this SHA before the sync push
 }
 
 
@@ -330,11 +331,25 @@ def phase_publish(spec, paths, state):
 
 
 def phase_master_sync(spec, paths, state):
-    expected_master = git(Path(spec["repo"]), "rev-parse", "origin/master") if subprocess.run(["git", "-C", str(spec["repo"]), "fetch", "github", "master"], capture_output=True).returncode == 0 else None
-    require(expected_master, "could not resolve remote master; fetch github master first")
-    script_path = paths["root"] / "scripts" / "sync_master_manifest.py"
-    require(script_path.is_file(), f"missing {script_path}; generate it from the previous release scripts directory")
-    result = subprocess.run([sys.executable, str(script_path), "--target", spec["target_commit"]], capture_output=True, text=True, timeout=600)
+    # 用仓库内参数化的脚本，不再每版复制一份到 release-<ver>/scripts/。
+    # 脚本自身幂等：master 已带同一对清单/签名时只回读并写记录，不会二次推送。
+    script_path = paths["root"].parent / "TaterClient-src" / "tclient_scripts" / "sync_master_manifest.py"
+    if not script_path.is_file():
+        script_path = Path(spec["repo"]) / "tclient_scripts" / "sync_master_manifest.py"
+    require(script_path.is_file(), f"missing {script_path}")
+    command = [
+        sys.executable, "-I", str(script_path),
+        "--root", str(paths["root"]),
+        "--assets", str(paths["assets"]),
+        "--tag", f'v{spec["version"]}',
+        "--version", spec["version"],
+        "--target", spec["target_commit"],
+        "--parent", spec["parent_commit"],
+        "--repo", str(spec["repo"]),
+    ]
+    if spec.get("expected_master"):
+        command += ["--expected-master", spec["expected_master"]]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=900)
     require(result.returncode == 0, "master manifest sync failed: " + result.stdout[-2000:] + result.stderr[-2000:])
     return json.loads(result.stdout) if result.stdout.strip().startswith("{") else {"synced": True}
 

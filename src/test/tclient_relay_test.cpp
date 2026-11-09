@@ -12,7 +12,7 @@ TEST(TClientRelay, DemoPlaybackNeverRegisters)
 
 TEST(TClientRelay, NonOnlineStatesNeverRegister)
 {
-	for(int State : {IClient::STATE_OFFLINE, IClient::STATE_CONNECTING, IClient::STATE_LOADING, IClient::STATE_QUITTING})
+	for(const IClient::EClientState State : {IClient::STATE_OFFLINE, IClient::STATE_CONNECTING, IClient::STATE_LOADING, IClient::STATE_QUITTING})
 	{
 		EXPECT_FALSE(RelayRouting::CanRegister(State, NETTYPE_INVALID));
 		EXPECT_FALSE(RelayRouting::CanRegister(State, NETTYPE_IPV4));

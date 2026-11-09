@@ -22,7 +22,7 @@
 namespace RelayRouting
 {
 // 只向真实在线的游戏服注册；demo 回放的 ServerAddress 为空，不能格式化为地址。
-inline bool CanRegister(int ClientState, unsigned int ServerAddressType)
+inline bool CanRegister(IClient::EClientState ClientState, unsigned int ServerAddressType)
 {
 	return ClientState == IClient::STATE_ONLINE && (ServerAddressType & NETTYPE_ALL) != 0;
 }

@@ -395,7 +395,8 @@ def compile_fixture(source: Path, output: Path, kind: int) -> None:
             f'cl {" ".join(flags)} "{source}" /Fe:"{output}" /link {" ".join(link_flags)} user32.lib\n',
             encoding="utf-8",
         )
-        command = ["cmd.exe", "/d", "/c", batch.name]
+        # Preserve NoDefaultCurrentDirectoryInExePath: explicitly invoke the local batch.
+        command = ["cmd.exe", "/d", "/c", f".\\{batch.name}"]
     else:
         raise unittest.SkipTest("MSVC or MinGW is required to build Windows fixture PEs")
     log = output.with_suffix(".compile.log")
@@ -720,7 +721,7 @@ class TClientUpdaterInstallTest(unittest.TestCase):
             encoding="utf-8",
         )
         result = subprocess.run(
-            ["cmd.exe", "/d", "/c", batch.name],
+            ["cmd.exe", "/d", "/c", f".\\{batch.name}"],
             cwd=self.tools, capture_output=True, timeout=10, creationflags=CREATE_NO_WINDOW,
         )
         self.assertEqual(result.returncode, 0, repr(result.stdout + result.stderr))

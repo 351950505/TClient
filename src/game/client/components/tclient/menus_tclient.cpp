@@ -2451,6 +2451,7 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 			str_copy(pSelectedEntry->m_aClan, s_aEntryClan);
 			str_copy(pSelectedEntry->m_aReason, s_aEntryReason);
 			pSelectedEntry->m_pWarType = pSelectedType;
+			GameClient()->m_WarList.InvalidateCache();
 			// Keep the value-based selection in sync with the edited entry.
 			str_copy(s_aSelectedEntryName, pSelectedEntry->m_aName);
 			str_copy(s_aSelectedEntryClan, pSelectedEntry->m_aClan);
@@ -2583,6 +2584,7 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 		{
 			str_copy(pSelectedType->m_aWarName, s_aTypeName);
 			pSelectedType->m_Color = s_GroupColor;
+			GameClient()->m_WarList.InvalidateCache();
 		}
 	}
 	str_copy(s_aSelectedType, pSelectedType->m_aWarName);

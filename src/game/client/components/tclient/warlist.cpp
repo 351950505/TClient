@@ -215,6 +215,7 @@ void CWarList::UpdateWarEntry(int Index, const char *pName, const char *pClan, c
 		str_copy(m_vWarEntries[Index].m_aClan, pClan);
 		str_copy(m_vWarEntries[Index].m_aReason, pReason);
 		m_vWarEntries[Index].m_pWarType = pType;
+		InvalidateCache();
 	}
 }
 
@@ -227,6 +228,7 @@ void CWarList::UpsertWarType(int Index, const char *pType, ColorRGBA Color)
 	{
 		str_copy(m_WarTypes[Index]->m_aWarName, pType);
 		m_WarTypes[Index]->m_Color = Color;
+		InvalidateCache();
 	}
 	else
 	{
@@ -257,6 +259,7 @@ void CWarList::AddWarEntry(const char *pName, const char *pClan, const char *pRe
 	if(!g_Config.m_TcWarListAllowDuplicates)
 		RemoveWarEntryDuplicates(pName, pClan);
 	m_vWarEntries.push_back(Entry);
+	InvalidateCache();
 }
 
 void CWarList::RemoveWarEntryDuplicates(const char *pName, const char *pClan)
@@ -271,7 +274,10 @@ void CWarList::RemoveWarEntryDuplicates(const char *pName, const char *pClan)
 			(str_comp(It->m_aClan, pClan) == 0);
 
 		if(IsDuplicate)
+		{
 			It = m_vWarEntries.erase(It);
+			InvalidateCache();
+		}
 		else
 			++It;
 	}
@@ -292,6 +298,7 @@ void CWarList::AddWarType(const char *pType, ColorRGBA Color)
 	{
 		Type->m_Color = Color;
 	}
+	InvalidateCache();
 }
 
 void CWarList::RemoveWarEntry(const char *pName, const char *pClan, const char *pType)
@@ -300,7 +307,10 @@ void CWarList::RemoveWarEntry(const char *pName, const char *pClan, const char *
 	CWarEntry Entry(pWarType, pName, pClan, "");
 	auto It = std::find(m_vWarEntries.begin(), m_vWarEntries.end(), Entry);
 	if(It != m_vWarEntries.end())
+	{
 		m_vWarEntries.erase(It);
+		InvalidateCache();
+	}
 }
 
 void CWarList::RemoveWarEntry(CWarEntry *Entry)
@@ -308,7 +318,10 @@ void CWarList::RemoveWarEntry(CWarEntry *Entry)
 	auto It = std::find_if(m_vWarEntries.begin(), m_vWarEntries.end(),
 		[Entry](const CWarEntry &WarEntry) { return &WarEntry == Entry; });
 	if(It != m_vWarEntries.end())
+	{
 		m_vWarEntries.erase(It);
+		InvalidateCache();
+	}
 }
 
 void CWarList::RemoveWarType(const char *pType)
@@ -333,6 +346,7 @@ void CWarList::RemoveWarType(const char *pType)
 		}
 		delete *It;
 		m_WarTypes.erase(It);
+		InvalidateCache();
 	}
 }
 
@@ -402,7 +416,7 @@ void CWarList::GetReason(char *pReason, int ClientId)
 	str_copy(pReason, m_WarPlayers[ClientId].m_aReason, sizeof(m_WarPlayers[ClientId].m_aReason));
 }
 
-CWarDataCache &CWarList::GetWarData(int ClientId)
+const CWarDataCache &CWarList::GetWarData(int ClientId) const
 {
 	return m_WarPlayers[ClientId];
 }
@@ -414,6 +428,34 @@ void CWarList::SortWarEntries()
 
 void CWarList::UpdateWarPlayers()
 {
+	bool Changed = m_ProcessedRevision != m_WarListRevision;
+	for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
+	{
+		const auto &Client = GameClient()->m_aClients[ClientId];
+		const auto &Cached = m_aCachedPlayers[ClientId];
+		if(Client.m_Active != Cached.m_Active ||
+			(Client.m_Active && (str_comp(Client.m_aName, Cached.m_aName) != 0 || str_comp(Client.m_aClan, Cached.m_aClan) != 0)))
+		{
+			Changed = true;
+			break;
+		}
+	}
+	if(!Changed)
+		return;
+
+	for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
+	{
+		const auto &Client = GameClient()->m_aClients[ClientId];
+		auto &Cached = m_aCachedPlayers[ClientId];
+		Cached.m_Active = Client.m_Active;
+		if(Client.m_Active)
+		{
+			str_copy(Cached.m_aName, Client.m_aName);
+			str_copy(Cached.m_aClan, Client.m_aClan);
+		}
+	}
+	m_ProcessedRevision = m_WarListRevision;
+
 	for(int i = 0; i < (int)m_WarTypes.size(); ++i)
 		m_WarTypes[i]->m_Index = i;
 

@@ -8,6 +8,8 @@
 
 #include <game/client/component.h>
 
+#include <cstdint>
+
 enum
 {
 	MAX_WARLIST_TYPE_LENGTH = 16,
@@ -154,13 +156,25 @@ public:
 	// TODO: create an unordered map for war clans and war names, to speed up updating the WarPlayers cache
 	// It should be updated when m_WarList changes
 
+private:
 	CWarDataCache m_WarPlayers[MAX_CLIENTS];
+	struct CWarPlayerInput
+	{
+		bool m_Active = false;
+		char m_aName[MAX_NAME_LENGTH] = "";
+		char m_aClan[MAX_CLAN_LENGTH] = "";
+	};
+	CWarPlayerInput m_aCachedPlayers[MAX_CLIENTS];
+	uint64_t m_WarListRevision = 1;
+	uint64_t m_ProcessedRevision = 0;
 
+public:
 	int Sizeof() const override { return sizeof(*this); }
 	void OnNewSnapshot() override;
 	void OnConsoleInit() override;
 
 	void UpdateWarPlayers();
+	void InvalidateCache() { ++m_WarListRevision; }
 
 	void UpdateWarEntry(int Index, const char *pName, const char *pClan, const char *pReason, CWarType *pType);
 
@@ -190,7 +204,7 @@ public:
 	bool GetClanWar(int ClientId);
 
 	void GetReason(char *pReason, int ClientId);
-	CWarDataCache &GetWarData(int ClientId);
+	const CWarDataCache &GetWarData(int ClientId) const;
 
 	void SortWarEntries();
 

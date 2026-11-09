@@ -125,6 +125,9 @@ public:
 	std::string m_TextWidthCacheFace;
 	// vinyl record spin angle (radians)
 	float m_VinylAngle = 0.0f;
+	// 胶囊宽度的动画值：只有目标宽度变化（拖动宽度滑条、进入/退出空态）时才平滑过渡，
+	// 平时歌词换行、时钟走字都不改变宽度。
+	float m_AnimatedWidth = -1.0f;
 	// 空态等化器的节奏：本地玩家按 hook（右键）的间隔驱动相位推进，
 	// 按得越快跳得越急；停手后能量衰减回静止台阶。
 
@@ -2619,24 +2622,30 @@ public:
 			return;
 
 		const CNetObj_GameInfo *pInfo = pGameClient->m_Snap.m_pGameInfoObj;
-		int Time = 0;
+		const int TickSpeed = std::max(1, pGameClient->Client()->GameTickSpeed());
+		const int64_t Tick = pGameClient->Client()->GameTick(g_Config.m_ClDummy);
+		int64_t Ms = 0;
 		if(pInfo->m_GameStateFlags & GAMESTATEFLAG_SUDDENDEATH)
 			return; // sudden death shows its own banner, no timer
 		if(pInfo->m_TimeLimit && (pInfo->m_WarmupTimer <= 0))
 		{
-			Time = pInfo->m_TimeLimit * 60 - ((pGameClient->Client()->GameTick(g_Config.m_ClDummy) - pInfo->m_RoundStartTick) / pGameClient->Client()->GameTickSpeed());
+			Ms = (int64_t)pInfo->m_TimeLimit * 60 * 1000 - (Tick - pInfo->m_RoundStartTick) * 1000 / TickSpeed;
 			if(pInfo->m_GameStateFlags & GAMESTATEFLAG_GAMEOVER)
-				Time = 0;
+				Ms = 0;
 		}
 		else if(pInfo->m_GameStateFlags & GAMESTATEFLAG_RACETIME)
 		{
-			Time = (pGameClient->Client()->GameTick(g_Config.m_ClDummy) + pInfo->m_WarmupTimer) / pGameClient->Client()->GameTickSpeed();
+			Ms = (Tick + pInfo->m_WarmupTimer) * 1000 / TickSpeed;
 		}
 		else
 		{
-			Time = (pGameClient->Client()->GameTick(g_Config.m_ClDummy) - pInfo->m_RoundStartTick) / pGameClient->Client()->GameTickSpeed();
+			Ms = (Tick - pInfo->m_RoundStartTick) * 1000 / TickSpeed;
 		}
-		str_time((int64_t)Time * 100, ETimeFormat::DAYS, pBuf, BufSize);
+		// 显示 分:秒；宽度由调用方按 00:00:00 预留，文字右对齐，左侧留出小时位空白。
+		if(Ms < 0)
+			Ms = 0;
+		const int64_t TotalSec = Ms / 1000;
+		str_format(pBuf, BufSize, "%02d:%02d", (int)(TotalSec / 60), (int)(TotalSec % 60));
 	}
 
 	// ---- cover decode thread ------------------------------------------------
@@ -2970,7 +2979,7 @@ public:
 		// screen the text renderer gets exactly integer font sizes and the glyphs
 		// stay crisp. Anything derived from Height*0.x lands on half pixels.
 		const float TitleSize = 12.0f * Scale;
-		const float LyricSize = 19.0f * Scale;
+		const float LyricSize = 18.0f * Scale;
 		const float TimerSize = 16.0f * Scale;
 
 		const int64_t LyricPosMs = CurrentPositionMs() - (int64_t)g_Config.m_TcIslandLyricOffset;
@@ -2988,8 +2997,14 @@ public:
 		GetGameTimeString(aGameTime, sizeof(aGameTime));
 		const bool ShowGameTime = g_Config.m_TcIslandShowProgress && aGameTime[0] != '\0';
 		float GameW = 0.0f;
+		float GameTextW = 0.0f;
 		if(ShowGameTime)
-			GameW = MeasureCached(m_pTextRender, TimerSize, aGameTime);
+		{
+			// 对局时钟显示 分:秒，胶囊按 00:00:00 预留宽度、文字右对齐，
+			// 左侧留出小时位的空白，歌词框宽度恒定。
+			GameW = MeasureCached(m_pTextRender, TimerSize, "00:00:00");
+			GameTextW = MeasureCached(m_pTextRender, TimerSize, "00:00");
+		}
 
 		// ---- link status cell (left of the game clock) -----------------------
 		// One LED plus one number. The dot carries the verdict (green / amber /
@@ -3145,7 +3160,7 @@ public:
 		const float ChromeW = LeftChrome + RightChrome;
 		// the widest the capsule may get on this screen: keep it on-screen with a
 		// comfortable margin, but never below the compact minimum.
-		const float MaxPillW = std::min(ScreenW * 0.78f, 560.0f * Scale);
+		const float MaxPillW = std::min(ScreenW * 0.96f, (float)g_Config.m_TcIslandWidth * Scale);
 		const float MinPillW = 180.0f * Scale;
 
 		// 宽度固定：胶囊不再随歌词长短伸缩，换行时连宽度都不变，因此端帽纹理永远是
@@ -3163,9 +3178,21 @@ public:
 		// 一条分隔线），宽度因此可以缩到远小于播放态的固定宽；播放态宽度仍按内容算。
 		const float IdleW = LinkCellW + (ShowGameTime ? ClockCellW : 0.0f) + (ShowLocalClock ? LocalClockCellW : 0.0f) +
 			EqPadL + EqSize + EqPadR;
-		const float Width = Idle
+		const float TargetWidth = Idle
 			? std::floor(std::clamp(IdleW, MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f
 			: std::floor(std::clamp(std::max(MaxPillW, NeededW), MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f;
+		// 宽度只在目标值变化时平滑过渡（拖宽度滑条、进入/退出空态），平时恒定不动。
+		// 按 8px 量化，一次过渡最多烘焙约十几张端帽纹理，不会冲爆形状缓存。
+		if(m_AnimatedWidth < 0.0f)
+			m_AnimatedWidth = TargetWidth;
+		else
+		{
+			const float Dt = std::clamp(m_pClient->RenderFrameTime(), 0.0f, 0.1f);
+			m_AnimatedWidth += (TargetWidth - m_AnimatedWidth) * (1.0f - std::exp(-Dt / 0.18f));
+			if(std::fabs(TargetWidth - m_AnimatedWidth) < 0.5f)
+				m_AnimatedWidth = TargetWidth;
+		}
+		const float Width = std::floor(m_AnimatedWidth / 8.0f) * 8.0f;
 
 		// 夹住水平位置：偏移量很大时（滑条 ±600 还要乘缩放）胶囊会被推出屏幕，
 		// 右端的圆头和等化器被裁掉，看起来就是"右边没了"。留 8px 边距。
@@ -3230,7 +3257,7 @@ public:
 			if(ShowGameTime)
 			{
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.80f);
-				m_pTextRender->Text(CursorX + ClockPad, TextY, TimerSize, aGameTime);
+				m_pTextRender->Text(CursorX + ClockPad + (GameW - GameTextW), TextY, TimerSize, aGameTime);
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 				CursorX += ClockCellW;
 				DrawSep(CursorX);
@@ -3333,7 +3360,7 @@ public:
 		{
 			// game round time, dim white so it recedes next to the artwork
 			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.80f);
-			m_pTextRender->Text(CellX + ClockPad, PillY + (Height - TimerSize) * 0.5f, TimerSize, aGameTime);
+			m_pTextRender->Text(CellX + ClockPad + (GameW - GameTextW), PillY + (Height - TimerSize) * 0.5f, TimerSize, aGameTime);
 			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 			CellX += ClockCellW;
 			DrawDivider(CellX);
@@ -3482,7 +3509,7 @@ public:
 				}
 			}
 			const float FullW = m_KaraokeFullW;
-			const float TitleGap = 2.0f * Scale;
+			const float TitleGap = 6.0f * Scale;
 			// centre the two-row block vertically instead of pinning it to a
 			// fraction of the height, which left a big gap under the lyric.
 			const float BlockH = TitleSize + TitleGap + LyricSize;

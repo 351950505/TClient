@@ -404,6 +404,7 @@ MACRO_CONFIG_INT(TcIslandLocalClock, tc_island_local_clock, 0, 0, 1, CFGFLAG_CLI
 MACRO_CONFIG_INT(TcIslandLinkStatus, tc_island_link_status, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show live network status (loss dot + latency) before the game clock")
 MACRO_CONFIG_STR(TcIslandFont, tc_island_font, 128, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island font face (empty = follow the global custom font)")
 MACRO_CONFIG_INT(TcIslandSize, tc_island_size, 100, 60, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island size (%)")
+MACRO_CONFIG_INT(TcIslandWidth, tc_island_width, 650, 320, 1600, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island capsule width in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandNetease, tc_island_netease, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island read NetEase CloudMusic desktop via window title monitor")
 MACRO_CONFIG_INT(TcIslandLyricOffset, tc_island_lyric_offset, 0, -30000, 30000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island lyric timing offset in ms (negative = earlier / ahead)")
 MACRO_CONFIG_INT(TcIslandKaraokeLead, tc_island_karaoke_lead, 60, -500, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island karaoke green fill lead in ms (how far the green wipe runs ahead of the lyric; negative = wipe lags behind)")

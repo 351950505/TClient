@@ -1492,6 +1492,8 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		Column.HSplitTop(LineSize, &Button, &Column);
 		Ui()->DoScrollbarOption(&g_Config.m_TcIslandSize, &g_Config.m_TcIslandSize, &Button, TCLocalize("Size"), 60, 200, &CUi::ms_LinearScrollbarScale, 0, "%");
 		Column.HSplitTop(LineSize, &Button, &Column);
+		Ui()->DoScrollbarOption(&g_Config.m_TcIslandWidth, &g_Config.m_TcIslandWidth, &Button, TCLocalize("Capsule width"), 320, 1600, &CUi::ms_LinearScrollbarScale, 0, "px");
+		Column.HSplitTop(LineSize, &Button, &Column);
 		Ui()->DoScrollbarOption(&g_Config.m_TcIslandLyricOffset, &g_Config.m_TcIslandLyricOffset, &Button, TCLocalize("Lyric offset (ms, - = earlier)"), -5000, 5000, &CUi::ms_LinearScrollbarScale, 0, "ms");
 		Column.HSplitTop(LineSize, &Button, &Column);
 		Ui()->DoScrollbarOption(&g_Config.m_TcIslandKaraokeLead, &g_Config.m_TcIslandKaraokeLead, &Button, TCLocalize("Karaoke lead (ms)"), 0, 500, &CUi::ms_LinearScrollbarScale, 0, "ms");

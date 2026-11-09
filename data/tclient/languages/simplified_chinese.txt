@@ -1002,6 +1002,9 @@ Follow custom font
 Size
 == 大小
 
+Capsule width
+== 胶囊宽度
+
 Lyric offset (ms, - = earlier)
 == 歌词偏移（毫秒，负值 = 提前）
 

@@ -160,6 +160,7 @@ MACRO_CONFIG_INT(TcColorFreeze, tc_color_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFL
 MACRO_CONFIG_INT(TcColorFreezeDarken, tc_color_freeze_darken, 90, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Makes color of tees darker when in freeze (0-100)")
 MACRO_CONFIG_INT(TcColorFreezeFeet, tc_color_freeze_feet, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Also use color for frozen tee feet")
 MACRO_CONFIG_INT(TcWaterHammerHighlight, tc_water_hammer_highlight, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight frozen teammates, yourself and your dummy holding hammer fire or hook")
+MACRO_CONFIG_INT(TcWaterHammerHighlightSelf, tc_water_hammer_highlight_self, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight your own frozen tee and dummy")
 
 // 卡锤/卡钩高亮和玩家设置状态齿轮使用独立颜色，不改变触发条件。
 MACRO_CONFIG_COL(TcWaterHammerBodyColor, tc_water_hammer_body_color, 589706, CFGFLAG_CLIENT | CFGFLAG_SAVE, "冻结锤钩高亮身体颜色")

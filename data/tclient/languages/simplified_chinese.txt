@@ -15,6 +15,9 @@
 Settings gear color
 == 设置状态齿轮颜色
 
+Highlight your own frozen tee and dummy
+== 高亮自己的冻结 tee 和 dummy
+
 Frozen highlight body color
 == 冻结高亮身体颜色
 

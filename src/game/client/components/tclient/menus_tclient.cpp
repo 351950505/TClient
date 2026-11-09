@@ -4202,6 +4202,7 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlight, TCLocalize("Highlight frozen teammates, yourself and your dummy holding hammer fire or hook"), &g_Config.m_TcWaterHammerHighlight, &RightView, LineSize);
 	if(g_Config.m_TcWaterHammerHighlight)
 	{
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlightSelf, TCLocalize("Highlight your own frozen tee and dummy"), &g_Config.m_TcWaterHammerHighlightSelf, &RightView, LineSize);
 		static CButtonContainer s_WaterHammerBodyColor, s_WaterHammerFeetColor;
 		DoLine_ColorPicker(&s_WaterHammerBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen highlight body color"), &g_Config.m_TcWaterHammerBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerBodyColor)), false);
 		DoLine_ColorPicker(&s_WaterHammerFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen highlight feet color"), &g_Config.m_TcWaterHammerFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerFeetColor)), false);

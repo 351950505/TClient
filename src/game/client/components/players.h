@@ -40,6 +40,8 @@ class CPlayers : public CComponent
 
 	int m_WeaponEmoteQuadContainerIndex;
 	int m_aWeaponSpriteMuzzleQuadContainerIndex[NUM_WEAPONS];
+	float m_aWaterHammerHighlightAlpha[MAX_CLIENTS]{};
+	CTeeRenderInfo m_aWaterHammerBaseRenderInfo[MAX_CLIENTS];
 
 	void CreateNinjaTeeRenderInfo();
 	void CreateSpectatorTeeRenderInfo();

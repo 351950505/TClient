@@ -78,6 +78,8 @@ bool CWaterHammerIndicator::IsMarked(int ClientId) const
 	const int CurrentLocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy];
 	const int DummyLocalId = GameClient()->m_aLocalIds[!g_Config.m_ClDummy];
 	const auto InputSource = TcWaterHammerInputSource(ClientId, CurrentLocalId, DummyLocalId, Client()->DummyConnected());
+	if(!TcShouldHighlightWaterHammerSource(InputSource, g_Config.m_TcWaterHammerHighlightSelf != 0))
+		return false;
 	const CNetObj_PlayerInput *pLocalInput = nullptr;
 	STcWaterHammerInputState RemoteInput{};
 	switch(InputSource)

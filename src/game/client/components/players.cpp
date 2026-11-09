@@ -1047,7 +1047,15 @@ void CPlayers::RenderPlayer(
 		RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, ShadowPosition, g_Config.m_ClUnpredictedShadowAlpha / 100.f, Local); // render ghost
 	}
 
-	RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, Position, Alpha, Local);
+	const float HighlightAlpha = in_range(ClientId, MAX_CLIENTS - 1) ? m_aWaterHammerHighlightAlpha[ClientId] : 0.0f;
+	if(HighlightAlpha > 0.001f && HighlightAlpha < 0.999f)
+	{
+		// 原皮肤与可染色皮肤交叉淡化，避免切换贴图时瞬间变灰。
+		RenderTools()->RenderTee(&State, &m_aWaterHammerBaseRenderInfo[ClientId], Player.m_Emote, Direction, Position, Alpha * (1.0f - HighlightAlpha), Local);
+		RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, Position, Alpha * HighlightAlpha, Local);
+	}
+	else
+		RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, Position, Alpha, Local);
 
 	float TeeAnimScale, TeeBaseSize;
 	CRenderTools::GetRenderTeeAnimScaleAndBaseSize(&RenderInfo, TeeAnimScale, TeeBaseSize);
@@ -1217,18 +1225,26 @@ void CPlayers::OnRender()
 			}
 		}
 
-		if(GameClient()->m_WaterHammerIndicator.IsMarked(i))
+		const bool Marked = GameClient()->m_WaterHammerIndicator.IsMarked(i);
+		float &Alpha = m_aWaterHammerHighlightAlpha[i];
+		Alpha = TcAdvanceWaterHammerHighlight(Alpha, Marked, Client()->RenderFrameTime());
+		if(Alpha > 0.001f)
 		{
 			const ColorRGBA BodyColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcWaterHammerBodyColor));
 			const ColorRGBA FeetColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcWaterHammerFeetColor));
+			m_aWaterHammerBaseRenderInfo[i] = aRenderInfo[i];
 			aRenderInfo[i].m_CustomColoredSkin = true;
 			aRenderInfo[i].m_ColorBody = BodyColor;
 			aRenderInfo[i].m_ColorFeet = FeetColor;
-			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aUseCustomColors[protocol7::SKINPART_BODY] = true;
-			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aUseCustomColors[protocol7::SKINPART_FEET] = true;
-			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aColors[protocol7::SKINPART_BODY] = BodyColor;
-			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aColors[protocol7::SKINPART_FEET] = FeetColor;
+			for(int Part : {protocol7::SKINPART_BODY, protocol7::SKINPART_FEET})
+			{
+				const ColorRGBA Target = Part == protocol7::SKINPART_BODY ? BodyColor : FeetColor;
+				aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aUseCustomColors[Part] = true;
+				aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aColors[Part] = Target;
+			}
 		}
+		else
+			Alpha = 0.0f;
 	}
 
 	// get screen edges to avoid rendering offscreen

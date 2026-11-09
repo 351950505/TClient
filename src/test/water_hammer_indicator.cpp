@@ -91,6 +91,34 @@ TEST(WaterHammer, LocalInputSourceIncludesCurrentAndConnectedDummy)
 	EXPECT_EQ(TcWaterHammerInputSource(10, 11, 10, true), ETcWaterHammerInputSource::DUMMY_LOCAL);
 }
 
+TEST(WaterHammer, LocalHighlightCanBeDisabledWithoutDisablingTeammates)
+{
+	EXPECT_TRUE(TcShouldHighlightWaterHammerSource(ETcWaterHammerInputSource::CURRENT_LOCAL, true));
+	EXPECT_TRUE(TcShouldHighlightWaterHammerSource(ETcWaterHammerInputSource::DUMMY_LOCAL, true));
+	EXPECT_FALSE(TcShouldHighlightWaterHammerSource(ETcWaterHammerInputSource::CURRENT_LOCAL, false));
+	EXPECT_FALSE(TcShouldHighlightWaterHammerSource(ETcWaterHammerInputSource::DUMMY_LOCAL, false));
+	EXPECT_TRUE(TcShouldHighlightWaterHammerSource(ETcWaterHammerInputSource::REMOTE, false));
+}
+
+TEST(WaterHammer, HighlightTransitionsFadeInAndOut)
+{
+	float Alpha = 0.0f;
+	Alpha = TcAdvanceWaterHammerHighlight(Alpha, true, 0.016f);
+	EXPECT_GT(Alpha, 0.0f);
+	EXPECT_LT(Alpha, 1.0f);
+	for(int Frame = 0; Frame < 120; ++Frame)
+		Alpha = TcAdvanceWaterHammerHighlight(Alpha, true, 0.016f);
+	EXPECT_NEAR(Alpha, 1.0f, 0.0001f);
+	Alpha = TcAdvanceWaterHammerHighlight(Alpha, false, 0.016f);
+	EXPECT_GT(Alpha, 0.0f);
+	EXPECT_LT(Alpha, 1.0f);
+	for(int Frame = 0; Frame < 120; ++Frame)
+		Alpha = TcAdvanceWaterHammerHighlight(Alpha, false, 0.016f);
+	EXPECT_NEAR(Alpha, 0.0f, 0.0001f);
+	EXPECT_EQ(TcAdvanceWaterHammerHighlight(0.0f, true, 0.0f), 0.0f);
+	EXPECT_EQ(TcAdvanceWaterHammerHighlight(0.0f, true, 1.0f), 1.0f);
+}
+
 TEST(WaterHammer, PreInputHookPersistsUntilReleaseOrClientReset)
 {
 	CTcWaterHammerInputCache Inputs;
@@ -325,6 +353,8 @@ int main()
 	WaterHammer_TargetFilters();
 	WaterHammer_HookAndHammerBothMarkFrozenCharacters();
 	WaterHammer_LocalInputSourceIncludesCurrentAndConnectedDummy();
+	WaterHammer_LocalHighlightCanBeDisabledWithoutDisablingTeammates();
+	WaterHammer_HighlightTransitionsFadeInAndOut();
 	WaterHammer_PreInputHookPersistsUntilReleaseOrClientReset();
 	WaterHammer_PreInputBeforeSnapshots();
 	WaterHammer_VisibilityDeathAndSpectatingKeepHeldInput();
@@ -337,6 +367,6 @@ int main()
 	WaterHammer_NewSessionDoesNotInheritEitherConnection();
 	WaterHammer_LocalSwapRecordsCopiedInputWithoutActiveSnapshot();
 	WaterHammer_FrozenKatanaDoesNotChangeRealWeapon();
-	std::puts("WaterHammer: 18 test groups passed");
+	std::puts("WaterHammer: 20 test groups passed");
 }
 #endif

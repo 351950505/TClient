@@ -4,6 +4,7 @@
 #include <engine/shared/protocol.h>
 #include <generated/protocol.h>
 
+#include <algorithm>
 #include <array>
 
 struct STcWaterHammerInputState
@@ -28,6 +29,18 @@ inline ETcWaterHammerInputSource TcWaterHammerInputSource(int ClientId, int Curr
 	if(DummyConnected && ClientId == DummyLocalId)
 		return ETcWaterHammerInputSource::DUMMY_LOCAL;
 	return ETcWaterHammerInputSource::REMOTE;
+}
+
+inline bool TcShouldHighlightWaterHammerSource(ETcWaterHammerInputSource InputSource, bool HighlightSelf)
+{
+	return InputSource == ETcWaterHammerInputSource::REMOTE || HighlightSelf;
+}
+
+inline float TcAdvanceWaterHammerHighlight(float Current, bool Marked, float DeltaSeconds)
+{
+	constexpr float TransitionSeconds = 0.12f;
+	const float Step = std::clamp(DeltaSeconds / TransitionSeconds, 0.0f, 1.0f);
+	return Marked ? std::min(Current + Step, 1.0f) : std::max(Current - Step, 0.0f);
 }
 
 inline bool TcIsWaterHammerTarget(int ClientId, int LocalClientId, bool Active, bool Spectator, bool Visible, bool SameTeam)

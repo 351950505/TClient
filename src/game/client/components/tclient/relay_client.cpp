@@ -139,7 +139,7 @@ bool CRelayClient::GameServerAddr(char *pBuf, int Size) const
 {
 	// 未连服务器时不注册：否则所有"未进服"的客户端会被分到同一个 offline
 	// 分组，互相推送无意义的 PEER，还会让外人在列表里看到你。
-	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+	if(!RelayRouting::CanRegister(Client()->State(), Client()->ServerAddress().type))
 		return false;
 	net_addr_str(&Client()->ServerAddress(), pBuf, Size, true);
 	return true;

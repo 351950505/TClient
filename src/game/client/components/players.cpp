@@ -270,6 +270,11 @@ void CPlayers::RenderHookCollLine(
 	std::vector<IGraphics::CLineItem> vLineSegments;
 
 	const int MaxHookTicks = 5 * Client()->GameTickSpeed(); // calculating above 5 seconds is very expensive and unlikely to happen
+	// One segment per simulated tick (plus the head/tail fixups); the loop below
+	// can run the full MaxHookTicks when nothing is hit, and this vector used to
+	// grow from zero with no reserve while the quad list derived from it does
+	// reserve. Same capacity, one allocation instead of ~8.
+	vLineSegments.reserve(MaxHookTicks + 8);
 
 	auto AddHookPlayerSegment = [&](const vec2 &StartPos, const vec2 &EndPos, const vec2 &HookablePlayerPosition, const vec2 &HitPos) {
 		HookCollColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClHookCollColorTeeColl));
@@ -1137,7 +1142,11 @@ void CPlayers::OnRender()
 
 	// update render info for ninja
 	CTeeRenderInfo aRenderInfo[MAX_CLIENTS];
-	CNetObj_Character aRenderCharacters[MAX_CLIENTS];
+	// TClient: 卡锤高亮需要一份"把武器改成忍者刀"的角色快照。这份快照只在
+	// tc_frozen_katana 打开时才存在(默认 0)，否则直接指向 m_RenderCur —— 之前
+	// 每帧无条件整结构体拷贝 64 份 CNetObj_Character，纯粹是白做。
+	CNetObj_Character aFrozenKatanaCharacters[MAX_CLIENTS];
+	const CNetObj_Character *apRenderCharacters[MAX_CLIENTS];
 	const bool IsTeamPlay = GameClient()->IsTeamPlay();
 	for(int i = 0; i < MAX_CLIENTS; ++i)
 	{
@@ -1174,11 +1183,13 @@ void CPlayers::OnRender()
 
 		// Keep the real weapon intact for prediction and water hammer detection.
 		const bool FrozenKatana = g_Config.m_TcFrozenKatana > 0 && Frozen;
-		aRenderCharacters[i] = TcFrozenKatanaRenderCharacter(GameClient()->m_aClients[i].m_RenderCur, FrozenKatana);
+		if(FrozenKatana)
+			aFrozenKatanaCharacters[i] = TcFrozenKatanaRenderCharacter(GameClient()->m_aClients[i].m_RenderCur, true);
+		apRenderCharacters[i] = FrozenKatana ? &aFrozenKatanaCharacters[i] : &GameClient()->m_aClients[i].m_RenderCur;
 		if(FrozenKatana)
 			aRenderInfo[i].m_TeeRenderFlags &= ~TEE_NO_WEAPON;
 
-		if((aRenderCharacters[i].m_Weapon == WEAPON_NINJA || (Frozen && !GameClient()->m_GameInfo.m_NoSkinChangeForFrozen)) && g_Config.m_ClShowNinja)
+		if((apRenderCharacters[i]->m_Weapon == WEAPON_NINJA || (Frozen && !GameClient()->m_GameInfo.m_NoSkinChangeForFrozen)) && g_Config.m_ClShowNinja)
 		{
 			// change the skin for the player to the ninja
 			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].Reset();
@@ -1238,12 +1249,12 @@ void CPlayers::OnRender()
 		{
 			continue;
 		}
-		RenderHook(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &aRenderCharacters[ClientId], &aRenderInfo[ClientId], ClientId);
+		RenderHook(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, apRenderCharacters[ClientId], &aRenderInfo[ClientId], ClientId);
 	}
 	if(LocalClientId != -1 && IsPlayerInfoAvailable(LocalClientId))
 	{
 		const CGameClient::CClientData *pLocalClientData = &GameClient()->m_aClients[LocalClientId];
-		RenderHook(ScreenRect, &pLocalClientData->m_RenderPrev, &aRenderCharacters[LocalClientId], &aRenderInfo[LocalClientId], LocalClientId);
+		RenderHook(ScreenRect, &pLocalClientData->m_RenderPrev, apRenderCharacters[LocalClientId], &aRenderInfo[LocalClientId], LocalClientId);
 	}
 
 	// render spectating players
@@ -1280,15 +1291,15 @@ void CPlayers::OnRender()
 				       (g_Config.m_TcUnpredOthersInFreeze && Client()->m_IsLocalFrozen);
 		if(g_Config.m_TcShowOthersGhosts && !HideGhost && !GameClient()->m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		{
-			RenderPlayer(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &aRenderCharacters[ClientId], &aRenderInfo[ClientId], ClientId, 0.0f, true);
+			RenderPlayer(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, apRenderCharacters[ClientId], &aRenderInfo[ClientId], ClientId, 0.0f, true);
 		}
-		RenderPlayer(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, &aRenderCharacters[ClientId], &aRenderInfo[ClientId], ClientId);
+		RenderPlayer(ScreenRect, &GameClient()->m_aClients[ClientId].m_RenderPrev, apRenderCharacters[ClientId], &aRenderInfo[ClientId], ClientId);
 	}
 	if(RenderLastId != -1 && IsPlayerInfoAvailable(RenderLastId))
 	{
 		const CGameClient::CClientData *pClientData = &GameClient()->m_aClients[RenderLastId];
 		RenderHookCollLine(ScreenRect, &pClientData->m_RenderPrev, &pClientData->m_RenderCur, RenderLastId);
-		RenderPlayer(ScreenRect, &pClientData->m_RenderPrev, &aRenderCharacters[RenderLastId], &aRenderInfo[RenderLastId], RenderLastId);
+		RenderPlayer(ScreenRect, &pClientData->m_RenderPrev, apRenderCharacters[RenderLastId], &aRenderInfo[RenderLastId], RenderLastId);
 	}
 }
 

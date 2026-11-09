@@ -1167,7 +1167,8 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 	if(VersionOrder <= 0)
 	{
 		// 旧镜像不能阻断后面的新版本。raw 可能长期滞后，不能证明已是最新。
-		if(VersionOrder == 0 && TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateManifestSource] != nullptr)
+		// 下载源多了 @api，不能再拿下载表的同下标判断最后一个 raw 清单源。
+		if(VersionOrder == 0 && m_UpdateManifestSource < (int)std::size(TCLIENT_UPDATE_MANIFEST_SOURCES) - 1)
 			m_UpdateFoundCurrentRelease = true;
 		log_info("tclient-update", "source version %s is not newer than %s; checking remaining sources", pVersion, TCLIENT_APP_VERSION);
 		json_value_free(pJson);
@@ -1394,6 +1395,8 @@ void CTClient::FinishApiResolve()
 	json_value *pRoot = pTask->ResultJson();
 	if(pRoot == nullptr || pRoot == &json_value_none || pRoot->type != json_object)
 	{
+		if(pRoot != nullptr && pRoot != &json_value_none)
+			json_value_free(pRoot);
 		RetryUpdateDownload(Helper, pResolveFail);
 		return;
 	}

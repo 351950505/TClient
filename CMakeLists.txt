@@ -3750,6 +3750,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     tclient_console_filter_test.cpp
     tclient_gradient_test.cpp
     tclient_jitter_buffer_test.cpp
+    tclient_relay_test.cpp
     tclient_skinprofiles_test.cpp
     teehistorian_test.cpp
     test.cpp

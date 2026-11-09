@@ -21,6 +21,12 @@
 
 namespace RelayRouting
 {
+// 只向真实在线的游戏服注册；demo 回放的 ServerAddress 为空，不能格式化为地址。
+inline bool CanRegister(int ClientState, unsigned int ServerAddressType)
+{
+	return ClientState == IClient::STATE_ONLINE && (ServerAddressType & NETTYPE_ALL) != 0;
+}
+
 // Keep direct delivery and relay suppression in one decision. Fresh peers only
 // suppress the relay when direct delivery is actually enabled.
 template<typename TPeers, typename TDirect, typename TSendDirect, typename TSendRelay>

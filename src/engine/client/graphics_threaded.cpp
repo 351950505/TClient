@@ -1025,6 +1025,16 @@ void CGraphics_Threaded::QuadsText(float x, float y, float Size, const char *pTe
 
 void CGraphics_Threaded::DrawRectExt(float x, float y, float w, float h, float r, int Corners)
 {
+	// Plain rectangle: no corner fan to draw, so skip the 72 trig calls the
+	// segment loop below would spend producing degenerate geometry. Mirrors the
+	// early-out DrawRectExt4 already had.
+	if(Corners == 0 || r == 0.0f)
+	{
+		CQuadItem ItemQ = CQuadItem(x, y, w, h);
+		QuadsDrawTL(&ItemQ, 1);
+		return;
+	}
+
 	// Segment count drives how closely the corner fans approximate a real arc.
 	// With 8 segments each step spans 11.25 degrees, which leaves a chord error
 	// of r*(1-cos(pi/16)) -- about 0.27 px at r=14 and 0.7 px at r=36. That is

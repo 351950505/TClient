@@ -23,9 +23,11 @@
 #include <base/time.h>
 
 #include <engine/client/link_probe.h>
+#include <engine/engine.h>
 #include <engine/graphics.h>
 #include <engine/http.h>
 #include <engine/shared/config.h>
+#include <engine/shared/jobs.h>
 #include <engine/shared/json.h>
 #include <engine/textrender.h>
 
@@ -78,6 +80,7 @@ public:
 	IClient *m_pClient = nullptr;
 	CGameClient *m_pGameClient = nullptr;
 	IHttp *m_pHttp = nullptr;
+	IEngine *m_pEngine = nullptr;
 	IGraphics *m_pGraphics = nullptr;
 	ITextRender *m_pTextRender = nullptr;
 
@@ -100,6 +103,26 @@ public:
 	std::string m_SongFitKey;          // 无词态歌名 FitText 缓存键
 	float m_SongFitMaxW = -1.0f;
 	std::string m_SongFitText;
+	// 常量/有界短串宽度缓存(2026-11-09):TextWidth 走的是全量字形布局
+	// (CreateTextContainer + AppendTextContainer + DeleteTextContainer,每次至少
+	// 3 次 make_shared),不是轻量测量。灵动岛每帧量 6 个宽度指示串 + 游戏时钟,
+	// 在 968fps(1.03ms/帧)下是实打实的浪费——这些文本的字号只在缩放/字号 cvar
+	// 变化时才变,内容本身是常量或 %02d:%02d 的有界集合。
+	class CTextWidthCacheEntry
+	{
+	public:
+		char m_aText[24] = "";
+		float m_Size = -1.0f;
+		// TextWidth 内部还会乘一次 tc_font_size/100(见 text.cpp 的 AppendTextContainer)，
+		// 所以字号 cvar 也要进键，否则玩家改了全局字号后缓存宽度会失真。
+		int m_FontSize = -1;
+		float m_Width = -1.0f;
+	};
+	static constexpr int TEXT_WIDTH_CACHE_MAX = 24;
+	CTextWidthCacheEntry m_aTextWidthCache[TEXT_WIDTH_CACHE_MAX];
+	int m_TextWidthCacheCount = 0;
+	int m_TextWidthCacheNext = 0;
+	std::string m_TextWidthCacheFace;
 	// vinyl record spin angle (radians)
 	float m_VinylAngle = 0.0f;
 	// 空态等化器的节奏：本地玩家按 hook（右键）的间隔驱动相位推进，
@@ -108,6 +131,7 @@ public:
 	~CImpl()
 	{
 		ResetLyrics();
+		StopCoverDecodeThread();
 #if TCLIENT_HAS_WINRT_MUSIC
 		StopWorker();
 #endif
@@ -507,22 +531,46 @@ public:
 	};
 	std::vector<EMediaCommand> m_vPendingCommands;
 
-	// Album cover art. The SMTC worker downloads the current track's thumbnail
-	// PNG bytes into m_CoverPng (guarded by m_Mutex) whenever the "cover key"
-	// (service id + title + album) changes. The render thread watches m_CoverKey,
-	// decodes the PNG into a texture once, and reuses it until the key changes.
-	std::string m_CoverKey;             // key the worker publishes for
+	// Album cover art flows through two stages:
+	//
+	//   1. Somebody publishes raw image bytes + the "cover key" that identifies the
+	//      track they belong to (service id + title + album; NetEase uses "163|title").
+	//      The SMTC worker (FetchCoverIfChanged) and the NetEase HTTP callback both
+	//      write m_CoverPng/m_CoverKey/m_CoverDirty under m_Mutex.
+	//   2. The render thread notices m_CoverDirty and hands the bytes to the cover
+	//      decode thread, which does stbi + the circular alpha mask off the render
+	//      thread. The render thread only uploads the finished pixels to the GPU.
+	//
+	// Decoding used to happen inline in UpdateCoverTexture(): a 2048x2048 cover is a
+	// 16 MiB RGBA buffer plus ~4M sqrt() calls for the round crop, all inside one
+	// frame right at a track change. That is the "换歌瞬间一顿" the users reported.
+	std::string m_CoverKey;             // key the publisher is writing for
 	std::string m_CoverFailedKey;       // key whose cover fetch already failed
-	std::vector<uint8_t> m_CoverPng;    // raw PNG bytes for m_CoverKey
-	bool m_CoverDirty = false;          // set by worker when new bytes arrive
+	std::vector<uint8_t> m_CoverPng;    // raw encoded bytes for m_CoverKey
+	bool m_CoverDirty = false;          // set by publisher when new bytes arrive
 
 	static constexpr size_t COVER_MAX_BYTES = 16u * 1024u * 1024u;
 	static constexpr int COVER_MAX_DIMENSION = 2048;
 	static constexpr size_t COVER_MAX_PIXELS = 4u * 1024u * 1024u; // 2048x2048 RGBA：解码/遮罩/上传峰值降 4 倍（换歌卡顿治理 2026-11-08）
 
-	// render-thread side texture cache
+	// ---- request slot: render thread -> decode thread ----
+	std::vector<uint8_t> m_vCoverDecodeReqPng;
+	std::string m_CoverDecodeReqKey;
+	bool m_CoverDecodeReqValid = false;   // a request is waiting to be decoded
+	std::condition_variable m_CoverDecodeCv;
+	std::thread m_CoverDecodeThread;
+	bool m_CoverDecodeShutdown = false;
+
+	// ---- result slot: decode thread -> render thread ----
+	std::string m_CoverDecodedKey;        // key the finished decode belongs to
+	CImageInfo m_CoverDecodedImage;       // RGBA pixels, moved out by the render thread
+	bool m_CoverDecodeReady = false;      // a result is waiting (success or failure)
+	bool m_CoverDecodeFailed = false;
+	std::string m_CoverDecodeReason;      // human-readable outcome, for m_LastTexResult
+
+	// render-thread side texture cache (only ever touched from the render thread)
 	std::string m_LoadedCoverKey;       // key currently decoded into m_CoverTexture
-	std::vector<uint8_t> m_LoadedPng;   // PNG bytes owned by the render thread
+	std::string m_CoverPendingKey;      // key we asked the decode thread for
 	IGraphics::CTextureHandle m_CoverTexture; // GPU texture for m_LoadedCoverKey
 	bool m_CoverTextureValid = false;
 	std::string m_LastTexResult = "(none yet)";
@@ -1269,6 +1317,35 @@ public:
 		std::vector<SLyricLine> m_vLines;
 	};
 
+	static constexpr int64_t LYRICS_MAX_BYTES = 4 * 1024 * 1024;
+
+	// Own the response and parse into job-local data, never into CImpl. A track
+	// change can drop an aborted job while the pool finishes it safely. Only
+	// STATE_DONE publishes m_Result; Done() also accepts jobs still aborting.
+	template<typename TResult>
+	class CResponseJob final : public IJob
+	{
+		using FParse = void (*)(const std::shared_ptr<IHttpRequest> &, TResult &);
+		const std::shared_ptr<IHttpRequest> m_pRequest;
+		const FParse m_pfnParse;
+
+		void Run() override
+		{
+			if(State() != STATE_ABORTED)
+				m_pfnParse(m_pRequest, m_Result);
+		}
+
+	public:
+		TResult m_Result;
+
+		CResponseJob(std::shared_ptr<IHttpRequest> pRequest, FParse pfnParse) :
+			m_pRequest(std::move(pRequest)),
+			m_pfnParse(pfnParse)
+		{
+			Abortable(true);
+		}
+	};
+
 	static std::string BuildCacheKey(const STrack &Track)
 	{
 		// NOTE: duration is intentionally NOT part of the key. SMTC reports a
@@ -1414,8 +1491,15 @@ public:
 	std::string m_ActiveKey;
 	ELyricsState m_LyricsState = ELyricsState::IDLE;
 	std::vector<SLyricLine> m_vLines;
+	// Key + revision of m_vLines as last copied from the active SNeteaseMeta; lets
+	// UpdateNetease skip the per-frame deep copy when nothing changed. Both are
+	// needed: a revision alone misses a track that returns after m_vLines was
+	// cleared, and a key alone misses lyrics that arrive mid-track.
+	std::string m_LinesKey;
+	uint64_t m_LinesRevision = 0;
 	std::map<std::string, SCacheEntry> m_Cache;
 	std::shared_ptr<IHttpRequest> m_pRequest;
+	std::shared_ptr<CResponseJob<SCacheEntry>> m_pRequestJob;
 	std::string m_RequestKey;
 
 	void AbortRequest()
@@ -1432,6 +1516,11 @@ public:
 #endif
 			m_pRequest->Abort();
 			m_pRequest.reset();
+		}
+		if(m_pRequestJob)
+		{
+			m_pRequestJob->Abort();
+			m_pRequestJob.reset();
 		}
 		m_RequestKey.clear();
 	}
@@ -1450,6 +1539,7 @@ public:
 			It->second.m_TriedLrclib = true;
 			It->second.m_LyricState = Entry.m_State;
 			It->second.m_vLines = Entry.m_vLines;
+			++It->second.m_LinesRevision;
 		}
 #endif
 		if(Key == m_ActiveKey)
@@ -1468,13 +1558,17 @@ public:
 		m_ActiveKey.clear();
 		m_LyricsState = ELyricsState::IDLE;
 		m_vLines.clear();
+		// Invalidate the copy cache too: with the key left behind, the same song
+		// returning after this reset would match and skip the refill, leaving the
+		// lyric view empty.
+		m_LinesKey.clear();
 		ResetMediaClock();
 	}
 
 	// ---------------- lrclib lyrics (foreign tracks / SMTC) ----------------
 	void StartRequest(const STrack &Track)
 	{
-		if(m_pHttp == nullptr)
+		if(m_pHttp == nullptr || m_pEngine == nullptr)
 		{
 			SCacheEntry Entry;
 			Entry.m_State = ELyricsState::OFFLINE;
@@ -1506,6 +1600,7 @@ public:
 				aEscapedTitle, aEscapedArtist);
 
 		m_pRequest = HttpGet(aUrl);
+		m_pRequest->MaxResponseSize(LYRICS_MAX_BYTES);
 		m_pRequest->Timeout(CTimeout{10000, 30000, 500, 10});
 		m_pRequest->LogProgress(HTTPLOG::FAILURE);
 		m_pRequest->FailOnErrorStatus(false);
@@ -1519,12 +1614,24 @@ public:
 	{
 		if(!m_pRequest || !m_pRequest->Done())
 			return;
+		if(!m_pRequestJob)
+		{
+			m_pRequestJob = std::make_shared<CResponseJob<SCacheEntry>>(m_pRequest, ParseLrclibResponse);
+			m_pEngine->AddJob(m_pRequestJob);
+			return;
+		}
+		if(m_pRequestJob->State() != IJob::STATE_DONE)
+			return;
 
-		std::shared_ptr<IHttpRequest> pFinished = m_pRequest;
+		auto pFinished = std::move(m_pRequestJob);
 		m_pRequest.reset();
-		const std::string FinishedKey = m_RequestKey;
+		const std::string FinishedKey = std::move(m_RequestKey);
 		m_RequestKey.clear();
-		SCacheEntry Entry;
+		StoreLrclibResult(FinishedKey, pFinished->m_Result);
+	}
+
+	static void ParseLrclibResponse(const std::shared_ptr<IHttpRequest> &pFinished, SCacheEntry &Entry)
+	{
 		Entry.m_State = ELyricsState::NOTFOUND;
 		// [HTTP-ASSERT] 请求可能以 ERROR/ABORTED 结束（超时/断网），此时先取 StatusCode
 		// 会触发 http.cpp 的 "Request not done" 断言弹窗；先看状态再取码，失败一律按离线处理
@@ -1568,8 +1675,6 @@ public:
 				json_value_free(pRoot);
 			}
 		}
-
-		StoreLrclibResult(FinishedKey, Entry);
 	}
 
 	void UpdateLyrics(const STrack &Track)
@@ -1590,6 +1695,9 @@ public:
 			AbortRequest();
 			m_ActiveKey = Key;
 			m_vLines.clear();
+			// Force a refill through the copy cache below even when this key was
+			// seen before: m_vLines was just emptied.
+			m_LinesKey.clear();
 			ResetMediaClock();
 			SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing);
 
@@ -1623,6 +1731,11 @@ public:
 		std::string m_Artist; // ditto
 		ELyricsState m_LyricState = ELyricsState::IDLE;
 		std::vector<SLyricLine> m_vLines;
+		// Bumped on every write to m_vLines above. The render thread copies the
+		// vector into m_vLines each frame; without this it would deep-copy ~100
+		// lines (each a string plus a per-char karaoke word vector) 968 times a
+		// second for nothing.
+		uint64_t m_LinesRevision = 0;
 		// plain LRC from lrc.lyric, kept so a track that has karaoke yrc can
 		// degrade to whole-line lyrics if yrc parsing ever fails.
 		std::vector<SLyricLine> m_vFallbackLines;
@@ -1639,6 +1752,18 @@ public:
 		std::string m_QQMid;
 	};
 
+	class CMusicResponse
+	{
+	public:
+		SNeteaseMeta m_Meta;
+		bool m_Lyric = false;
+		bool m_Detail = false;
+		bool m_Cover = false;
+		std::vector<uint8_t> m_vCoverPng;
+	};
+
+	std::shared_ptr<CResponseJob<CMusicResponse>> m_pNeteaseJob;
+	std::shared_ptr<CResponseJob<CMusicResponse>> m_pQQJob;
 	std::map<std::string, SNeteaseMeta> m_NeteaseData;
 	std::string m_NeteaseInFlight; // cache key currently being resolved
 	bool m_NeteaseInLyricPhase = false;
@@ -1681,6 +1806,16 @@ public:
 			m_pQQRequest->Abort();
 			m_pQQRequest.reset();
 		}
+		if(m_pNeteaseJob)
+		{
+			m_pNeteaseJob->Abort();
+			m_pNeteaseJob.reset();
+		}
+		if(m_pQQJob)
+		{
+			m_pQQJob->Abort();
+			m_pQQJob.reset();
+		}
 		m_NeteaseInFlight.clear();
 		m_QQInFlight.clear();
 		m_NeteaseInLyricPhase = false;
@@ -1714,6 +1849,7 @@ public:
 	void StartNeteaseRequest(const std::string &Key, const char *pUrl, bool Lyric = false, bool Detail = false, bool Cover = false)
 	{
 		m_pNeteaseRequest = HttpGet(pUrl);
+		m_pNeteaseRequest->MaxResponseSize(Cover ? COVER_MAX_BYTES : LYRICS_MAX_BYTES);
 		m_pNeteaseRequest->Timeout(CTimeout{10000, 30000, 500, 10});
 		m_pNeteaseRequest->LogProgress(HTTPLOG::FAILURE);
 		m_pNeteaseRequest->FailOnErrorStatus(false);
@@ -1743,6 +1879,7 @@ public:
 				"https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?format=json&nobase64=1&g_tk=5381&loginUin=0&hostUin=0&platform=yqq&songmid=%s", aEscMid);
 		}
 		m_pQQRequest = HttpGet(aUrl);
+		m_pQQRequest->MaxResponseSize(LYRICS_MAX_BYTES);
 		m_pQQRequest->Timeout(CTimeout{10000, 30000, 500, 10});
 		m_pQQRequest->LogProgress(HTTPLOG::FAILURE);
 		m_pQQRequest->FailOnErrorStatus(false);
@@ -1763,6 +1900,9 @@ public:
 			AbortNetease();
 			m_ActiveKey = Key;
 			m_vLines.clear();
+			// Force the copy below to refill: m_vLines was just emptied, so a key
+			// match alone no longer means the render-side copy is current.
+			m_LinesKey.clear();
 			ResetMediaClock();
 			// 切歌：清掉上一首的曲长，防止新歌 resolve 完成前旧曲长参与重锚换算
 			if(m_pIslandView)
@@ -1802,12 +1942,12 @@ public:
 		ProcessQQ();
 		ProcessRequest();
 
-		if(m_pHttp == nullptr && Meta.m_LyricState != ELyricsState::READY)
+		if((m_pHttp == nullptr || m_pEngine == nullptr) && Meta.m_LyricState != ELyricsState::READY)
 		{
 			Meta.m_LyricState = ELyricsState::OFFLINE;
 			Meta.m_TriedLyric = Meta.m_TriedQQ = Meta.m_TriedLrclib = true;
 		}
-		else if(m_pHttp != nullptr)
+		else if(m_pHttp != nullptr && m_pEngine != nullptr)
 		{
 			if(!m_pNeteaseRequest && !Meta.m_TriedLyric)
 			{
@@ -1864,20 +2004,42 @@ public:
 		}
 
 		m_LyricsState = Meta.m_LyricState;
-		m_vLines = Meta.m_vLines;
+		if(m_LinesKey != Key || m_LinesRevision != Meta.m_LinesRevision)
+		{
+			m_LinesKey = Key;
+			m_LinesRevision = Meta.m_LinesRevision;
+			m_vLines = Meta.m_vLines;
+		}
 	}
 
 	void ProcessNetease()
 	{
 		if(!m_pNeteaseRequest || !m_pNeteaseRequest->Done())
 			return;
+		if(!m_pNeteaseJob)
+		{
+			m_pNeteaseJob = std::make_shared<CResponseJob<CMusicResponse>>(m_pNeteaseRequest, ParseNeteaseResponse);
+			auto &Response = m_pNeteaseJob->m_Result;
+			Response.m_Lyric = m_NeteaseInLyricPhase;
+			Response.m_Detail = m_NeteaseInDetailPhase;
+			Response.m_Cover = m_NeteaseInCoverPhase;
+			const auto It = m_NeteaseData.find(m_NeteaseInFlight);
+			if(It != m_NeteaseData.end())
+			{
+				// Snapshot only the search inputs, not the cached lyric vectors.
+				Response.m_Meta.m_Title = It->second.m_Title;
+				Response.m_Meta.m_Artist = It->second.m_Artist;
+				Response.m_Meta.m_DurationMs = It->second.m_DurationMs;
+			}
+			m_pEngine->AddJob(m_pNeteaseJob);
+			return;
+		}
+		if(m_pNeteaseJob->State() != IJob::STATE_DONE)
+			return;
 
-		std::shared_ptr<IHttpRequest> pFinished = m_pNeteaseRequest;
+		auto pFinished = std::move(m_pNeteaseJob);
 		m_pNeteaseRequest.reset();
-		const std::string Key = m_NeteaseInFlight;
-		const bool WasLyric = m_NeteaseInLyricPhase;
-		const bool WasDetail = m_NeteaseInDetailPhase;
-		const bool WasCover = m_NeteaseInCoverPhase;
+		const std::string Key = std::move(m_NeteaseInFlight);
 		m_NeteaseInFlight.clear();
 		m_NeteaseInLyricPhase = false;
 		m_NeteaseInDetailPhase = false;
@@ -1887,7 +2049,61 @@ public:
 			return;
 
 		SNeteaseMeta &Meta = It->second;
-		const bool ApplyToActive = Key == m_ActiveKey;
+		auto &Response = pFinished->m_Result;
+		SNeteaseMeta &Parsed = Response.m_Meta;
+		// Apply only this stage's fields. Detail/cover can finish while QQ or
+		// lrclib updates lyrics, so replacing the whole Meta would lose that work.
+		if(Response.m_Detail)
+		{
+			if(!Parsed.m_PicUrl.empty())
+				Meta.m_PicUrl = std::move(Parsed.m_PicUrl);
+			Meta.m_DetailQueued = true;
+			return;
+		}
+		if(Response.m_Cover)
+		{
+			if(Key == m_ActiveKey && !Response.m_vCoverPng.empty())
+			{
+				std::lock_guard<std::mutex> Lock(m_Mutex);
+				m_CoverPng = std::move(Response.m_vCoverPng);
+				m_CoverKey = "163|" + Meta.m_Title;
+				m_CoverDirty = true;
+			}
+			Meta.m_CoverQueued = true;
+			return;
+		}
+		if(Response.m_Lyric)
+		{
+			Meta.m_vFallbackLines = std::move(Parsed.m_vFallbackLines);
+			if(!Parsed.m_vLines.empty())
+			{
+				Meta.m_vLines = std::move(Parsed.m_vLines);
+				++Meta.m_LinesRevision;
+				Meta.m_LyricState = ELyricsState::READY;
+			}
+		}
+		else if(Parsed.m_Resolved)
+		{
+			Meta.m_Resolved = true;
+			Meta.m_SongId = Parsed.m_SongId;
+			Meta.m_DurationMs = Parsed.m_DurationMs;
+			if(!Parsed.m_PicUrl.empty())
+				Meta.m_PicUrl = std::move(Parsed.m_PicUrl);
+		}
+		if(Response.m_Lyric || !Meta.m_Resolved)
+		{
+			Meta.m_TriedLyric = true;
+			if(Meta.m_vLines.empty())
+				Meta.m_LyricState = ELyricsState::NOTFOUND;
+		}
+	}
+
+	static void ParseNeteaseResponse(const std::shared_ptr<IHttpRequest> &pFinished, CMusicResponse &Response)
+	{
+		SNeteaseMeta &Meta = Response.m_Meta;
+		const bool WasLyric = Response.m_Lyric;
+		const bool WasDetail = Response.m_Detail;
+		const bool WasCover = Response.m_Cover;
 
 		// detail phase: resolve album.picUrl that the search response omitted.
 		if(WasDetail)
@@ -1907,33 +2123,21 @@ public:
 				if(pRoot != nullptr && pRoot != &json_value_none)
 					json_value_free(pRoot);
 			}
-			else
-			{
-			}
-			m_NeteaseInDetailPhase = false;
 			Meta.m_DetailQueued = true;
 			return;
 		}
 
-		// cover phase: raw image bytes (not JSON). Store into the shared cover
-		// buffer used by the render thread's UpdateCoverTexture().
+		// Copy raw cover bytes on the worker as well. The render thread only
+		// moves the finished buffer after checking that the track is still active.
 		if(WasCover)
 		{
-			if(ApplyToActive && pFinished->State() == EHttpState::DONE && pFinished->StatusCode() >= 200 && pFinished->StatusCode() < 300)
+			if(pFinished->State() == EHttpState::DONE && pFinished->StatusCode() >= 200 && pFinished->StatusCode() < 300)
 			{
 				unsigned char *pResultPtr = nullptr;
 				size_t ResultLen = 0;
 				pFinished->Result(&pResultPtr, &ResultLen);
 				if(pResultPtr != nullptr && ResultLen > 0 && ResultLen <= COVER_MAX_BYTES)
-				{
-					std::lock_guard<std::mutex> Lock(m_Mutex);
-					m_CoverPng.assign(pResultPtr, pResultPtr + ResultLen);
-					m_CoverKey = "163|" + Meta.m_Title;
-					m_CoverDirty = true;
-				}
-			}
-			else
-			{
+					Response.m_vCoverPng.assign(pResultPtr, pResultPtr + ResultLen);
 			}
 			Meta.m_CoverQueued = true;
 			return;
@@ -2121,21 +2325,23 @@ public:
 
 					const bool LrcOk = ParseSyncedLyrics(pLyricText, Meta.m_vFallbackLines);
 
-					bool Ok = false;
-					if(pYrcText[0] != '\0')
-					{
-						std::vector<SLyricLine> vYrc;
-						if(ParseYrcLyrics(pYrcText, vYrc))
+						bool Ok = false;
+						if(pYrcText[0] != '\0')
 						{
-							Meta.m_vLines = std::move(vYrc);
+							std::vector<SLyricLine> vYrc;
+							if(ParseYrcLyrics(pYrcText, vYrc))
+							{
+								Meta.m_vLines = std::move(vYrc);
+								++Meta.m_LinesRevision;
+								Ok = true;
+							}
+						}
+						if(!Ok && LrcOk)
+						{
+							Meta.m_vLines = Meta.m_vFallbackLines;
+							++Meta.m_LinesRevision;
 							Ok = true;
 						}
-					}
-					if(!Ok && LrcOk)
-					{
-						Meta.m_vLines = Meta.m_vFallbackLines;
-						Ok = true;
-					}
 
 					Meta.m_LyricState = Ok ? ELyricsState::READY : ELyricsState::NOTFOUND;
 				}
@@ -2160,11 +2366,19 @@ public:
 	{
 		if(!m_pQQRequest || !m_pQQRequest->Done())
 			return;
-		std::shared_ptr<IHttpRequest> pFinished = m_pQQRequest;
+		if(!m_pQQJob)
+		{
+			m_pQQJob = std::make_shared<CResponseJob<CMusicResponse>>(m_pQQRequest, ParseQQResponse);
+			m_pQQJob->m_Result.m_Lyric = m_QQInLyric;
+			m_pEngine->AddJob(m_pQQJob);
+			return;
+		}
+		if(m_pQQJob->State() != IJob::STATE_DONE)
+			return;
+
+		auto pFinished = std::move(m_pQQJob);
 		m_pQQRequest.reset();
-		const std::string Key = m_QQInFlight;
-		const bool WasSearch = m_QQInSearch;
-		const bool WasLyric = m_QQInLyric;
+		const std::string Key = std::move(m_QQInFlight);
 		m_QQInFlight.clear();
 		m_QQInSearch = false;
 		m_QQInLyric = false;
@@ -2172,8 +2386,32 @@ public:
 		if(Key.empty() || It == m_NeteaseData.end())
 			return;
 		SNeteaseMeta &Meta = It->second;
+		SNeteaseMeta &Parsed = pFinished->m_Result.m_Meta;
+		const bool FoundMid = !Parsed.m_QQMid.empty();
+		if(FoundMid)
+			Meta.m_QQMid = std::move(Parsed.m_QQMid);
+		if(!Parsed.m_vLines.empty())
+		{
+			Meta.m_vLines = std::move(Parsed.m_vLines);
+			++Meta.m_LinesRevision;
+			Meta.m_vFallbackLines.clear();
+			Meta.m_LyricState = ELyricsState::READY;
+		}
+		if(FoundMid && Key == m_ActiveKey && m_pHttp != nullptr)
+		{
+			StartQQ(Key, Meta);
+			return;
+		}
+		Meta.m_TriedQQ = !FoundMid;
+		if(Meta.m_vLines.empty())
+			Meta.m_LyricState = ELyricsState::NOTFOUND;
+	}
 
-		bool FoundMid = false;
+	static void ParseQQResponse(const std::shared_ptr<IHttpRequest> &pFinished, CMusicResponse &Response)
+	{
+		SNeteaseMeta &Meta = Response.m_Meta;
+		const bool WasSearch = !Response.m_Lyric;
+		const bool WasLyric = Response.m_Lyric;
 		if(pFinished->State() == EHttpState::DONE && pFinished->StatusCode() >= 200 && pFinished->StatusCode() < 300)
 		{
 			json_value *pRoot = pFinished->ResultJson();
@@ -2191,7 +2429,6 @@ public:
 					if(pMid->type == json_string && pMid->u.string.length > 0)
 					{
 						Meta.m_QQMid = pMid->u.string.ptr;
-						FoundMid = true;
 					}
 				}
 				else if(Success && WasLyric)
@@ -2201,6 +2438,7 @@ public:
 					if(pLyric->type == json_string && ParseSyncedLyrics(pLyric->u.string.ptr, vLines))
 					{
 						Meta.m_vLines = std::move(vLines);
+						++Meta.m_LinesRevision;
 						Meta.m_vFallbackLines.clear();
 						Meta.m_LyricState = ELyricsState::READY;
 					}
@@ -2209,15 +2447,6 @@ public:
 			if(pRoot != nullptr && pRoot != &json_value_none)
 				json_value_free(pRoot);
 		}
-
-		if(FoundMid && Key == m_ActiveKey && m_pHttp != nullptr)
-		{
-			StartQQ(Key, Meta);
-			return;
-		}
-		Meta.m_TriedQQ = !FoundMid;
-		if(Meta.m_vLines.empty())
-			Meta.m_LyricState = ELyricsState::NOTFOUND;
 	}
 #endif
 
@@ -2331,6 +2560,53 @@ public:
 			aBuf[strlen(aBuf) - 1] = '\0';
 	}
 
+	// 缓存 TextWidth 的结果(2026-11-09)：TextWidth 内部走 TextEx →
+	// CreateTextContainer + AppendTextContainer + DeleteTextContainer 的全量字形布局，
+	// 每次至少 3 次 make_shared，代价远高于字面量除法。灵动岛每帧量的这些串要么是
+	// 常量("00:00"、"↑~999.9k"…)、要么来自有界集合(计时器 %02d:%02d)，而字号只在
+	// Scale/字号 cvar 变化时才变；字体变化时先清表，再按 (文本, 字号) 匹配。
+	// 表满后按轮转位覆盖，计时器短串也能复用。
+	float MeasureCached(ITextRender *pTextRender, float Size, const char *pText)
+	{
+		if(!pText || pText[0] == '\0')
+			return 0.0f;
+		const char *pFace = g_Config.m_TcIslandFont[0] ? g_Config.m_TcIslandFont : g_Config.m_TcCustomFont;
+		if(!pFace[0])
+		{
+			const auto *pFaces = pTextRender->GetCustomFaces();
+			if(pFaces && !pFaces->empty())
+				pFace = pFaces->front().c_str();
+		}
+		// 切换独立、全局或默认字体后，旧字宽不再适用于当前字形布局。
+		if(m_TextWidthCacheFace != pFace)
+		{
+			m_TextWidthCacheFace = pFace;
+			m_TextWidthCacheCount = 0;
+			m_TextWidthCacheNext = 0;
+		}
+		const int FontSize = g_Config.m_TcFontSize;
+		for(int i = 0; i < m_TextWidthCacheCount; i++)
+		{
+			if(m_aTextWidthCache[i].m_Size == Size && m_aTextWidthCache[i].m_FontSize == FontSize && str_comp(m_aTextWidthCache[i].m_aText, pText) == 0)
+				return m_aTextWidthCache[i].m_Width;
+		}
+		const float Width = pTextRender->TextWidth(Size, pText);
+		if(str_length(pText) < (int)sizeof(m_aTextWidthCache[0].m_aText))
+		{
+			int Slot;
+			if(m_TextWidthCacheCount < TEXT_WIDTH_CACHE_MAX)
+				Slot = m_TextWidthCacheCount++;
+			else
+				Slot = m_TextWidthCacheNext++ % TEXT_WIDTH_CACHE_MAX;
+			CTextWidthCacheEntry &Entry = m_aTextWidthCache[Slot];
+			str_copy(Entry.m_aText, pText);
+			Entry.m_Size = Size;
+			Entry.m_FontSize = FontSize;
+			Entry.m_Width = Width;
+		}
+		return Width;
+	}
+
 	// TClient: game round timer, drawn inside the island (left of the disc icon)
 	// so it no longer sits at the top-centre and gets covered by the island.
 	// Mirrors CHud::RenderGameTimer()'s time computation. Returns empty string
@@ -2363,100 +2639,207 @@ public:
 		str_time((int64_t)Time * 100, ETimeFormat::DAYS, pBuf, BufSize);
 	}
 
-	// Ensure the GPU texture matches the worker's current cover PNG. Re-decodes
-	// only when the published cover key changed. Returns true when m_CoverTexture
-	// holds a valid texture ready to draw this frame.
-	bool UpdateCoverTexture()
+	// ---- cover decode thread ------------------------------------------------
+	// stbi decode + the circular alpha mask used to run inline in
+	// UpdateCoverTexture(), i.e. on the render thread, exactly when a track
+	// changed: a 2048x2048 cover is a 16 MiB RGBA buffer plus ~4M sqrt() calls.
+	// It runs here now; the render thread only uploads finished pixels.
+	void CoverDecodeMain()
 	{
-		std::string Key;
-		bool Dirty = false;
-		{
-			std::lock_guard<std::mutex> Lock(m_Mutex);
-			Key = m_CoverKey;
-			if(m_CoverDirty)
-			{
-				m_CoverDirty = false;
-				Dirty = true;
-				m_LoadedPng.swap(m_CoverPng); // take ownership of the fresh bytes
-			}
-			else if(Key != m_LoadedCoverKey)
-			{
-				// key changed but no new bytes queued (e.g. a track with no cover):
-				// drop the old texture so we don't show the wrong art.
-				Dirty = true;
-				m_LoadedPng.clear();
-			}
-		}
-		if(!Dirty)
-			return m_CoverTextureValid;
-		if(m_CoverTextureValid)
-		{
-			m_pGraphics->UnloadTexture(&m_CoverTexture);
-			m_CoverTextureValid = false;
-		}
-		m_LoadedCoverKey = Key;
-		if(m_LoadedPng.empty() || m_LoadedPng.size() > COVER_MAX_BYTES || m_LoadedPng.size() > (size_t)std::numeric_limits<int>::max())
-		{
-			m_LastTexResult = "invalid cover bytes=" + std::to_string(m_LoadedPng.size());
-			return false;
-		}
-		const int InputSize = (int)m_LoadedPng.size();
-		int IW = 0, IH = 0, IChannels = 0;
 		auto ValidDimensions = [](int W, int H) {
 			if(W <= 0 || H <= 0 || W > COVER_MAX_DIMENSION || H > COVER_MAX_DIMENSION)
 				return false;
 			const size_t Width = (size_t)W, Height = (size_t)H;
 			return Width <= COVER_MAX_PIXELS / Height && Width <= std::numeric_limits<size_t>::max() / Height / 4;
 		};
-		if(!stbi_info_from_memory(m_LoadedPng.data(), InputSize, &IW, &IH, &IChannels) || !ValidDimensions(IW, IH))
+
+		while(true)
 		{
-			m_LastTexResult = "invalid cover dimensions or format";
-			return false;
-		}
-		unsigned char *pPixels = stbi_load_from_memory(m_LoadedPng.data(), InputSize, &IW, &IH, &IChannels, 4);
-		if(!pPixels || !ValidDimensions(IW, IH))
-		{
-			m_LastTexResult = "stbi-FAIL bytes=" + std::to_string(m_LoadedPng.size()) + " err=" + std::string(stbi_failure_reason() ? stbi_failure_reason() : "?");
-			stbi_image_free(pPixels);
-			return false;
-		}
-		CImageInfo Image;
-		Image.m_Width = (size_t)IW;
-		Image.m_Height = (size_t)IH;
-		Image.m_Format = CImageInfo::FORMAT_RGBA;
-		Image.Allocate();
-		if(!Image.m_pData)
-		{
-			stbi_image_free(pPixels);
-			m_LastTexResult = "cover allocation failed";
-			return false;
-		}
-		memcpy(Image.m_pData, pPixels, (size_t)IW * (size_t)IH * 4);
-		stbi_image_free(pPixels);
-		// 网易云黑胶样式：封面裁成圆形（边缘 2px 抗锯齿），黑胶边从圆外露出
-		{
-			const float CXp = (IW - 1) * 0.5f;
-			const float CYp = (IH - 1) * 0.5f;
-			const float Radius = std::min(IW, IH) * 0.5f - 1.0f;
-			unsigned char *pPx = (unsigned char *)Image.m_pData;
-			for(int y = 0; y < IH; ++y)
+			std::vector<uint8_t> Png;
+			std::string Key;
 			{
-				for(int x = 0; x < IW; ++x)
+				std::unique_lock<std::mutex> Lock(m_Mutex);
+				m_CoverDecodeCv.wait(Lock, [this]() { return m_CoverDecodeShutdown || m_CoverDecodeReqValid; });
+				if(m_CoverDecodeShutdown)
+					return;
+				Png = std::move(m_vCoverDecodeReqPng);
+				m_vCoverDecodeReqPng.clear();
+				Key = std::move(m_CoverDecodeReqKey);
+				m_CoverDecodeReqKey.clear();
+				m_CoverDecodeReqValid = false;
+			}
+
+			CImageInfo Image;
+			bool Failed = false;
+			std::string Reason;
+			int IW = 0, IH = 0, IChannels = 0;
+
+			if(Png.empty() || Png.size() > COVER_MAX_BYTES || Png.size() > (size_t)std::numeric_limits<int>::max())
+			{
+				Failed = true;
+				Reason = "invalid cover bytes=" + std::to_string(Png.size());
+			}
+
+			unsigned char *pPixels = nullptr;
+			if(!Failed)
+			{
+				const int InputSize = (int)Png.size();
+				if(!stbi_info_from_memory(Png.data(), InputSize, &IW, &IH, &IChannels) || !ValidDimensions(IW, IH))
 				{
-					const float Dx = x - CXp;
-					const float Dy = y - CYp;
-					const float Edge = Radius - std::sqrt(Dx * Dx + Dy * Dy);
-					unsigned char &Alpha = pPx[((size_t)y * (size_t)IW + (size_t)x) * 4 + 3];
-					if(Edge <= 0.0f)
-						Alpha = 0;
-					else if(Edge < 2.0f)
-						Alpha = (unsigned char)(Alpha * (Edge / 2.0f));
+					Failed = true;
+					Reason = "invalid cover dimensions or format";
+				}
+				else
+				{
+					pPixels = stbi_load_from_memory(Png.data(), InputSize, &IW, &IH, &IChannels, 4);
+					if(!pPixels || !ValidDimensions(IW, IH))
+					{
+						Failed = true;
+						Reason = "stbi-FAIL bytes=" + std::to_string(Png.size()) + " err=" + std::string(stbi_failure_reason() ? stbi_failure_reason() : "?");
+					}
+					else
+					{
+						Image.m_Width = (size_t)IW;
+						Image.m_Height = (size_t)IH;
+						Image.m_Format = CImageInfo::FORMAT_RGBA;
+						Image.Allocate();
+						if(!Image.m_pData)
+						{
+							Failed = true;
+							Reason = "cover allocation failed";
+						}
+						else
+						{
+							memcpy(Image.m_pData, pPixels, (size_t)IW * (size_t)IH * 4);
+							// 网易云黑胶样式：封面裁成圆形（边缘 2px 抗锯齿），黑胶边从圆外露出
+							const float CXp = (IW - 1) * 0.5f;
+							const float CYp = (IH - 1) * 0.5f;
+							const float Radius = std::min(IW, IH) * 0.5f - 1.0f;
+							unsigned char *pPx = (unsigned char *)Image.m_pData;
+							for(int y = 0; y < IH; ++y)
+							{
+								for(int x = 0; x < IW; ++x)
+								{
+									const float Dx = x - CXp;
+									const float Dy = y - CYp;
+									const float Edge = Radius - std::sqrt(Dx * Dx + Dy * Dy);
+									unsigned char &Alpha = pPx[((size_t)y * (size_t)IW + (size_t)x) * 4 + 3];
+									if(Edge <= 0.0f)
+										Alpha = 0;
+									else if(Edge < 2.0f)
+										Alpha = (unsigned char)(Alpha * (Edge / 2.0f));
+								}
+							}
+							Reason = "decoded " + std::to_string(IW) + "x" + std::to_string(IH);
+						}
+					}
 				}
 			}
+			if(pPixels)
+				stbi_image_free(pPixels);
+
+			{
+				std::lock_guard<std::mutex> Lock(m_Mutex);
+				// operator= 只搬字段、不释放旧数据，先手动释放
+				if(m_CoverDecodedImage.m_pData)
+					m_CoverDecodedImage.Free();
+				m_CoverDecodedImage = std::move(Image);
+				m_CoverDecodedKey = Key;
+				m_CoverDecodeFailed = Failed;
+				m_CoverDecodeReason = std::move(Reason);
+				m_CoverDecodeReady = true;
+			}
 		}
-		m_CoverTexture = m_pGraphics->LoadTextureRawMove(Image, 0, "island-cover");
-		m_CoverTextureValid = m_CoverTexture.IsValid();
-		m_LastTexResult = "decoded " + std::to_string(IW) + "x" + std::to_string(IH) + " valid=" + std::to_string((int)m_CoverTextureValid);
+	}
+
+	void StartCoverDecodeThread()
+	{
+		if(m_CoverDecodeThread.joinable())
+			return;
+		m_CoverDecodeThread = std::thread([this]() { CoverDecodeMain(); });
+	}
+
+	void StopCoverDecodeThread()
+	{
+		if(!m_CoverDecodeThread.joinable())
+			return;
+		{
+			std::lock_guard<std::mutex> Lock(m_Mutex);
+			m_CoverDecodeShutdown = true;
+		}
+		m_CoverDecodeCv.notify_all();
+		m_CoverDecodeThread.join();
+	}
+
+	// Ensure the GPU texture matches the published cover. The render thread only
+	// publishes raw bytes to the decode thread and uploads finished pixels; the
+	// PNG decode and circular mask happen off-thread (see CoverDecodeMain).
+	// Returns true when m_CoverTexture holds a valid texture ready to draw.
+	bool UpdateCoverTexture()
+	{
+		std::string Key;
+		bool GotResult = false;
+		bool Failed = false;
+		std::string ResultKey;
+		std::string Reason;
+		bool RequestPending = false;
+		CImageInfo Finished;
+		{
+			std::lock_guard<std::mutex> Lock(m_Mutex);
+			Key = m_CoverKey;
+			if(m_CoverDirty)
+			{
+				m_CoverDirty = false;
+				// Hand the fresh bytes to the decode thread. If it is still busy
+				// with an older request, replace it: only the newest cover matters.
+				m_vCoverDecodeReqPng = std::move(m_CoverPng);
+				m_CoverPng.clear();
+				m_CoverDecodeReqKey = Key;
+				m_CoverDecodeReqValid = true;
+				m_CoverPendingKey = Key;
+				m_CoverDecodeCv.notify_one();
+			}
+			RequestPending = m_CoverPendingKey == Key;
+			if(m_CoverDecodeReady)
+			{
+				m_CoverDecodeReady = false;
+				GotResult = true;
+				Failed = m_CoverDecodeFailed;
+				ResultKey = m_CoverDecodedKey;
+				Reason = m_CoverDecodeReason;
+				if(m_CoverDecodedImage.m_pData)
+					Finished = std::move(m_CoverDecodedImage);
+				if(ResultKey == Key)
+					m_CoverPendingKey.clear();
+			}
+		}
+
+		// Finished decode for the track we are showing: upload and swap the texture.
+		if(GotResult && !Failed && Finished.m_pData && ResultKey == Key)
+		{
+			if(m_CoverTextureValid)
+				m_pGraphics->UnloadTexture(&m_CoverTexture);
+			m_CoverTextureValid = false;
+			m_LoadedCoverKey = Key;
+			m_CoverTexture = m_pGraphics->LoadTextureRawMove(Finished, 0, "island-cover");
+			m_CoverTextureValid = m_CoverTexture.IsValid();
+			m_LastTexResult = Reason + " valid=" + std::to_string((int)m_CoverTextureValid);
+			return m_CoverTextureValid;
+		}
+
+		// Drop stale art when the track changed and nothing new will arrive: a
+		// failed decode for this key, or a key with no cover queued at all. While
+		// a decode is still in flight the previous texture stays up, so a track
+		// change shows the old art for a few frames instead of a hole.
+		if(Key != m_LoadedCoverKey && (!RequestPending || (GotResult && ResultKey == Key)))
+		{
+			if(GotResult && Failed)
+				m_LastTexResult = Reason;
+			if(m_CoverTextureValid)
+				m_pGraphics->UnloadTexture(&m_CoverTexture);
+			m_CoverTextureValid = false;
+			m_LoadedCoverKey = Key;
+		}
 		return m_CoverTextureValid;
 	}
 
@@ -2606,7 +2989,7 @@ public:
 		const bool ShowGameTime = g_Config.m_TcIslandShowProgress && aGameTime[0] != '\0';
 		float GameW = 0.0f;
 		if(ShowGameTime)
-			GameW = m_pTextRender->TextWidth(TimerSize, aGameTime);
+			GameW = MeasureCached(m_pTextRender, TimerSize, aGameTime);
 
 		// ---- link status cell (left of the game clock) -----------------------
 		// One LED plus one number. The dot carries the verdict (green / amber /
@@ -2661,9 +3044,9 @@ public:
 		const float LinkDot = 6.0f * Scale;
 		const float LinkGap = 7.0f * Scale;
 		const float LinkPad = 17.0f * Scale;
-		const float LinkTextW = ShowLink ? std::max(std::max(m_pTextRender->TextWidth(LinkSize, "9999 ms"), m_pTextRender->TextWidth(LinkSize, "100.0%")),
-			std::max(std::max(m_pTextRender->TextWidth(LinkSubSize, "\xE2\x86\x91~999.9k"), m_pTextRender->TextWidth(LinkSubSize, "\xE2\x86\x91~999.9M")),
-				m_pTextRender->TextWidth(LinkSubSize, "\xE2\x86\x91~9.9e+18"))) : 0.0f;
+		const float LinkTextW = ShowLink ? std::max(std::max(MeasureCached(m_pTextRender, LinkSize, "9999 ms"), MeasureCached(m_pTextRender, LinkSize, "100.0%")),
+			std::max(std::max(MeasureCached(m_pTextRender, LinkSubSize, "\xE2\x86\x91~999.9k"), MeasureCached(m_pTextRender, LinkSubSize, "\xE2\x86\x91~999.9M")),
+				MeasureCached(m_pTextRender, LinkSubSize, "\xE2\x86\x91~9.9e+18"))) : 0.0f;
 		const float LinkCellW = ShowLink ? (LinkPad + LinkDot + LinkGap + LinkTextW + LinkPad) : 0.0f;
 		auto LinkColor = [&](float Alpha) -> ColorRGBA {
 			if(!LinkKnown)
@@ -2734,22 +3117,6 @@ public:
 		const float EqPadR = Height * 0.5f + 8.0f * Scale;
 		const float EqPadL = 18.0f * Scale;            // divider -> equaliser
 
-		// measure the text column width. The capsule is dynamic: it grows to
-		// fit the whole lyric/title line so we never crop the tail. Only when a
-		// line is longer than the on-screen cap do we fall back to marquee scroll.
-		char aMeasure[512];
-		float FullTextW;
-		if(UseLyric)
-		{
-			str_copy(aMeasure, aLyricBuf);
-			FullTextW = m_pTextRender->TextWidth(LyricSize, aMeasure);
-		}
-		else
-		{
-			str_copy(aMeasure, aSong);
-			FullTextW = m_pTextRender->TextWidth(TitleSize, aMeasure);
-		}
-
 		// fixed left/right chrome: the clock cell, the disc cell, the text gutters
 		// and the equaliser cell on the right
 		const float ClockCellW = ClockPad + GameW + ClockPad;
@@ -2769,7 +3136,7 @@ public:
 #endif
 			str_format(aLocalClock, sizeof(aLocalClock), "%02d:%02d", LocalTm.tm_hour, LocalTm.tm_min);
 		}
-		const float LocalClockTextW = ShowLocalClock ? m_pTextRender->TextWidth(TimerSize, "00:00") : 0.0f;
+		const float LocalClockTextW = ShowLocalClock ? MeasureCached(m_pTextRender, TimerSize, "00:00") : 0.0f;
 		const float LocalClockCellW = ShowLocalClock ? (ClockPad + LocalClockTextW + ClockPad) : 0.0f;
 		const float TextGapL = 14.0f * Scale;          // disc cell -> lyric text
 		const float TextGapR = 20.0f * Scale;          // lyric text -> divider（与绘制侧保持一致）
@@ -2781,10 +3148,8 @@ public:
 		const float MaxPillW = std::min(ScreenW * 0.78f, 560.0f * Scale);
 		const float MinPillW = 180.0f * Scale;
 
-		const float TextW = std::max(0.0f, std::min(FullTextW, MaxPillW - ChromeW));
 		// 宽度固定：胶囊不再随歌词长短伸缩，换行时连宽度都不变，因此端帽纹理永远是
 		// 同一张、整帧不需要任何新的烘焙。长歌词由下面的 FitText/marquee 在框内处理。
-		(void)TextW;
 		// 打开本地时间等额外单元后，chrome 可能超过 MaxPillW 的可用量：
 		// 宽度至少要容得下 chrome + 最小歌词区，否则右侧单元会被挤出胶囊。
 		const float NeededW = ChromeW + 120.0f * Scale;
@@ -3343,6 +3708,7 @@ void CIslandMusic::EnsureImpl()
 		m_pImpl->m_pClient = Client();
 		m_pImpl->m_pGameClient = GameClient();
 		m_pImpl->m_pHttp = Http();
+		m_pImpl->m_pEngine = Engine();
 		m_pImpl->m_pGraphics = Graphics();
 		m_pImpl->m_pTextRender = TextRender();
 	}
@@ -3354,6 +3720,7 @@ void CIslandMusic::OnInit()
 #if TCLIENT_HAS_WINRT_MUSIC
 	if(g_Config.m_TcIslandEnable)
 		m_pImpl->StartWorker();
+	m_pImpl->StartCoverDecodeThread();
 #endif
 }
 
@@ -3369,6 +3736,7 @@ void CIslandMusic::OnRender()
 #if TCLIENT_HAS_WINRT_MUSIC
 	if(g_Config.m_TcIslandEnable)
 		m_pImpl->StartWorker();
+	m_pImpl->StartCoverDecodeThread();
 	m_pImpl->Render();
 #endif
 }
@@ -3378,6 +3746,8 @@ void CIslandMusic::OnShutdown()
 	if(m_pImpl)
 		m_pImpl->ResetLyrics();
 #if TCLIENT_HAS_WINRT_MUSIC
+	if(m_pImpl)
+		m_pImpl->StopCoverDecodeThread();
 	if(m_pImpl)
 		m_pImpl->StopWorker();
 #endif

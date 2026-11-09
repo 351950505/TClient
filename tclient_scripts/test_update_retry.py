@@ -41,6 +41,10 @@ HARNESS = r'''
 constexpr int IO_MAX_PATH_LENGTH = 1024;
 enum class EHttpState { RUNNING, DONE, ERROR, ABORTED };
 enum class IPRESOLVE { V4 };
+enum class HTTPLOG { NONE };
+const json_value *json_object_get(const json_value *pValue, const char *pName) { return pValue && pValue->type == json_object ? &(*pValue)[pName] : &json_value_none; }
+unsigned json_array_length(const json_value *pValue) { return pValue && pValue->type == json_array ? pValue->u.array.length : 0; }
+const json_value *json_array_get(const json_value *pValue, unsigned Index) { return Index < json_array_length(pValue) ? pValue->u.array.values[Index] : &json_value_none; }
 struct CTimeout { int a, b, c, d; };
 struct SHA256_DIGEST { std::string m_Value; };
 int sha256_from_str(SHA256_DIGEST *pDigest, const char *pText) {
@@ -74,6 +78,7 @@ void io_close(IOHANDLE) {}
 struct IHttpRequest {
 	EHttpState m_State = EHttpState::RUNNING;
 	std::string m_Url, m_Path, m_ExpectedSha;
+	std::map<std::string, std::string> m_Headers;
 	std::vector<unsigned char> m_Data;
 	bool m_Aborted = false;
 	bool Done() const { return m_State != EHttpState::RUNNING; }
@@ -83,6 +88,8 @@ struct IHttpRequest {
 	void IpResolve(IPRESOLVE) {}
 	void MaxResponseSize(size_t) {}
 	void FailOnErrorStatus(bool) {}
+	void HeaderString(const char *pName, const char *pValue) { m_Headers[pName] = pValue; }
+	void LogProgress(HTTPLOG) {}
 	void ExpectSha256(const SHA256_DIGEST &Digest) { m_ExpectedSha = Digest.m_Value; }
 	void ValidateBeforeOverwrite(bool) {}
 	void AllowResume(bool) {}
@@ -107,6 +114,30 @@ int NumAssetSources() {
 	return Count;
 }
 void Done(const std::shared_ptr<IHttpRequest> &pTask, const std::vector<unsigned char> &Data) { CHECK(pTask); pTask->m_Data = Data; pTask->m_State = EHttpState::DONE; }
+int ApiSource() {
+	for(int Source = 0; Source < NumSources; ++Source) if(UpdateSourceIsApi(TCLIENT_UPDATE_SOURCE_SIBLING_BASES[Source])) return Source;
+	CHECK(false); return -1;
+}
+std::string ApiAssetUrl(bool Helper) {
+	return std::string("https://api.github.com/repos/") + TCLIENT_UPDATE_GH_REPO_PATH + "/releases/assets/" + (Helper ? "202" : "101");
+}
+std::string ApiReply(bool Zip = true, bool Helper = true) {
+	std::string Reply = "{\"assets\":[";
+	if(Zip) Reply += std::string("{\"name\":\"") + TCLIENT_UPDATE_ZIP_ASSET + "\",\"url\":\"" + ApiAssetUrl(false) + "\"}";
+	if(Zip && Helper) Reply += ",";
+	if(Helper) Reply += std::string("{\"name\":\"") + TCLIENT_UPDATE_HELPER_ASSET + "\",\"url\":\"" + ApiAssetUrl(true) + "\"}";
+	return Reply + "]}";
+}
+void ResolveApi(CTClient &C) {
+	if(!C.m_pUpdateApiResolveTask) return;
+	CHECK(C.m_pUpdateApiResolveTask->m_Url == std::string("https://api.github.com/repos/") + TCLIENT_UPDATE_GH_REPO_PATH + "/releases/tags/v2.3.5");
+	const std::string Sha = C.m_UpdateRelease.m_aSha256, HelperSha = C.m_UpdateRelease.m_aHelperSha256;
+	const std::string Reply = ApiReply();
+	Done(C.m_pUpdateApiResolveTask, std::vector<unsigned char>(Reply.begin(), Reply.end()));
+	C.PollUpdateTasks();
+	CHECK(!C.m_pUpdateApiResolveTask && C.m_UpdateRelease.m_Valid);
+	CHECK(Sha == C.m_UpdateRelease.m_aSha256 && HelperSha == C.m_UpdateRelease.m_aHelperSha256);
+}
 void Pair(CTClient &C, const std::vector<unsigned char> &Manifest = s_NewManifest, const std::vector<unsigned char> &Sig = s_NewSignature) {
 	CHECK(C.m_pUpdateManifestTask);
 	const std::string Url = C.m_pUpdateManifestTask->m_Url;
@@ -117,7 +148,7 @@ void Pair(CTClient &C, const std::vector<unsigned char> &Manifest = s_NewManifes
 	C.PollUpdateTasks();
 }
 void Clean(const CTClient &C) {
-	CHECK(!C.m_pUpdateManifestTask && !C.m_pUpdateManifestSigTask && !C.m_pUpdateDownloadTask && !C.m_pUpdateHelperTask);
+	CHECK(!C.m_pUpdateManifestTask && !C.m_pUpdateManifestSigTask && !C.m_pUpdateDownloadTask && !C.m_pUpdateHelperTask && !C.m_pUpdateApiResolveTask);
 	CHECK(C.m_UpdateRetryAt < 0);
 }
 void WaitRetry(CTClient &C) {
@@ -127,22 +158,41 @@ void WaitRetry(CTClient &C) {
 	C.PollUpdateTasks(); CHECK(C.m_Http.m_vRequests.size() == Count);
 	C.m_Clock.m_Now += 0.01f;
 	C.PollUpdateTasks(); CHECK(C.m_Http.m_vRequests.size() == Count + 1);
+	ResolveApi(C);
 }
 void DownloadDone(CTClient &C) {
 	CHECK(C.m_pUpdateDownloadTask);
 	g_Files[TCLIENT_UPDATE_ZIP_PATH] = C.m_UpdateRelease.m_Size;
 	C.m_pUpdateDownloadTask->m_State = EHttpState::DONE; C.PollUpdateTasks();
+	ResolveApi(C);
 	CHECK(C.m_pUpdateHelperTask && !C.m_pUpdateDownloadTask);
 }
 void CheckTag(const std::shared_ptr<IHttpRequest> &pTask, const char *pAsset, const char *pSha) {
 	CHECK(pTask && pTask->m_ExpectedSha == pSha);
-	CHECK(pTask->m_Url.find("/releases/download/v2.3.5/") != std::string::npos);
-	CHECK(pTask->m_Url.find("/latest/") == std::string::npos);
-	CHECK(pTask->m_Url.substr(pTask->m_Url.size() - std::strlen(pAsset)) == pAsset);
+	if(pTask->m_Url.find("https://api.github.com/") == 0) {
+		CHECK(pTask->m_Url == ApiAssetUrl(str_comp(pAsset, TCLIENT_UPDATE_HELPER_ASSET) == 0));
+		const auto Accept = pTask->m_Headers.find("Accept");
+		CHECK(Accept != pTask->m_Headers.end() && Accept->second == "application/octet-stream");
+	} else {
+		CHECK(pTask->m_Url.find("/releases/download/v2.3.5/") != std::string::npos);
+		CHECK(pTask->m_Url.find("/latest/") == std::string::npos);
+		CHECK(pTask->m_Url.substr(pTask->m_Url.size() - std::strlen(pAsset)) == pAsset);
+		CHECK(pTask->m_Headers.find("Accept") == pTask->m_Headers.end());
+	}
+}
+void BeginApi(CTClient &C, bool Helper) {
+	C.UpdateCheck(true); Pair(C);
+	C.m_UpdateDownloadSource = ApiSource();
+	if(Helper) C.StartUpdateHelperTask(); else C.StartDownloadTask();
+	CHECK(C.m_pUpdateApiResolveTask && C.m_ApiResolvePending == Helper);
+	CHECK(!C.m_pUpdateDownloadTask && !C.m_pUpdateHelperTask);
 }
 int main() {
 	int Scenarios = 0;
-	CHECK(NumSources == 5 && NumAssetSources() == 4);
+	CHECK(NumAssetSources() == TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT);
+	CHECK(std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES) == NumSources + 1);
+	CHECK(TCLIENT_UPDATE_SOURCE_SIBLING_BASES[NumSources] == nullptr);
+	CHECK(ApiSource() == TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT - 1);
 	// Every source obtains its own manifest/signature pair, including raw.
 	for(int Source = 0; Source < NumSources; ++Source) {
 		++Scenarios;
@@ -154,7 +204,7 @@ int main() {
 		CHECK(C.m_UpdateManifestSource == Source);
 		Pair(C);
 		CHECK(C.m_UpdateState == CTClient::EUpdateState::AVAILABLE && C.m_UpdateRelease.m_Valid);
-		Clean(C); C.UpdateStartDownload();
+		Clean(C); C.UpdateStartDownload(); ResolveApi(C);
 		CheckTag(C.m_pUpdateDownloadTask, TCLIENT_UPDATE_ZIP_ASSET, C.m_UpdateRelease.m_aSha256);
 	}
 	// Signature HTTP failures discard the pair and move to the next source.
@@ -223,7 +273,7 @@ int main() {
 	// ZIP and helper each cycle four mirrors once, always preserving signed metadata.
 	{
 		++Scenarios;
-		CTClient C; C.UpdateCheck(true); Pair(C); C.UpdateStartDownload();
+		CTClient C; C.UpdateCheck(true); Pair(C); C.UpdateStartDownload(); ResolveApi(C);
 		std::vector<std::string> ZipUrls, HelperUrls;
 		for(int Attempt = 0; Attempt < NumAssetSources(); ++Attempt) {
 			CheckTag(C.m_pUpdateDownloadTask, TCLIENT_UPDATE_ZIP_ASSET, C.m_UpdateRelease.m_aSha256);
@@ -247,7 +297,7 @@ int main() {
 	// Both transfer and final size failures rotate/exhaust with no stale retries.
 	for(bool Helper : {false, true}) for(bool WrongSize : {false, true}) {
 		++Scenarios;
-		CTClient C; C.UpdateCheck(true); Pair(C); C.UpdateStartDownload();
+		CTClient C; C.UpdateCheck(true); Pair(C); C.UpdateStartDownload(); ResolveApi(C);
 		if(Helper) DownloadDone(C);
 		for(int Attempt = 0; Attempt < NumAssetSources(); ++Attempt) {
 			auto pTask = Helper ? C.m_pUpdateHelperTask : C.m_pUpdateDownloadTask; CHECK(pTask);
@@ -263,7 +313,7 @@ int main() {
 		++Scenarios;
 		CTClient C; C.UpdateCheck(true);
 		if(Stage == 1) { Done(C.m_pUpdateManifestTask, s_NewManifest); C.PollUpdateTasks(); }
-		if(Stage >= 2) { Pair(C); C.UpdateStartDownload(); }
+		if(Stage >= 2) { Pair(C); C.UpdateStartDownload(); ResolveApi(C); }
 		if(Stage == 3) DownloadDone(C);
 		if(Stage == 4) { C.m_pUpdateDownloadTask->m_State = EHttpState::ERROR; C.PollUpdateTasks(); C.ResetUpdateTasks(); }
 		else { auto pTask = Stage == 0 ? C.m_pUpdateManifestTask : Stage == 1 ? C.m_pUpdateManifestSigTask : Stage == 2 ? C.m_pUpdateDownloadTask : C.m_pUpdateHelperTask; pTask->m_State = EHttpState::ABORTED; C.PollUpdateTasks(); }
@@ -273,12 +323,73 @@ int main() {
 	{
 		++Scenarios;
 		CTClient C;
-		auto M = C.m_pUpdateManifestTask = HttpGet("manifest"), S = C.m_pUpdateManifestSigTask = HttpGet("signature"), Z = C.m_pUpdateDownloadTask = HttpGet("zip"), H = C.m_pUpdateHelperTask = HttpGet("helper");
+		auto M = C.m_pUpdateManifestTask = HttpGet("manifest"), S = C.m_pUpdateManifestSigTask = HttpGet("signature"), Z = C.m_pUpdateDownloadTask = HttpGet("zip"), H = C.m_pUpdateHelperTask = HttpGet("helper"), A = C.m_pUpdateApiResolveTask = HttpGet("api");
 		C.m_UpdateRetryAt = 20; C.BootstrapHelperPending = true; C.UpdateFail("failed");
-		CHECK(M->m_Aborted && S->m_Aborted && Z->m_Aborted && H->m_Aborted && !C.BootstrapHelperPending); Clean(C);
+		CHECK(M->m_Aborted && S->m_Aborted && Z->m_Aborted && H->m_Aborted && A->m_Aborted && !C.BootstrapHelperPending); Clean(C);
 	}
-		CHECK(Scenarios == 29);
-		std::printf("%d updater scenarios passed: five paired sources, real Ed25519 rejection, stale raw, fixed tags, independent ZIP/helper mirror budgets, size errors and cancellation\n", Scenarios);
+	// API resolution is bounded, tag-pinned, and does not duplicate a pending request.
+	for(bool Helper : {false, true}) {
+		++Scenarios;
+		CTClient C; BeginApi(C, Helper);
+		const auto Count = C.m_Http.m_vRequests.size();
+		for(int i = 0; i < 20; ++i) { C.PollUpdateTasks(); C.UpdateStartDownload(); }
+		CHECK(C.m_Http.m_vRequests.size() == Count && C.m_pUpdateApiResolveTask);
+		ResolveApi(C);
+		CheckTag(Helper ? C.m_pUpdateHelperTask : C.m_pUpdateDownloadTask, Helper ? TCLIENT_UPDATE_HELPER_ASSET : TCLIENT_UPDATE_ZIP_ASSET, Helper ? C.m_UpdateRelease.m_aHelperSha256 : C.m_UpdateRelease.m_aSha256);
+		if(!Helper) {
+			const auto ResolvedCount = C.m_Http.m_vRequests.size();
+			DownloadDone(C);
+			CHECK(C.m_Http.m_vRequests.size() == ResolvedCount + 1);
+			CheckTag(C.m_pUpdateHelperTask, TCLIENT_UPDATE_HELPER_ASSET, C.m_UpdateRelease.m_aHelperSha256);
+		}
+		g_Files[TCLIENT_UPDATE_BOOTSTRAP_PATH] = C.m_UpdateRelease.m_HelperSize;
+		C.m_pUpdateHelperTask->m_State = EHttpState::DONE; C.PollUpdateTasks();
+		CHECK(C.m_UpdateState == CTClient::EUpdateState::DOWNLOADED && C.BootstrapHelperPending); Clean(C);
+	}
+	// HTTP errors, invalid JSON and either missing asset all rotate the same budget.
+	for(bool Helper : {false, true}) for(int Failure = 0; Failure < 5; ++Failure) {
+		++Scenarios;
+		CTClient C; BeginApi(C, Helper);
+		if(Failure == 0) C.m_pUpdateApiResolveTask->m_State = EHttpState::ERROR;
+		else {
+			const std::string Reply = Failure == 1 ? "{" : Failure == 2 ? "[]" : ApiReply(Failure != 3, Failure != 4);
+			Done(C.m_pUpdateApiResolveTask, std::vector<unsigned char>(Reply.begin(), Reply.end()));
+		}
+		C.PollUpdateTasks();
+		CHECK(!C.m_pUpdateApiResolveTask && C.m_UpdateRelease.m_Valid);
+		CHECK(C.m_UpdateDownloadSource == (ApiSource() + 1) % NumAssetSources());
+		CHECK(C.m_UpdateDownloadAttempt == 1 && C.m_UpdateRetryHelper == Helper);
+		CHECK(!C.m_pUpdateDownloadTask && !C.m_pUpdateHelperTask);
+		WaitRetry(C);
+		CheckTag(Helper ? C.m_pUpdateHelperTask : C.m_pUpdateDownloadTask, Helper ? TCLIENT_UPDATE_HELPER_ASSET : TCLIENT_UPDATE_ZIP_ASSET, Helper ? C.m_UpdateRelease.m_aHelperSha256 : C.m_UpdateRelease.m_aSha256);
+	}
+	for(bool Helper : {false, true}) {
+		++Scenarios;
+		CTClient C; BeginApi(C, Helper);
+		C.m_pUpdateApiResolveTask->m_State = EHttpState::ABORTED; C.PollUpdateTasks();
+		CHECK(C.m_UpdateState == CTClient::EUpdateState::FAILED && !C.m_UpdateRelease.m_Valid); Clean(C);
+		const auto Count = C.m_Http.m_vRequests.size(); C.m_Clock.m_Now += 100; C.PollUpdateTasks();
+		CHECK(C.m_Http.m_vRequests.size() == Count && !C.BootstrapHelperPending);
+	}
+	for(bool Helper : {false, true}) {
+		++Scenarios;
+		CTClient C; BeginApi(C, Helper);
+		C.m_UpdateDownloadAttempt = NumAssetSources() - 1;
+		C.m_pUpdateApiResolveTask->m_State = EHttpState::ERROR; C.PollUpdateTasks();
+		CHECK(C.m_UpdateState == CTClient::EUpdateState::FAILED && !C.m_UpdateRelease.m_Valid); Clean(C);
+	}
+	{
+		++Scenarios;
+		CTClient C; BeginApi(C, false);
+		auto Old = C.m_pUpdateApiResolveTask; C.UpdateFail("cancelled"); Clean(C);
+		C.UpdateCheck(true); const auto Count = C.m_Http.m_vRequests.size();
+		const std::string Reply = ApiReply(); Done(Old, std::vector<unsigned char>(Reply.begin(), Reply.end()));
+		C.PollUpdateTasks();
+		CHECK(C.m_UpdateState == CTClient::EUpdateState::CHECKING && !C.m_UpdateRelease.m_Valid);
+		CHECK(C.m_pUpdateManifestTask && !C.m_pUpdateApiResolveTask && C.m_Http.m_vRequests.size() == Count);
+	}
+	CHECK(Scenarios == NumSources + 41);
+	std::printf("%d updater scenarios passed: %d paired sources, real Ed25519 rejection, fixed tags, ZIP/helper mirror budgets, API assets and headers, resolve failures, stale completion and cancellation\n", Scenarios, NumSources);
 }
 '''
 
@@ -314,7 +425,7 @@ class UpdateRetryTest(unittest.TestCase):
 };
 '''
 		methods = []
-		for name in ["SetUpdateStatus", "UpdateFail", "ResetUpdateTasks", "VerifyUpdateManifestSignature", "UpdateCheck", "FetchUpdateManifest", "FinishUpdateManifest", "UpdateStartDownload", "StartDownloadTask", "FinishUpdateDownload", "FinishUpdateBootstrap", "PollUpdateTasks", "NextUpdateManifestSource", "RetryUpdateDownload", "StartUpdateHelperTask"]:
+		for name in ["SetUpdateStatus", "UpdateFail", "ResetUpdateTasks", "VerifyUpdateManifestSignature", "UpdateCheck", "FetchUpdateManifest", "FinishUpdateManifest", "UpdateStartDownload", "StartDownloadTask", "FinishUpdateDownload", "FinishUpdateBootstrap", "PollUpdateTasks", "NextUpdateManifestSource", "RetryUpdateDownload", "StartUpdateHelperTask", "StartApiResolveTask", "FinishApiResolve"]:
 			match = re.search(r"^(?:void|bool) CTClient::" + name + r"\([^\n]*\)\s*\n\{.*?^\}", source, re.MULTILINE | re.DOTALL)
 			if not match and name in {"NextUpdateManifestSource", "RetryUpdateDownload", "StartUpdateHelperTask"}:
 				continue  # Allows the regression to run red before the production fix.
@@ -340,9 +451,10 @@ class UpdateRetryTest(unittest.TestCase):
 				command = [compiler, "/nologo", "/utf-8", "/std:c++17", "/EHsc", "/I" + str(ROOT / "src"), str(cpp), *map(str, dependencies), "/Fe:" + str(exe)]
 			else:
 				command = [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT / "src"), str(cpp), *map(str, dependencies), "-o", str(exe)]
-			compiled = subprocess.run(command, cwd=root, capture_output=True, text=True)
+			# Localized compiler diagnostics must not hide the actual exit status.
+			compiled = subprocess.run(command, cwd=root, capture_output=True, text=True, errors="replace")
 			self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
-			result = subprocess.run([str(exe)], cwd=root, capture_output=True, text=True)
+			result = subprocess.run([str(exe)], cwd=root, capture_output=True, text=True, errors="replace")
 			self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 			print(result.stdout.strip())
 

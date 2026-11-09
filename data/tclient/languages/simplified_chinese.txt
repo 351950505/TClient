@@ -12,6 +12,30 @@
 
 ##### translated strings #####
 
+Settings gear color
+== 设置状态齿轮颜色
+
+Frozen highlight body color
+== 冻结高亮身体颜色
+
+Frozen highlight feet color
+== 冻结高亮脚部颜色
+
+Light
+== Light
+
+Azure
+== Azure
+
+BestClient-Light Ancient
+== BestClient-Light Ancient
+
+Light input others
+== Light 应用到其他玩家
+
+Azure input others
+== Azure 应用到其他玩家
+
 Yes: %d
 == 赞成：%d
 

@@ -47,7 +47,7 @@ public:
 
 	// alpha 各模式分别保留两号输入和动作锁存；切换模式不覆盖其他模式缓存。
 	// mode 0~7 = alpha 七模式（4 为历史空位），8~11 = BestClient 四模式（Best/Saiko/Delta/Cloud）。
-	static constexpr int NUM_FAST_INPUT_MODES = 12;
+	static constexpr int NUM_FAST_INPUT_MODES = 15;
 	CNetObj_PlayerInput m_aaModeFastInput[NUM_FAST_INPUT_MODES][NUM_DUMMIES] = {};
 	bool m_aModeFastInputHookAction[NUM_FAST_INPUT_MODES] = {};
 	bool m_aModeFastInputFireAction[NUM_FAST_INPUT_MODES] = {};

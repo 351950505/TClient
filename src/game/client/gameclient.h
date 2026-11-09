@@ -1045,6 +1045,7 @@ public:
 	float GetAncientInputAmount(int ClientId);
 	vec2 ApplyAncientInputPost(int ClientId, vec2 BasePos);
 	FastInput::CAncientState m_aAncientInputState[NUM_DUMMIES];
+	FastInput::CAncientState m_aLightAncientInputState[NUM_DUMMIES];
 	bool HasSnowHookInteraction(int ClientId) const;
 	bool IsSnowHookActive() const;
 	bool IsSnowHookAffected(int ClientId) const;

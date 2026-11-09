@@ -102,7 +102,7 @@ MACRO_CONFIG_INT(TcFastInputOthers, tc_fast_input_others, 0, 0, 1, CFGFLAG_CLIEN
 MACRO_CONFIG_INT(TcFastInputRepredictHook, tc_fast_input_repredict_hook, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Repredict fast input hook when the direction changes (requires Sub-Tick aiming disabled)")
 // 快速输入模式：0=Tater(原版) 1=Meow 2=Snow 3=Next 5=Salatik 6=Ancient 7=F（对齐 MeowClient-Next alpha）
 // 8=Best 9=Saiko 10=Delta 11=Cloud（2026-10-29 自 BestClient 移植，见 交接摘要 §172）
-MACRO_CONFIG_INT(TcFastInputMode, tc_fast_input_mode, 0, 0, 11, CFGFLAG_CLIENT | CFGFLAG_SAVE, "快速输入模式：0=Tater 1=Meow 2=Snow 3=Next 5=Salatik 6=Ancient 7=F 8=Best 9=Saiko 10=Delta 11=Cloud")
+MACRO_CONFIG_INT(TcFastInputMode, tc_fast_input_mode, 0, 0, 14, CFGFLAG_CLIENT | CFGFLAG_SAVE, "快速输入模式：0=Tater 1=Meow 2=Snow 3=Next 5=Salatik 6=Ancient 7=F 8=Best 9=Saiko 10=Delta 11=Cloud 12=Light 13=Azure 14=BestClient-Light Ancient")
 // 各模式的量均先换算为 tick，不是秒；Tater/Ancient/Hook 的毫秒值除以 20。
 // Meow 是原生 float ticks（对齐 alpha 的 meow_input，0.0f~5.0f，默认 0.0f）；
 // Snow/Next/Salatik 用百分之一 tick 兼容整数配置；F 用千分之一 tick。
@@ -140,6 +140,17 @@ MACRO_CONFIG_INT(TcDeltaInputOthers, tc_delta_input_others, 0, 0, 1, CFGFLAG_CLI
 MACRO_CONFIG_INT(TcCloudInput, tc_cloud_input, 0, 0, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Cloud 预测量（百分之一 tick，0~500）")
 MACRO_CONFIG_INT(TcCloudInputOthers, tc_cloud_input_others, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Cloud 应用到其他玩家")
 
+// BestClient-Light: 独立配置，保留现有模式及配置兼容性。
+MACRO_CONFIG_INT(TcLightInput, tc_light_input, 0, 0, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Light 预测量（百分之一 tick）")
+MACRO_CONFIG_INT(TcLightInputOthers, tc_light_input_others, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Light 应用到其他玩家")
+MACRO_CONFIG_INT(TcLightInputHook, tc_light_input_hook, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Light 钩子交互使用独立预测量")
+MACRO_CONFIG_INT(TcLightInputHookAmount, tc_light_input_hook_amount, 37, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Light 钩子预测量（毫秒）")
+MACRO_CONFIG_INT(TcAzureInput, tc_azure_input, 0, 0, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Azure 预测量（百分之一 tick）")
+MACRO_CONFIG_INT(TcAzureInputOthers, tc_azure_input_others, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Azure 应用到其他玩家")
+MACRO_CONFIG_INT(TcLightAncientInput, tc_light_ancient_input, 0, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "BestClient-Light Ancient 预测量（毫秒）")
+MACRO_CONFIG_INT(TcLightAncientInputOthers, tc_light_ancient_input_others, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "BestClient-Light Ancient 应用到其他玩家")
+MACRO_CONFIG_INT(TcLightAncientInputOthersAmount, tc_light_ancient_input_others_amount, 0, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "BestClient-Light Ancient 其他玩家预测量（毫秒）")
+
 MACRO_CONFIG_INT(TcAntiPingImproved, tc_antiping_improved, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Different antiping smoothing algorithm, not compatible with cl_antiping_smooth")
 MACRO_CONFIG_INT(TcAntiPingNegativeBuffer, tc_antiping_negative_buffer, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Helps in Gores. Allows internal certainty value to be negative which causes more conservative prediction")
 MACRO_CONFIG_INT(TcAntiPingStableDirection, tc_antiping_stable_direction, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Predicts optimistically along the tees stable axis to reduce delay in gaining overall stability")
@@ -149,6 +160,11 @@ MACRO_CONFIG_INT(TcColorFreeze, tc_color_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFL
 MACRO_CONFIG_INT(TcColorFreezeDarken, tc_color_freeze_darken, 90, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Makes color of tees darker when in freeze (0-100)")
 MACRO_CONFIG_INT(TcColorFreezeFeet, tc_color_freeze_feet, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Also use color for frozen tee feet")
 MACRO_CONFIG_INT(TcWaterHammerHighlight, tc_water_hammer_highlight, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight frozen teammates, yourself and your dummy holding hammer fire or hook")
+
+// 卡锤/卡钩高亮和玩家设置状态齿轮使用独立颜色，不改变触发条件。
+MACRO_CONFIG_COL(TcWaterHammerBodyColor, tc_water_hammer_body_color, 589706, CFGFLAG_CLIENT | CFGFLAG_SAVE, "冻结锤钩高亮身体颜色")
+MACRO_CONFIG_COL(TcWaterHammerFeetColor, tc_water_hammer_feet_color, 1441679, CFGFLAG_CLIENT | CFGFLAG_SAVE, "冻结锤钩高亮脚部颜色")
+MACRO_CONFIG_COL(TcSettingsGearColor, tc_settings_gear_color, 2228140, CFGFLAG_CLIENT | CFGFLAG_SAVE, "打开设置的玩家头顶齿轮颜色")
 
 // Revert Variables
 MACRO_CONFIG_INT(TcSmoothPredictionMargin, tc_prediction_margin_smooth, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Makes prediction margin transition smooth, causes worse ping jitter adjustment (reverts a DDNet change)")

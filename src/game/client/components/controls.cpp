@@ -34,6 +34,13 @@ void CControls::OnReset()
 {
 	ResetInput(0);
 	ResetInput(1);
+	for(int Mode = 12; Mode < NUM_FAST_INPUT_MODES; ++Mode)
+	{
+		for(auto &Input : m_aaModeFastInput[Mode])
+			Input = {};
+		m_aModeFastInputHookAction[Mode] = false;
+		m_aModeFastInputFireAction[Mode] = false;
+	}
 
 	for(int &AmmoCount : m_aAmmoCount)
 		AmmoCount = 0;
@@ -522,13 +529,18 @@ bool CControls::CheckNewInput()
 	int Mode = GameClient()->FastInputMode();
 	if(!GameClient()->FastInputActive(GameClient()->m_Snap.m_LocalClientId, false))
 		Mode = 0;
+	bool NewInput = Mode != m_ActiveFastInputMode && (Mode >= 12 || m_ActiveFastInputMode >= 12);
+	if(Mode >= 12 && Mode != m_ActiveFastInputMode)
+	{
+		m_aModeFastInputHookAction[Mode] = false;
+		m_aModeFastInputFireAction[Mode] = false;
+	}
 	m_ActiveFastInputMode = Mode;
 	CNetObj_PlayerInput *pFastInputs = Mode == 0 ? m_aFastInput : m_aaModeFastInput[Mode];
 	bool &HookAction = Mode == 0 ? m_FastInputHookAction : m_aModeFastInputHookAction[Mode];
 	bool &FireAction = Mode == 0 ? m_FastInputFireAction : m_aModeFastInputFireAction[Mode];
-	const bool DirectAim = Mode == 1 || Mode == 3 || Mode == 5 || Mode == 9 || Mode == 11;
+	const bool DirectAim = Mode == 1 || Mode == 3 || Mode == 5 || Mode == 9 || Mode == 11 || Mode == 13 || Mode == 14;
 	const bool ActiveOnly = Mode == 3 || Mode == 5 || Mode == 9;
-	bool NewInput = false;
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; Dummy++)
 	{
 		// Next 和 Salatik 的同一采集函数只更新当前操控号，其余模式检查两号。

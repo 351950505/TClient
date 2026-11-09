@@ -1219,8 +1219,8 @@ void CPlayers::OnRender()
 
 		if(GameClient()->m_WaterHammerIndicator.IsMarked(i))
 		{
-			const ColorRGBA BodyColor(1.0f, 0.25f, 0.08f, 1.0f);
-			const ColorRGBA FeetColor(1.0f, 0.55f, 0.12f, 1.0f);
+			const ColorRGBA BodyColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcWaterHammerBodyColor));
+			const ColorRGBA FeetColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcWaterHammerFeetColor));
 			aRenderInfo[i].m_CustomColoredSkin = true;
 			aRenderInfo[i].m_ColorBody = BodyColor;
 			aRenderInfo[i].m_ColorFeet = FeetColor;

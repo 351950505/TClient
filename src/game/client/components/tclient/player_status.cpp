@@ -82,7 +82,7 @@ void CPlayerStatus::RenderGears()
 		Graphics()->MapScreen(CScreenRect(0.0f, 0.0f, (float)Graphics()->ScreenWidth(), (float)Graphics()->ScreenHeight()));
 		const float GearSize = std::clamp(20.0f * Graphics()->ScreenHeight() / WorldRect.Height(), 10.0f, 96.0f);
 		TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
-		TextRender()->TextColor(1.0f, 0.85f, 0.35f, 1.0f);
+		TextRender()->TextColor(color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcSettingsGearColor)));
 		for(const vec2 &Gear : vGearPixels)
 		{
 			const float Width = TextRender()->TextWidth(GearSize, FontIcon::GEAR, -1, -1.0f);

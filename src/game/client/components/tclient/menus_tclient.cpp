@@ -787,6 +787,11 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	// DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcRenderNameplateSpec, TCLocalize("Hide nameplates in spec"), &g_Config.m_TcRenderNameplateSpec, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcNameplateSkins, TCLocalize("Show skin names in nameplate"), &g_Config.m_TcNameplateSkins, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowSettingsGear, TCLocalize("Show a gear above players who have the settings menu open"), &g_Config.m_TcShowSettingsGear, &Column, LineSize);
+	if(g_Config.m_TcShowSettingsGear)
+	{
+		static CButtonContainer s_SettingsGearColor;
+		DoLine_ColorPicker(&s_SettingsGearColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Settings gear color"), &g_Config.m_TcSettingsGearColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcSettingsGearColor)), false);
+	}
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClFreezeStars, TCLocalize("Freeze stars"), &g_Config.m_ClFreezeStars, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcColorFreeze, TCLocalize("Colored frozen tee skins"), &g_Config.m_TcColorFreeze, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenKatana, TCLocalize("Show katan on frozen players"), &g_Config.m_TcFrozenKatana, &Column, LineSize);
@@ -850,9 +855,9 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	// 快速输入模式选择（照 alpha 客户端顺序：Tater/Ancient/Next/Meow/Snow/Salatik/F，对应 mode 0/6/3/1/2/5/7；
 	// 8~11 = BestClient 四模式 Best/Saiko/Delta/Cloud，接在 F 后）
 	{
-		static const std::vector<int> s_vModeValues = {0, 6, 3, 1, 2, 5, 7, 8, 9, 10, 11};
+		static const std::vector<int> s_vModeValues = {0, 6, 3, 1, 2, 5, 7, 8, 9, 10, 11, 12, 13, 14};
 		static std::vector<const char *> s_vModeNames;
-		s_vModeNames = {TCLocalize("Tater"), TCLocalize("Ancient"), TCLocalize("Next"), TCLocalize("Meow"), TCLocalize("Snow"), TCLocalize("Salatik"), TCLocalize("F"), TCLocalize("Best"), TCLocalize("Saiko"), TCLocalize("Delta"), TCLocalize("Cloud")};
+		s_vModeNames = {TCLocalize("Tater"), TCLocalize("Ancient"), TCLocalize("Next"), TCLocalize("Meow"), TCLocalize("Snow"), TCLocalize("Salatik"), TCLocalize("F"), TCLocalize("Best"), TCLocalize("Saiko"), TCLocalize("Delta"), TCLocalize("Cloud"), TCLocalize("Light"), TCLocalize("Azure"), TCLocalize("BestClient-Light Ancient")};
 		static CUi::SDropDownState s_ModeDropDownState;
 		static CScrollRegion s_ModeDropDownScrollRegion;
 		s_ModeDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_ModeDropDownScrollRegion;
@@ -971,6 +976,21 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 			Column.HSplitTop(LineSize, &Button, &Column);
 			DoSliderWithDividedValue(&g_Config.m_TcCloudInput, &g_Config.m_TcCloudInput, &Button, TCLocalize("Cloud input"), 0, 500, 100, " ticks");
 			break;
+		case 12:
+			Column.HSplitTop(LineSize, &Button, &Column);
+			DoSliderWithDividedValue(&g_Config.m_TcLightInput, &g_Config.m_TcLightInput, &Button, TCLocalize("Fast Input Amount"), 0, 500, 100, " ticks");
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcLightInputHook, TCLocalize("Hook amount (another hook logic)"), &g_Config.m_TcLightInputHook, &Column, LineSize);
+			Column.HSplitTop(LineSize, &Button, &Column);
+			DoSliderWithScaledValue(&g_Config.m_TcLightInputHookAmount, &g_Config.m_TcLightInputHookAmount, &Button, TCLocalize("Hook Amount"), 1, 100, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
+			break;
+		case 13:
+			Column.HSplitTop(LineSize, &Button, &Column);
+			DoSliderWithDividedValue(&g_Config.m_TcAzureInput, &g_Config.m_TcAzureInput, &Button, TCLocalize("Fast Input Amount"), 0, 500, 100, " ticks");
+			break;
+		case 14:
+			Column.HSplitTop(LineSize, &Button, &Column);
+			DoSliderWithScaledValue(&g_Config.m_TcLightAncientInput, &g_Config.m_TcLightAncientInput, &Button, TCLocalize("Amount"), 0, 100, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
+			break;
 		default:
 			Column.HSplitTop(LineSize, nullptr, &Column);
 			break;
@@ -998,6 +1018,16 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		case 9: DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcSaikoInputOthers, TCLocalize("Saiko input others"), &g_Config.m_TcSaikoInputOthers, &Column, LineSize); break;
 		case 10: DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDeltaInputOthers, TCLocalize("Delta input others"), &g_Config.m_TcDeltaInputOthers, &Column, LineSize); break;
 		case 11: DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcCloudInputOthers, TCLocalize("Cloud input others"), &g_Config.m_TcCloudInputOthers, &Column, LineSize); break;
+		case 12: DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcLightInputOthers, TCLocalize("Light input others"), &g_Config.m_TcLightInputOthers, &Column, LineSize); break;
+		case 13: DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAzureInputOthers, TCLocalize("Azure input others"), &g_Config.m_TcAzureInputOthers, &Column, LineSize); break;
+		case 14:
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcLightAncientInputOthers, TCLocalize("Ancient input others"), &g_Config.m_TcLightAncientInputOthers, &Column, LineSize);
+			if(g_Config.m_TcLightAncientInputOthers)
+			{
+				Column.HSplitTop(LineSize, &Button, &Column);
+				DoSliderWithScaledValue(&g_Config.m_TcLightAncientInputOthersAmount, &g_Config.m_TcLightAncientInputOthersAmount, &Button, TCLocalize("Others prediction amount"), 0, 100, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
+			}
+			break;
 		default: Column.HSplitTop(LineSize, nullptr, &Column); break;
 		}
 	}
@@ -4170,6 +4200,12 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	Ui()->DoLabel(&Label, TCLocalize("Frozen hammer/hook highlight"), HeadlineFontSize, TEXTALIGN_ML);
 	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlight, TCLocalize("Highlight frozen teammates, yourself and your dummy holding hammer fire or hook"), &g_Config.m_TcWaterHammerHighlight, &RightView, LineSize);
+	if(g_Config.m_TcWaterHammerHighlight)
+	{
+		static CButtonContainer s_WaterHammerBodyColor, s_WaterHammerFeetColor;
+		DoLine_ColorPicker(&s_WaterHammerBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen highlight body color"), &g_Config.m_TcWaterHammerBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerBodyColor)), false);
+		DoLine_ColorPicker(&s_WaterHammerFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen highlight feet color"), &g_Config.m_TcWaterHammerFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerFeetColor)), false);
+	}
 
 	// The columns' remaining height may be negative after scrolling; only their consumed height is content.
 	CUIRect Content = MainView;

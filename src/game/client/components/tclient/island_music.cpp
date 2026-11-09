@@ -1358,10 +1358,12 @@ public:
 		// used to rank the search result, not to identify the track.
 		std::string Key;
 		Key.reserve(128);
-		Key += "v1|";
+		Key += "v2|";
 		Key += Track.m_Artist;
 		Key += '|';
 		Key += Track.m_Title;
+		Key += '|';
+		Key += Track.m_Album;
 		return Key;
 	}
 
@@ -1732,6 +1734,7 @@ public:
 		int64_t m_DurationMs = 0;
 		std::string m_Title;  // title as shown by the netease window, kept for version matching
 		std::string m_Artist; // ditto
+		std::string m_Album;  // 专辑名，用于区分同名的原版 / 现场版
 		ELyricsState m_LyricState = ELyricsState::IDLE;
 		std::vector<SLyricLine> m_vLines;
 		// Bumped on every write to m_vLines above. The render thread copies the
@@ -1751,8 +1754,12 @@ public:
 		bool m_DetailQueued = false;
 		// QQ 音乐第三源（NetEase NOTFOUND 后、lrclib 兜底前尝试）
 		bool m_TriedQQ = false; // QQ search/lyric completed, successfully or not
+		bool m_TriedKugou = false; // 酷狗 search/candidate/lyric completed
 		bool m_TriedLrclib = false;
 		std::string m_QQMid;
+		std::string m_KugouHash;
+		std::string m_KugouLyricId;
+		std::string m_KugouAccessKey;
 	};
 
 	class CMusicResponse
@@ -1762,11 +1769,13 @@ public:
 		bool m_Lyric = false;
 		bool m_Detail = false;
 		bool m_Cover = false;
+		int m_KugouStage = -1;
 		std::vector<uint8_t> m_vCoverPng;
 	};
 
 	std::shared_ptr<CResponseJob<CMusicResponse>> m_pNeteaseJob;
 	std::shared_ptr<CResponseJob<CMusicResponse>> m_pQQJob;
+	std::shared_ptr<CResponseJob<CMusicResponse>> m_pKugouJob;
 	std::map<std::string, SNeteaseMeta> m_NeteaseData;
 	std::string m_NeteaseInFlight; // cache key currently being resolved
 	bool m_NeteaseInLyricPhase = false;
@@ -1774,9 +1783,12 @@ public:
 	bool m_NeteaseInDetailPhase = false;
 	std::shared_ptr<IHttpRequest> m_pNeteaseRequest;
 	std::shared_ptr<IHttpRequest> m_pQQRequest;
+	std::shared_ptr<IHttpRequest> m_pKugouRequest;
 	std::string m_QQInFlight; // independent of NetEase detail/cover ownership
 	bool m_QQInSearch = false;
 	bool m_QQInLyric = false;
+	std::string m_KugouInFlight;
+	int m_KugouInStage = 0; // 0=search, 1=candidate, 2=lyric download
 
 	void AbortNetease()
 	{
@@ -1814,13 +1826,33 @@ public:
 			m_pNeteaseJob->Abort();
 			m_pNeteaseJob.reset();
 		}
+		if(m_pKugouRequest)
+		{
+			auto It = m_NeteaseData.find(m_KugouInFlight);
+			if(It != m_NeteaseData.end())
+			{
+				It->second.m_TriedKugou = false;
+				It->second.m_KugouHash.clear();
+				It->second.m_KugouLyricId.clear();
+				It->second.m_KugouAccessKey.clear();
+			}
+			m_pKugouRequest->Abort();
+			m_pKugouRequest.reset();
+		}
 		if(m_pQQJob)
 		{
 			m_pQQJob->Abort();
 			m_pQQJob.reset();
 		}
+		if(m_pKugouJob)
+		{
+			m_pKugouJob->Abort();
+			m_pKugouJob.reset();
+		}
 		m_NeteaseInFlight.clear();
 		m_QQInFlight.clear();
+		m_KugouInFlight.clear();
+		m_KugouInStage = 0;
 		m_NeteaseInLyricPhase = false;
 		m_NeteaseInCoverPhase = false;
 		m_NeteaseInDetailPhase = false;
@@ -1846,6 +1878,8 @@ public:
 		Key += Track.m_Artist;
 		Key += '|';
 		Key += Track.m_Title;
+		Key += '|';
+		Key += Track.m_Album;
 		return Key;
 	}
 
@@ -1929,6 +1963,7 @@ public:
 		SNeteaseMeta &Meta = m_NeteaseData[Key];
 		Meta.m_Title = Track.m_Title;
 		Meta.m_Artist = Track.m_Artist;
+		Meta.m_Album = Track.m_Album;
 		// v6: 单字段原子回传曲长给 monitor（seek 重锚把 Fraction 换算成秒用）。
 		// 必须只写这一个字段——整结构回写会与 monitor 50ms 一次的 SHM 刷新竞争、覆盖它的数据。
 		if(m_pIslandView && Meta.m_DurationMs > 0)
@@ -1943,6 +1978,7 @@ public:
 		// owns the lyric state and continues while QQ/lrclib are in flight.
 		ProcessNetease();
 		ProcessQQ();
+		ProcessKugou();
 		ProcessRequest();
 
 		if((m_pHttp == nullptr || m_pEngine == nullptr) && Meta.m_LyricState != ELyricsState::READY)
@@ -1952,7 +1988,7 @@ public:
 		}
 		else if(m_pHttp != nullptr && m_pEngine != nullptr)
 		{
-			if(!m_pNeteaseRequest && !Meta.m_TriedLyric)
+			if(!m_pNeteaseRequest && !Meta.m_TriedLyric && TcDetectSourceService(Track.m_ServiceId) <= 1)
 			{
 				char aUrl[1400];
 				if(Meta.m_Resolved)
@@ -1973,14 +2009,36 @@ public:
 				Meta.m_LyricState = ELyricsState::LOADING;
 			}
 
+			// 播放器是 QQ/酷我/酷狗时，先向它自己的平台要歌词，不拿网易云的搜索凑数。
+			const int SourceService = TcDetectSourceService(Track.m_ServiceId);
+			if(SourceService > 1 && Meta.m_Resolved && !Meta.m_TriedLyric)
+			{
+				Meta.m_TriedLyric = true;
+				Meta.m_LyricState = ELyricsState::NOTFOUND;
+			}
 			if(Meta.m_TriedLyric && Meta.m_vLines.empty())
 			{
-				if(!Meta.m_TriedQQ)
+				// 播放器是酷狗就先用酷狗，否则 QQ 优先；两个都失败才走 lrclib。
+				const bool KugouFirst = TcDetectSourceService(Track.m_ServiceId) == 4;
+				bool Started = false;
+				for(int Pass = 0; Pass < 2 && !Started; ++Pass)
 				{
-					if(!m_pQQRequest)
+					const bool WantKugou = (Pass == 0) == KugouFirst;
+					if(WantKugou)
+					{
+						if(!Meta.m_TriedKugou && !m_pKugouRequest)
+						{
+							StartKugou(Key, Meta);
+							Started = true;
+						}
+					}
+					else if(!Meta.m_TriedQQ && !m_pQQRequest)
+					{
 						StartQQ(Key, Meta);
+						Started = true;
+					}
 				}
-				else if(!Meta.m_TriedLrclib && !m_pRequest)
+				if(!Started && Meta.m_TriedQQ && Meta.m_TriedKugou && !Meta.m_TriedLrclib && !m_pRequest)
 				{
 					Meta.m_TriedLrclib = true;
 					Meta.m_LyricState = ELyricsState::LOADING;
@@ -2032,6 +2090,7 @@ public:
 				// Snapshot only the search inputs, not the cached lyric vectors.
 				Response.m_Meta.m_Title = It->second.m_Title;
 				Response.m_Meta.m_Artist = It->second.m_Artist;
+				Response.m_Meta.m_Album = It->second.m_Album;
 				Response.m_Meta.m_DurationMs = It->second.m_DurationMs;
 			}
 			m_pEngine->AddJob(m_pNeteaseJob);
@@ -2101,6 +2160,178 @@ public:
 		}
 	}
 
+	// ---- 统一的歌词候选评分 ------------------------------------------------
+	// 所有平台共用一套规则选版本：歌名本体 > 歌手 > 专辑 > 曲长 > Live/Remix 标记。
+	// 旧逻辑里 QQ 取第一条、网易云对"换歌手"只扣 500 分，Live 版就串到了别的歌手。
+	static std::string TcStripBrackets(const std::string &Name)
+	{
+		static const char *s_apOpen[] = {"(", "（", "[", "【"};
+		static const char *s_apClose[] = {")", "）", "]", "】"};
+		std::string Out;
+		Out.reserve(Name.size());
+		size_t i = 0;
+		while(i < Name.size())
+		{
+			bool Stripped = false;
+			for(int b = 0; b < 4; ++b)
+			{
+				const size_t OpenLen = strlen(s_apOpen[b]);
+				if(Name.compare(i, OpenLen, s_apOpen[b]) == 0)
+				{
+					const size_t Close = Name.find(s_apClose[b], i + OpenLen);
+					if(Close != std::string::npos)
+					{
+						i = Close + strlen(s_apClose[b]);
+						Out.push_back(' ');
+						Stripped = true;
+					}
+					break;
+				}
+			}
+			if(!Stripped)
+				Out.push_back(Name[i++]);
+		}
+		return Out;
+	}
+
+	// 中文歌名里的空格、连字符、大小写都不影响匹配，统一压平后再比。
+	static std::string TcCompactName(const std::string &Name)
+	{
+		std::string Out;
+		Out.reserve(Name.size());
+		for(char c : Name)
+		{
+			if(c == ' ' || c == '\t' || c == '-' || c == '_' || c == ':' || c == '.' || c == '/')
+				continue;
+			Out.push_back((char)tolower((unsigned char)c));
+		}
+		return Out;
+	}
+
+	static bool TcContainsTag(const std::string &Name, const char *const *ppTags, size_t NumTags)
+	{
+		std::string Lower;
+		Lower.reserve(Name.size());
+		for(char c : Name)
+			Lower.push_back((char)tolower((unsigned char)c));
+		for(size_t i = 0; i < NumTags; ++i)
+			if(Lower.find(ppTags[i]) != std::string::npos)
+				return true;
+		return false;
+	}
+
+	struct STcVersionTags
+	{
+		bool m_Live = false;
+		bool m_Remix = false;
+		bool m_Acoustic = false;
+		bool m_Inst = false;
+		bool m_Cover = false;
+	};
+
+	static void TcVersionTags(const std::string &Name, STcVersionTags &Tags)
+	{
+		static const char *s_apLiveTags[] = {"live", "现场", "演唱会", "concert", "unplugged"};
+		static const char *s_apRemixTags[] = {"remix", "混音", "dj版", "抖音"};
+		static const char *s_apInstTags[] = {"伴奏", "instrumental", "karaoke"};
+		static const char *s_apAcousticTags[] = {"acoustic", "不插电"};
+		static const char *s_apCoverTags[] = {"翻唱", "cover", "深情版", "女声版", "男声版", "童声版", "钢琴版", "纯音乐"};
+		Tags.m_Live = TcContainsTag(Name, s_apLiveTags, sizeof(s_apLiveTags) / sizeof(s_apLiveTags[0]));
+		Tags.m_Remix = TcContainsTag(Name, s_apRemixTags, sizeof(s_apRemixTags) / sizeof(s_apRemixTags[0]));
+		Tags.m_Inst = TcContainsTag(Name, s_apInstTags, sizeof(s_apInstTags) / sizeof(s_apInstTags[0]));
+		Tags.m_Acoustic = TcContainsTag(Name, s_apAcousticTags, sizeof(s_apAcousticTags) / sizeof(s_apAcousticTags[0]));
+		Tags.m_Cover = TcContainsTag(Name, s_apCoverTags, sizeof(s_apCoverTags) / sizeof(s_apCoverTags[0]));
+	}
+
+	// 当前播放的是哪个客户端：决定优先问哪个平台的歌词，而不是每次都从网易云搜起。
+	static int TcDetectSourceService(const std::string &ServiceId)
+	{
+		std::string Lower;
+		Lower.reserve(ServiceId.size());
+		for(char c : ServiceId)
+			Lower.push_back((char)tolower((unsigned char)c));
+		if(Lower.find("cloudmusic") != std::string::npos || Lower.find("netease") != std::string::npos)
+			return 1;
+		if(Lower.find("qqmusic") != std::string::npos || Lower.find("qq.com") != std::string::npos)
+			return 2;
+		if(Lower.find("kuwo") != std::string::npos || Lower.find("kwmusic") != std::string::npos)
+			return 3;
+		if(Lower.find("kugou") != std::string::npos || Lower.find("kgmusic") != std::string::npos)
+			return 4;
+		return 0;
+	}
+
+	static constexpr int TC_MATCH_ACCEPT_SCORE = 700;
+
+	// 返回分数；低于 TC_MATCH_ACCEPT_SCORE 视为"这不是同一首"，继续问下一个平台。
+	static int TcScoreSongMatch(const std::string &WantTitle, const std::string &WantArtist, const std::string &WantAlbum, int64_t WantDurationMs,
+		const std::string &Name, const std::string &ArtistName, const std::string &AlbumName, int64_t DurationMs)
+	{
+		const std::string WantBase = TcCompactName(TcStripBrackets(WantTitle));
+		const std::string CandBase = TcCompactName(TcStripBrackets(Name));
+
+		int Score;
+		if(!WantBase.empty() && CandBase == WantBase)
+			Score = 1000;
+		else if(!WantBase.empty() && (CandBase.find(WantBase) != std::string::npos || WantBase.find(CandBase) != std::string::npos))
+			Score = 400;
+		else
+			Score = -1200;
+
+		STcVersionTags Want, Cand;
+		TcVersionTags(WantTitle, Want);
+		TcVersionTags(Name, Cand);
+		if(Want.m_Live != Cand.m_Live)
+			Score -= 1500;
+		else if(Want.m_Live)
+			Score += 400;
+		if(Want.m_Remix != Cand.m_Remix)
+			Score -= 600;
+		else if(Want.m_Remix)
+			Score += 200;
+		if(Want.m_Acoustic && !Cand.m_Acoustic)
+			Score -= 300;
+		if(Cand.m_Inst && !Want.m_Remix)
+			Score -= 800;
+		if(Cand.m_Cover && !Want.m_Cover)
+			Score -= 700;
+		else if(Cand.m_Cover && Want.m_Cover)
+			Score += 150;
+
+		if(!WantArtist.empty() && !ArtistName.empty())
+		{
+			const std::string A = TcCompactName(WantArtist);
+			const std::string B = TcCompactName(ArtistName);
+			if(A == B)
+				Score += 600;
+			else if(!A.empty() && !B.empty() && (A.find(B) != std::string::npos || B.find(A) != std::string::npos))
+				Score += 300;
+			else
+				Score -= 900; // 换歌手通常是另一版/翻唱，不能压过原唱
+		}
+
+		if(!WantAlbum.empty() && !AlbumName.empty())
+		{
+			const std::string A = TcCompactName(WantAlbum);
+			const std::string B = TcCompactName(AlbumName);
+			if(A == B)
+				Score += 500;
+			else if(!A.empty() && !B.empty() && (A.find(B) != std::string::npos || B.find(A) != std::string::npos))
+				Score += 300;
+			else
+				Score -= 200;
+		}
+
+		if(WantDurationMs > 0 && DurationMs > 0)
+		{
+			int64_t DurDiff = std::llabs((long long)(DurationMs - WantDurationMs)) / 10;
+			if(DurDiff > 300)
+				DurDiff = 300;
+			Score -= (int)DurDiff;
+		}
+		return Score;
+	}
+
 	static void ParseNeteaseResponse(const std::shared_ptr<IHttpRequest> &pFinished, CMusicResponse &Response)
 	{
 		SNeteaseMeta &Meta = Response.m_Meta;
@@ -2153,74 +2384,11 @@ public:
 			{
 				if(!WasLyric)
 				{
-					// search response: pick the version (studio / live / remix / cover) that matches the
-					// title in the netease window. Blindly taking songs[0] handed a (Live版) track the
-					// studio lyrics, and netease search happily returns covers.
+					// search response: 用统一评分选版本（歌名本体 + 歌手 + 专辑 + 曲长 + 版本标记）。
 					const json_value *pResult = json_object_get(pRoot, "result");
 					const json_value *pSongs = pResult ? json_object_get(pResult, "songs") : nullptr;
 					const json_value *pBestSong = nullptr;
 					int BestScore = -1000000;
-
-					static const char *s_apLiveTags[] = {"live", "现场", "演唱会", "concert", "unplugged"};
-					static const char *s_apRemixTags[] = {"remix", "混音", "dj版", "抖音"};
-					static const char *s_apInstTags[] = {"伴奏", "instrumental", "karaoke"};
-					static const char *s_apAcousticTags[] = {"acoustic", "不插电"};
-					static const char *s_apCoverTags[] = {"翻唱", "cover", "深情版", "女声版", "男声版", "童声版", "钢琴版", "纯音乐"};
-
-					auto ContainsAny = [](const std::string &Name, const char *const *ppTags, size_t NumTags) {
-						std::string Lower;
-						Lower.reserve(Name.size());
-						for(char c : Name) Lower.push_back((char)tolower((unsigned char)c));
-						for(size_t i = 0; i < NumTags; ++i)
-							if(Lower.find(ppTags[i]) != std::string::npos) return true;
-						return false;
-					};
-					// 把 "(Live版)" / "（女声）" / "[remix]" 这类括号段整段去掉，剩下的才是"歌名本体"。
-					// 网易云标题花样多："思念 (Live)" vs "思念 - (Live)" vs "思念（live）"，只有比本体才稳。
-					auto StripBrackets = [](const std::string &Name) {
-						static const char *s_apOpen[] = {"(", "（", "[", "【"};
-						static const char *s_apClose[] = {")", "）", "]", "】"};
-						std::string Out;
-						Out.reserve(Name.size());
-						size_t i = 0;
-						while(i < Name.size())
-						{
-							bool Stripped = false;
-							for(int b = 0; b < 4; ++b)
-							{
-								const size_t OpenLen = strlen(s_apOpen[b]);
-								if(Name.compare(i, OpenLen, s_apOpen[b]) == 0)
-								{
-									const size_t Close = Name.find(s_apClose[b], i + OpenLen);
-									if(Close != std::string::npos)
-									{
-										i = Close + strlen(s_apClose[b]);
-										Out.push_back(' ');
-										Stripped = true;
-									}
-									break;
-								}
-							}
-							if(!Stripped)
-								Out.push_back(Name[i++]);
-						}
-						// 去掉空白，中文歌名里空格无意义，还顺手统一中英文标题的差异
-						std::string Compact;
-						Compact.reserve(Out.size());
-						for(char c : Out)
-						{
-							if(c == ' ' || c == '\t' || c == '-')
-								continue;
-							Compact.push_back((char)tolower((unsigned char)c));
-						}
-						return Compact;
-					};
-
-					const bool WantLive = ContainsAny(Meta.m_Title, s_apLiveTags, sizeof(s_apLiveTags) / sizeof(s_apLiveTags[0]));
-					const bool WantRemix = ContainsAny(Meta.m_Title, s_apRemixTags, sizeof(s_apRemixTags) / sizeof(s_apRemixTags[0]));
-					const bool WantAcoustic = ContainsAny(Meta.m_Title, s_apAcousticTags, sizeof(s_apAcousticTags) / sizeof(s_apAcousticTags[0]));
-					const bool WantCover = ContainsAny(Meta.m_Title, s_apCoverTags, sizeof(s_apCoverTags) / sizeof(s_apCoverTags[0]));
-					const std::string WantBase = StripBrackets(Meta.m_Title);
 
 					if(pSongs != nullptr && pSongs->type == json_array)
 					{
@@ -2233,76 +2401,29 @@ public:
 							const json_value *pName = json_object_get(pSong, "name");
 							const json_value *pDur = json_object_get(pSong, "duration");
 							const char *pNameText = (pName != nullptr && pName->type == json_string) ? pName->u.string.ptr : "";
-							const std::string CandidateName(pNameText);
-							const std::string CandidateBase = StripBrackets(CandidateName);
 
-							const bool IsLive = ContainsAny(CandidateName, s_apLiveTags, sizeof(s_apLiveTags) / sizeof(s_apLiveTags[0]));
-							const bool IsRemix = ContainsAny(CandidateName, s_apRemixTags, sizeof(s_apRemixTags) / sizeof(s_apRemixTags[0]));
-							const bool IsAcoustic = ContainsAny(CandidateName, s_apAcousticTags, sizeof(s_apAcousticTags) / sizeof(s_apAcousticTags[0]));
-							const bool IsInst = ContainsAny(CandidateName, s_apInstTags, sizeof(s_apInstTags) / sizeof(s_apInstTags[0]));
-							const bool IsCover = ContainsAny(CandidateName, s_apCoverTags, sizeof(s_apCoverTags) / sizeof(s_apCoverTags[0]));
-
-							// 歌名本体先过闸门：完全一致 1000，包含关系 400，完全不搭 -1200
-							int Score;
-							if(!WantBase.empty() && CandidateBase == WantBase)
-								Score = 1000;
-							else if(!WantBase.empty() && (CandidateBase.find(WantBase) != std::string::npos || WantBase.find(CandidateBase) != std::string::npos))
-								Score = 400;
-							else
-								Score = -1200;
-
-							// 版本类型是硬闸门，权重必须压过歌名——"原版"和"Live 版"歌名本体一模一样，
-							// 光看歌名永远分不出来，这正是之前串词的原因。
-							if(WantLive != IsLive)
-								Score -= 1500;
-							else if(WantLive)
-								Score += 400;
-							if(WantRemix != IsRemix)
-								Score -= 600;
-							else if(WantRemix)
-								Score += 200;
-							if(WantAcoustic && !IsAcoustic)
-								Score -= 300;
-							if(IsInst && !WantRemix)
-								Score -= 800;
-							if(IsCover && !WantCover)
-								Score -= 700;
-							else if(IsCover && WantCover)
-								Score += 150;
-
-							// 歌手：完全一致 600，包含 300，不一样 -500（翻唱署名不同、串烧合唱也算不一样）
-							if(!Meta.m_Artist.empty())
+							std::string CandidateArtist;
+							const json_value *pArtists = json_object_get(pSong, "artists");
+							if(pArtists != nullptr && pArtists->type == json_array && pArtists->u.array.length > 0)
 							{
-								const json_value *pArtists = json_object_get(pSong, "artists");
-								if(pArtists != nullptr && pArtists->type == json_array && pArtists->u.array.length > 0)
-								{
-									const json_value *pFirst = pArtists->u.array.values[0];
-									const json_value *pArtistName = (pFirst != nullptr && pFirst->type == json_object) ? json_object_get(pFirst, "name") : nullptr;
-									if(pArtistName != nullptr && pArtistName->type == json_string)
-									{
-										const std::string CandidateArtist(pArtistName->u.string.ptr);
-										if(CandidateArtist == Meta.m_Artist)
-											Score += 600;
-										else if(!CandidateArtist.empty() && (CandidateArtist.find(Meta.m_Artist) != std::string::npos || Meta.m_Artist.find(CandidateArtist) != std::string::npos))
-											Score += 300;
-										else
-											Score -= 500;
-									}
-								}
+								const json_value *pFirst = pArtists->u.array.values[0];
+								const json_value *pArtistName = (pFirst != nullptr && pFirst->type == json_object) ? json_object_get(pFirst, "name") : nullptr;
+								if(pArtistName != nullptr && pArtistName->type == json_string)
+									CandidateArtist = pArtistName->u.string.ptr;
 							}
+							std::string CandidateAlbum;
+							const json_value *pAlbum = json_object_get(pSong, "album");
+							const json_value *pAlbumName = pAlbum ? json_object_get(pAlbum, "name") : nullptr;
+							if(pAlbumName != nullptr && pAlbumName->type == json_string)
+								CandidateAlbum = pAlbumName->u.string.ptr;
 
-							// 曲长只在 LS 给了真实时长时才有意义（monitor 现在会填 DurationMs 了）
-							if(pDur != nullptr && pDur->type == json_integer && Meta.m_DurationMs > 0)
-							{
-								int64_t DurDiff = std::llabs((long long)(pDur->u.integer - Meta.m_DurationMs)) / 10;
-								if(DurDiff > 300)
-									DurDiff = 300;
-								Score -= (int)DurDiff;
-							}
+							const int64_t CandDurMs = (pDur != nullptr && pDur->type == json_integer) ? pDur->u.integer : 0;
+							const int Score = TcScoreSongMatch(Meta.m_Title, Meta.m_Artist, Meta.m_Album, Meta.m_DurationMs,
+								pNameText, CandidateArtist, CandidateAlbum, CandDurMs);
 							if(Score > BestScore) { BestScore = Score; pBestSong = pSong; }
 						}
 					}
-					if(pBestSong != nullptr)
+					if(pBestSong != nullptr && BestScore >= TC_MATCH_ACCEPT_SCORE)
 					{
 						const json_value *pId = json_object_get(pBestSong, "id");
 						const json_value *pDur = json_object_get(pBestSong, "duration");
@@ -2313,6 +2434,12 @@ public:
 						const json_value *pPic = pAlbum ? json_object_get(pAlbum, "picUrl") : nullptr;
 						if(pPic != nullptr && pPic->type == json_string && pPic->u.string.length > 0)
 							Meta.m_PicUrl = NeteaseThumbUrl(pPic->u.string.ptr);
+					}
+					else
+					{
+						// 没有足够像的候选：不要拿"别的歌手的 Live 版"凑合，交给后续平台继续找。
+						Meta.m_TriedLyric = true;
+						Meta.m_LyricState = ELyricsState::NOTFOUND;
 					}
 				}
 				else
@@ -2373,6 +2500,16 @@ public:
 		{
 			m_pQQJob = std::make_shared<CResponseJob<CMusicResponse>>(m_pQQRequest, ParseQQResponse);
 			m_pQQJob->m_Result.m_Lyric = m_QQInLyric;
+			{
+				const auto It = m_NeteaseData.find(m_QQInFlight);
+				if(It != m_NeteaseData.end())
+				{
+					m_pQQJob->m_Result.m_Meta.m_Title = It->second.m_Title;
+					m_pQQJob->m_Result.m_Meta.m_Artist = It->second.m_Artist;
+					m_pQQJob->m_Result.m_Meta.m_Album = It->second.m_Album;
+					m_pQQJob->m_Result.m_Meta.m_DurationMs = It->second.m_DurationMs;
+				}
+			}
 			m_pEngine->AddJob(m_pQQJob);
 			return;
 		}
@@ -2424,13 +2561,44 @@ public:
 				const bool Success = pCode->type == json_none || (pCode->type == json_integer && pCode->u.integer == 0);
 				if(Success && WasSearch)
 				{
+					// 旧代码直接取 list[0]，Live 版会串到别人的翻唱上。现在对全部结果评分，
+					// 分数不够就不采信，让后面的平台继续找。
 					const json_value *pData = json_object_get(pRoot, "data");
 					const json_value *pSong = json_object_get(pData, "song");
 					const json_value *pList = json_object_get(pSong, "list");
-					const json_value *pFirst = pList->type == json_array && pList->u.array.length > 0 ? pList->u.array.values[0] : &json_value_none;
-					const json_value *pMid = json_object_get(pFirst, "songmid");
-					if(pMid->type == json_string && pMid->u.string.length > 0)
+					const json_value *pBest = nullptr;
+					int BestScore = -1000000;
+					if(pList != nullptr && pList->type == json_array)
 					{
+						for(unsigned i = 0; i < pList->u.array.length; ++i)
+						{
+							const json_value *pItem = pList->u.array.values[i];
+							if(pItem == nullptr || pItem->type != json_object) continue;
+							const json_value *pMid = json_object_get(pItem, "songmid");
+							if(pMid == nullptr || pMid->type != json_string || pMid->u.string.length == 0) continue;
+							const json_value *pName = json_object_get(pItem, "songname");
+							const json_value *pAlbumName = json_object_get(pItem, "albumname");
+							const json_value *pInterval = json_object_get(pItem, "interval");
+							const char *pNameText = (pName != nullptr && pName->type == json_string) ? pName->u.string.ptr : "";
+							const char *pAlbumText = (pAlbumName != nullptr && pAlbumName->type == json_string) ? pAlbumName->u.string.ptr : "";
+							std::string CandidateArtist;
+							const json_value *pSingers = json_object_get(pItem, "singer");
+							if(pSingers != nullptr && pSingers->type == json_array && pSingers->u.array.length > 0)
+							{
+								const json_value *pFirstSinger = pSingers->u.array.values[0];
+								const json_value *pSingerName = (pFirstSinger != nullptr && pFirstSinger->type == json_object) ? json_object_get(pFirstSinger, "name") : nullptr;
+								if(pSingerName != nullptr && pSingerName->type == json_string)
+									CandidateArtist = pSingerName->u.string.ptr;
+							}
+							const int64_t CandDurMs = (pInterval != nullptr && pInterval->type == json_integer) ? pInterval->u.integer * 1000 : 0;
+							const int Score = TcScoreSongMatch(Meta.m_Title, Meta.m_Artist, Meta.m_Album, Meta.m_DurationMs,
+								pNameText, CandidateArtist, pAlbumText, CandDurMs);
+							if(Score > BestScore) { BestScore = Score; pBest = pItem; }
+						}
+					}
+					if(pBest != nullptr && BestScore >= TC_MATCH_ACCEPT_SCORE)
+					{
+						const json_value *pMid = json_object_get(pBest, "songmid");
 						Meta.m_QQMid = pMid->u.string.ptr;
 					}
 				}
@@ -2452,6 +2620,207 @@ public:
 		}
 	}
 #endif
+
+	// ---------------- 酷狗歌词源（播放器是酷狗时优先） ----------------
+	// 三阶段：搜索拿 hash → krcs 拿歌词 id/accesskey → 下载 base64 LRC。
+	void StartKugou(const std::string &Key, SNeteaseMeta &Meta)
+	{
+		char aUrl[2048];
+		int Stage = 2;
+		if(Meta.m_KugouHash.empty())
+			Stage = 0;
+		else if(Meta.m_KugouLyricId.empty())
+			Stage = 1;
+
+		if(Stage == 0)
+		{
+			char aEscT[512], aEscA[512];
+			EscapeUrl(aEscT, Meta.m_Title.c_str());
+			EscapeUrl(aEscA, Meta.m_Artist.c_str());
+			str_format(aUrl, sizeof(aUrl), "http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword=%s%%20%s&page=1&pagesize=15", aEscT, aEscA);
+		}
+		else if(Stage == 1)
+		{
+			char aEscT[512];
+			EscapeUrl(aEscT, Meta.m_Title.c_str());
+			const int DurationSec = Meta.m_DurationMs > 0 ? (int)(Meta.m_DurationMs / 1000) : 0;
+			str_format(aUrl, sizeof(aUrl), "http://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=%s&duration=%d&hash=%s", aEscT, DurationSec, Meta.m_KugouHash.c_str());
+		}
+		else
+		{
+			str_format(aUrl, sizeof(aUrl), "http://lyrics.kugou.com/download?ver=1&client=pc&id=%s&accesskey=%s&fmt=lrc&charset=utf8", Meta.m_KugouLyricId.c_str(), Meta.m_KugouAccessKey.c_str());
+		}
+
+		m_pKugouRequest = HttpGet(aUrl);
+		m_pKugouRequest->MaxResponseSize(LYRICS_MAX_BYTES);
+		m_pKugouRequest->Timeout(CTimeout{10000, 30000, 500, 10});
+		m_pKugouRequest->LogProgress(HTTPLOG::FAILURE);
+		m_pKugouRequest->FailOnErrorStatus(false);
+		m_pKugouRequest->HeaderString("Referer", "https://www.kugou.com/");
+		m_KugouInFlight = Key;
+		m_KugouInStage = Stage;
+		Meta.m_LyricState = ELyricsState::LOADING;
+		m_pHttp->Run(m_pKugouRequest);
+	}
+
+	static void ParseKugouResponse(const std::shared_ptr<IHttpRequest> &pFinished, CMusicResponse &Response)
+	{
+		SNeteaseMeta &Meta = Response.m_Meta;
+		const int Stage = Response.m_KugouStage;
+		if(pFinished->State() != EHttpState::DONE || pFinished->StatusCode() < 200 || pFinished->StatusCode() >= 300)
+			return;
+		json_value *pRoot = pFinished->ResultJson();
+		if(pRoot == nullptr || pRoot == &json_value_none || pRoot->type != json_object)
+		{
+			if(pRoot != nullptr && pRoot != &json_value_none)
+				json_value_free(pRoot);
+			return;
+		}
+
+		if(Stage == 0)
+		{
+			const json_value *pData = json_object_get(pRoot, "data");
+			const json_value *pInfo = pData ? json_object_get(pData, "info") : nullptr;
+			const json_value *pBest = nullptr;
+			int BestScore = -1000000;
+			if(pInfo != nullptr && pInfo->type == json_array)
+			{
+				for(unsigned i = 0; i < pInfo->u.array.length; ++i)
+				{
+					const json_value *pItem = pInfo->u.array.values[i];
+					if(pItem == nullptr || pItem->type != json_object) continue;
+					const json_value *pHash = json_object_get(pItem, "hash");
+					if(pHash == nullptr || pHash->type != json_string || pHash->u.string.length == 0) continue;
+					const json_value *pName = json_object_get(pItem, "songname");
+					const json_value *pSinger = json_object_get(pItem, "singername");
+					const json_value *pAlbum = json_object_get(pItem, "album_name");
+					const json_value *pDuration = json_object_get(pItem, "duration");
+					const char *pNameText = (pName != nullptr && pName->type == json_string) ? pName->u.string.ptr : "";
+					const char *pSingerText = (pSinger != nullptr && pSinger->type == json_string) ? pSinger->u.string.ptr : "";
+					const char *pAlbumText = (pAlbum != nullptr && pAlbum->type == json_string) ? pAlbum->u.string.ptr : "";
+					const int64_t CandDurMs = (pDuration != nullptr && pDuration->type == json_integer) ? pDuration->u.integer * 1000 : 0;
+					const int Score = TcScoreSongMatch(Meta.m_Title, Meta.m_Artist, Meta.m_Album, Meta.m_DurationMs,
+						pNameText, pSingerText, pAlbumText, CandDurMs);
+					if(Score > BestScore) { BestScore = Score; pBest = pItem; }
+				}
+			}
+			if(pBest != nullptr && BestScore >= TC_MATCH_ACCEPT_SCORE)
+			{
+				const json_value *pHash = json_object_get(pBest, "hash");
+				Meta.m_KugouHash = pHash->u.string.ptr;
+			}
+		}
+		else if(Stage == 1)
+		{
+			const json_value *pCands = json_object_get(pRoot, "candidates");
+			if(pCands != nullptr && pCands->type == json_array && pCands->u.array.length > 0)
+			{
+				const json_value *pCand = pCands->u.array.values[0];
+				const json_value *pId = pCand ? json_object_get(pCand, "id") : nullptr;
+				const json_value *pKey = pCand ? json_object_get(pCand, "accesskey") : nullptr;
+				if(pId != nullptr && pId->type == json_integer)
+				{
+					char aId[32];
+					str_format(aId, sizeof(aId), "%lld", (long long)pId->u.integer);
+					Meta.m_KugouLyricId = aId;
+				}
+				else if(pId != nullptr && pId->type == json_string)
+					Meta.m_KugouLyricId = pId->u.string.ptr;
+				if(pKey != nullptr && pKey->type == json_string)
+					Meta.m_KugouAccessKey = pKey->u.string.ptr;
+			}
+		}
+		else if(Stage == 2)
+		{
+			const json_value *pContent = json_object_get(pRoot, "content");
+			if(pContent != nullptr && pContent->type == json_string && pContent->u.string.length > 0)
+			{
+				const size_t SrcLen = pContent->u.string.length;
+				std::vector<char> vDecoded(SrcLen / 4 * 3 + 8);
+				const int DecodedLen = str_base64_decode(vDecoded.data(), (int)vDecoded.size() - 1, pContent->u.string.ptr);
+				if(DecodedLen > 0)
+				{
+					vDecoded[DecodedLen] = '\0';
+					std::vector<SLyricLine> vLines;
+					if(ParseSyncedLyrics(vDecoded.data(), vLines))
+					{
+						Meta.m_vLines = std::move(vLines);
+						++Meta.m_LinesRevision;
+						Meta.m_vFallbackLines.clear();
+						Meta.m_LyricState = ELyricsState::READY;
+					}
+				}
+			}
+		}
+		json_value_free(pRoot);
+	}
+
+	void ProcessKugou()
+	{
+		if(!m_pKugouRequest || !m_pKugouRequest->Done())
+			return;
+		if(!m_pKugouJob)
+		{
+			m_pKugouJob = std::make_shared<CResponseJob<CMusicResponse>>(m_pKugouRequest, ParseKugouResponse);
+			m_pKugouJob->m_Result.m_KugouStage = m_KugouInStage;
+			{
+				const auto It = m_NeteaseData.find(m_KugouInFlight);
+				if(It != m_NeteaseData.end())
+				{
+					m_pKugouJob->m_Result.m_Meta.m_Title = It->second.m_Title;
+					m_pKugouJob->m_Result.m_Meta.m_Artist = It->second.m_Artist;
+					m_pKugouJob->m_Result.m_Meta.m_Album = It->second.m_Album;
+					m_pKugouJob->m_Result.m_Meta.m_DurationMs = It->second.m_DurationMs;
+				}
+			}
+			m_pEngine->AddJob(m_pKugouJob);
+			return;
+		}
+		if(m_pKugouJob->State() != IJob::STATE_DONE)
+			return;
+
+		auto pFinished = std::move(m_pKugouJob);
+		m_pKugouRequest.reset();
+		const std::string Key = std::move(m_KugouInFlight);
+		m_KugouInFlight.clear();
+		const int Stage = m_KugouInStage;
+		m_KugouInStage = 0;
+		auto It = m_NeteaseData.find(Key);
+		if(Key.empty() || It == m_NeteaseData.end())
+			return;
+		SNeteaseMeta &Meta = It->second;
+		SNeteaseMeta &Parsed = pFinished->m_Result.m_Meta;
+		if(!Parsed.m_KugouHash.empty())
+			Meta.m_KugouHash = std::move(Parsed.m_KugouHash);
+		if(!Parsed.m_KugouLyricId.empty())
+		{
+			Meta.m_KugouLyricId = std::move(Parsed.m_KugouLyricId);
+			Meta.m_KugouAccessKey = std::move(Parsed.m_KugouAccessKey);
+		}
+		if(!Parsed.m_vLines.empty())
+		{
+			Meta.m_vLines = std::move(Parsed.m_vLines);
+			++Meta.m_LinesRevision;
+			Meta.m_TriedKugou = true;
+			Meta.m_LyricState = ELyricsState::READY;
+			return;
+		}
+
+		// 成功拿到下一阶段的参数就继续，否则这一源到此为止。
+		if(Stage == 0 && !Meta.m_KugouHash.empty() && Key == m_ActiveKey && m_pHttp != nullptr)
+		{
+			StartKugou(Key, Meta);
+			return;
+		}
+		if(Stage == 1 && !Meta.m_KugouLyricId.empty() && Key == m_ActiveKey && m_pHttp != nullptr)
+		{
+			StartKugou(Key, Meta);
+			return;
+		}
+		Meta.m_TriedKugou = true;
+		if(Meta.m_vLines.empty())
+			Meta.m_LyricState = ELyricsState::NOTFOUND;
+	}
 
 	int FindLineIndex(int64_t PositionMs) const
 	{
@@ -2622,30 +2991,26 @@ public:
 			return;
 
 		const CNetObj_GameInfo *pInfo = pGameClient->m_Snap.m_pGameInfoObj;
-		const int TickSpeed = std::max(1, pGameClient->Client()->GameTickSpeed());
-		const int64_t Tick = pGameClient->Client()->GameTick(g_Config.m_ClDummy);
-		int64_t Ms = 0;
+		int Time = 0;
 		if(pInfo->m_GameStateFlags & GAMESTATEFLAG_SUDDENDEATH)
 			return; // sudden death shows its own banner, no timer
 		if(pInfo->m_TimeLimit && (pInfo->m_WarmupTimer <= 0))
 		{
-			Ms = (int64_t)pInfo->m_TimeLimit * 60 * 1000 - (Tick - pInfo->m_RoundStartTick) * 1000 / TickSpeed;
+			Time = pInfo->m_TimeLimit * 60 - ((pGameClient->Client()->GameTick(g_Config.m_ClDummy) - pInfo->m_RoundStartTick) / pGameClient->Client()->GameTickSpeed());
 			if(pInfo->m_GameStateFlags & GAMESTATEFLAG_GAMEOVER)
-				Ms = 0;
+				Time = 0;
 		}
 		else if(pInfo->m_GameStateFlags & GAMESTATEFLAG_RACETIME)
 		{
-			Ms = (Tick + pInfo->m_WarmupTimer) * 1000 / TickSpeed;
+			Time = (pGameClient->Client()->GameTick(g_Config.m_ClDummy) + pInfo->m_WarmupTimer) / pGameClient->Client()->GameTickSpeed();
 		}
 		else
 		{
-			Ms = (Tick - pInfo->m_RoundStartTick) * 1000 / TickSpeed;
+			Time = (pGameClient->Client()->GameTick(g_Config.m_ClDummy) - pInfo->m_RoundStartTick) / pGameClient->Client()->GameTickSpeed();
 		}
-		// 显示 分:秒；宽度由调用方按 00:00:00 预留，文字右对齐，左侧留出小时位空白。
-		if(Ms < 0)
-			Ms = 0;
-		const int64_t TotalSec = Ms / 1000;
-		str_format(pBuf, BufSize, "%02d:%02d", (int)(TotalSec / 60), (int)(TotalSec % 60));
+		// 默认格式：不足一小时显示 分:秒，超过一小时自动变成 时:分:秒（str_time 原行为）。
+		// 胶囊宽度另按 00:00:00 预留，短格式时左侧留出小时位空白。
+		str_time((int64_t)Time * 100, ETimeFormat::DAYS, pBuf, BufSize);
 	}
 
 	// ---- cover decode thread ------------------------------------------------
@@ -3000,11 +3365,12 @@ public:
 		float GameTextW = 0.0f;
 		if(ShowGameTime)
 		{
-			// 对局时钟显示 分:秒，胶囊按 00:00:00 预留宽度、文字右对齐，
-			// 左侧留出小时位的空白，歌词框宽度恒定。
+			// 时钟本身用默认格式（分:秒，超过一小时才出现小时位），
+			// 但胶囊始终按 00:00:00 预留宽度；短格式右对齐，左侧留出小时位空白。
 			GameW = MeasureCached(m_pTextRender, TimerSize, "00:00:00");
 			GameTextW = MeasureCached(m_pTextRender, TimerSize, "00:00");
 		}
+		const float GameTextOffset = (ShowGameTime && aGameTime[5] == '\0') ? (GameW - GameTextW) * 0.5f : 0.0f;
 
 		// ---- link status cell (left of the game clock) -----------------------
 		// One LED plus one number. The dot carries the verdict (green / amber /
@@ -3257,7 +3623,7 @@ public:
 			if(ShowGameTime)
 			{
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.80f);
-				m_pTextRender->Text(CursorX + ClockPad + (GameW - GameTextW), TextY, TimerSize, aGameTime);
+				m_pTextRender->Text(CursorX + ClockPad + GameTextOffset, TextY, TimerSize, aGameTime);
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 				CursorX += ClockCellW;
 				DrawSep(CursorX);
@@ -3360,7 +3726,7 @@ public:
 		{
 			// game round time, dim white so it recedes next to the artwork
 			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.80f);
-			m_pTextRender->Text(CellX + ClockPad + (GameW - GameTextW), PillY + (Height - TimerSize) * 0.5f, TimerSize, aGameTime);
+			m_pTextRender->Text(CellX + ClockPad + GameTextOffset, PillY + (Height - TimerSize) * 0.5f, TimerSize, aGameTime);
 			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 			CellX += ClockCellW;
 			DrawDivider(CellX);

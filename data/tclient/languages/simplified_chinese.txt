@@ -1817,11 +1817,11 @@ Show tune zone colors
 When disabled, tune zones use your entity tiles without added colors.
 == 关闭后，调谐区使用你的实体贴图，不额外着色。
 
-Water hammer highlight
-== 水域卡锤高亮
+Frozen hammer/hook highlight
+== 冻结卡锤／卡钩高亮
 
-Highlight frozen teammates holding hammer fire
-== 高亮冻结时持锤并按住开火的队友
+Highlight frozen teammates, yourself and your dummy holding hammer fire or hook
+== 冻结时按住锤击或钩子的队友、自己及分身均会高亮
 
 Steam
 == Steam

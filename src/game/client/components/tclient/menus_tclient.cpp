@@ -4165,9 +4165,9 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 
 	RightView.HSplitTop(MarginBetweenSections, nullptr, &RightView);
 	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
-	Ui()->DoLabel(&Label, TCLocalize("Water hammer highlight"), HeadlineFontSize, TEXTALIGN_ML);
+	Ui()->DoLabel(&Label, TCLocalize("Frozen hammer/hook highlight"), HeadlineFontSize, TEXTALIGN_ML);
 	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlight, TCLocalize("Highlight frozen teammates holding hammer fire"), &g_Config.m_TcWaterHammerHighlight, &RightView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlight, TCLocalize("Highlight frozen teammates, yourself and your dummy holding hammer fire or hook"), &g_Config.m_TcWaterHammerHighlight, &RightView, LineSize);
 
 	// The columns' remaining height may be negative after scrolling; only their consumed height is content.
 	CUIRect Content = MainView;

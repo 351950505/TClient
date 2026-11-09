@@ -42,6 +42,10 @@ TEST(WaterHammer, LocalInputTakesPriority)
 	EXPECT_TRUE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {true, WEAPON_GUN + 1, 2}, &Local));
 	Local.m_WantedWeapon = WEAPON_GUN + 1;
 	EXPECT_FALSE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {true, 1, 1}, &Local));
+	Local.m_Hook = 0;
+	EXPECT_FALSE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {true, 0, 0, 1}, &Local));
+	Local.m_Hook = 1;
+	EXPECT_TRUE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {}, &Local));
 }
 
 TEST(WaterHammer, TargetFilters)
@@ -53,11 +57,52 @@ TEST(WaterHammer, TargetFilters)
 		EXPECT_FALSE(TcIsWaterHammerTarget(Invalid, 0, true, false, true, true));
 		EXPECT_FALSE(TcIsWaterHammerTarget(1, Invalid, true, false, true, true));
 	}
-	EXPECT_FALSE(TcIsWaterHammerTarget(0, 0, true, false, true, true));
+	EXPECT_TRUE(TcIsWaterHammerTarget(0, 0, true, false, true, true));
 	EXPECT_FALSE(TcIsWaterHammerTarget(1, 0, false, false, true, true));
 	EXPECT_FALSE(TcIsWaterHammerTarget(1, 0, true, true, true, true));
 	EXPECT_FALSE(TcIsWaterHammerTarget(1, 0, true, false, false, true));
 	EXPECT_FALSE(TcIsWaterHammerTarget(1, 0, true, false, true, false));
+}
+
+TEST(WaterHammer, HookAndHammerBothMarkFrozenCharacters)
+{
+	EXPECT_TRUE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {true, WEAPON_GUN + 1, 0, 1}, nullptr));
+	EXPECT_TRUE(TcShouldMarkWaterHammer(-1, false, WEAPON_NINJA, {true, WEAPON_NINJA + 1, 0, 1}, nullptr));
+	EXPECT_FALSE(TcShouldMarkWaterHammer(0, false, WEAPON_GUN, {true, 0, 0, 1}, nullptr));
+	EXPECT_FALSE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {true, 0, 0, 0}, nullptr));
+	EXPECT_TRUE(TcShouldMarkWaterHammer(100, false, WEAPON_HAMMER, {true, 0, 1, 0}, nullptr));
+	EXPECT_TRUE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {true, 0, 0, 1}, nullptr));
+	EXPECT_FALSE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {}, nullptr));
+
+	CNetObj_PlayerInput Local{};
+	Local.m_Hook = 0;
+	EXPECT_FALSE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {true, 0, 0, 1}, &Local));
+	Local.m_Hook = 1;
+	EXPECT_TRUE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {}, &Local));
+}
+
+TEST(WaterHammer, LocalInputSourceIncludesCurrentAndConnectedDummy)
+{
+	EXPECT_EQ(TcWaterHammerInputSource(10, 10, 11, true), ETcWaterHammerInputSource::CURRENT_LOCAL);
+	EXPECT_EQ(TcWaterHammerInputSource(11, 10, 11, true), ETcWaterHammerInputSource::DUMMY_LOCAL);
+	EXPECT_EQ(TcWaterHammerInputSource(11, 10, 11, false), ETcWaterHammerInputSource::REMOTE);
+	EXPECT_EQ(TcWaterHammerInputSource(12, 10, 11, true), ETcWaterHammerInputSource::REMOTE);
+	EXPECT_EQ(TcWaterHammerInputSource(11, 11, 10, true), ETcWaterHammerInputSource::CURRENT_LOCAL);
+	EXPECT_EQ(TcWaterHammerInputSource(10, 11, 10, true), ETcWaterHammerInputSource::DUMMY_LOCAL);
+}
+
+TEST(WaterHammer, PreInputHookPersistsUntilReleaseOrClientReset)
+{
+	CTcWaterHammerInputCache Inputs;
+	Inputs.StorePreInput(0, 2, 105, WEAPON_GUN + 1, 0, 1);
+	EXPECT_EQ(Inputs.PreInput(0, 2).m_Hook, 1);
+	EXPECT_TRUE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, Inputs.PreInput(0, 2), nullptr));
+	Inputs.StorePreInput(0, 2, 106, WEAPON_GUN + 1, 0, 0);
+	EXPECT_EQ(Inputs.PreInput(0, 2).m_Hook, 0);
+	EXPECT_FALSE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, Inputs.PreInput(0, 2), nullptr));
+	Inputs.StorePreInput(0, 2, 107, WEAPON_GUN + 1, 0, 1);
+	Inputs.ResetClient(0, 2);
+	EXPECT_FALSE(Inputs.PreInput(0, 2).m_Received);
 }
 
 TEST(WaterHammer, PreInputBeforeSnapshots)
@@ -278,6 +323,9 @@ int main()
 	WaterHammer_WeaponAndFireCounter();
 	WaterHammer_LocalInputTakesPriority();
 	WaterHammer_TargetFilters();
+	WaterHammer_HookAndHammerBothMarkFrozenCharacters();
+	WaterHammer_LocalInputSourceIncludesCurrentAndConnectedDummy();
+	WaterHammer_PreInputHookPersistsUntilReleaseOrClientReset();
 	WaterHammer_PreInputBeforeSnapshots();
 	WaterHammer_VisibilityDeathAndSpectatingKeepHeldInput();
 	WaterHammer_SwitchingConnectionsKeepsIndependentInputs();
@@ -289,6 +337,6 @@ int main()
 	WaterHammer_NewSessionDoesNotInheritEitherConnection();
 	WaterHammer_LocalSwapRecordsCopiedInputWithoutActiveSnapshot();
 	WaterHammer_FrozenKatanaDoesNotChangeRealWeapon();
-	std::puts("WaterHammer: 15 test groups passed");
+	std::puts("WaterHammer: 18 test groups passed");
 }
 #endif

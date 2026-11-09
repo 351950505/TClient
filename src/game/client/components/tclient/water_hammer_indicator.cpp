@@ -28,7 +28,7 @@ void CWaterHammerIndicator::OnSnapshot(int Connection, int SnapshotTick, const C
 
 void CWaterHammerIndicator::OnPreInput(int Connection, const CNetMsg_Sv_PreInput &Message)
 {
-	m_Inputs.StorePreInput(Connection, Message.m_Owner, Message.m_IntendedTick, Message.m_WantedWeapon, Message.m_Fire);
+	m_Inputs.StorePreInput(Connection, Message.m_Owner, Message.m_IntendedTick, Message.m_WantedWeapon, Message.m_Fire, Message.m_Hook);
 }
 
 void CWaterHammerIndicator::OnClientDrop(int Connection, int ClientId)
@@ -75,14 +75,26 @@ bool CWaterHammerIndicator::IsMarked(int ClientId) const
 		GameClient()->m_Teams.Team(ClientId) == GameClient()->m_Teams.Team(LocalClientId)))
 		return false;
 
+	const int CurrentLocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy];
+	const int DummyLocalId = GameClient()->m_aLocalIds[!g_Config.m_ClDummy];
+	const auto InputSource = TcWaterHammerInputSource(ClientId, CurrentLocalId, DummyLocalId, Client()->DummyConnected());
 	const CNetObj_PlayerInput *pLocalInput = nullptr;
-	if(Client()->DummyConnected() && ClientId == GameClient()->m_aLocalIds[!g_Config.m_ClDummy])
+	STcWaterHammerInputState RemoteInput{};
+	switch(InputSource)
 	{
+	case ETcWaterHammerInputSource::CURRENT_LOCAL:
+		pLocalInput = &GameClient()->m_Controls.m_aInputData[g_Config.m_ClDummy];
+		break;
+	case ETcWaterHammerInputSource::DUMMY_LOCAL:
 		// Never substitute a delayed server echo for missing local lifecycle input.
 		if(!m_Inputs.HasLocalInput(!g_Config.m_ClDummy, ClientId, g_Config.m_ClDummyHammer != 0))
 			return false;
 		pLocalInput = g_Config.m_ClDummyHammer ? &GameClient()->m_HammerInput : &GameClient()->m_DummyInput;
+		break;
+	case ETcWaterHammerInputSource::REMOTE:
+		RemoteInput = m_Inputs.PreInput(g_Config.m_ClDummy, ClientId);
+		break;
 	}
 	return TcShouldMarkWaterHammer(ClientData.m_FreezeEnd, ClientData.m_LiveFrozen,
-		ClientData.m_RenderCur.m_Weapon, m_Inputs.PreInput(g_Config.m_ClDummy, ClientId), pLocalInput);
+		ClientData.m_RenderCur.m_Weapon, RemoteInput, pLocalInput);
 }

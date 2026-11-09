@@ -11,12 +11,29 @@ struct STcWaterHammerInputState
 	bool m_Received = false;
 	int m_WantedWeapon = 0;
 	int m_Fire = 0;
+	int m_Hook = 0;
 };
+
+enum class ETcWaterHammerInputSource
+{
+	REMOTE,
+	CURRENT_LOCAL,
+	DUMMY_LOCAL,
+};
+
+inline ETcWaterHammerInputSource TcWaterHammerInputSource(int ClientId, int CurrentLocalId, int DummyLocalId, bool DummyConnected)
+{
+	if(ClientId == CurrentLocalId)
+		return ETcWaterHammerInputSource::CURRENT_LOCAL;
+	if(DummyConnected && ClientId == DummyLocalId)
+		return ETcWaterHammerInputSource::DUMMY_LOCAL;
+	return ETcWaterHammerInputSource::REMOTE;
+}
 
 inline bool TcIsWaterHammerTarget(int ClientId, int LocalClientId, bool Active, bool Spectator, bool Visible, bool SameTeam)
 {
 	return ClientId >= 0 && ClientId < MAX_CLIENTS &&
-		LocalClientId >= 0 && LocalClientId < MAX_CLIENTS && ClientId != LocalClientId &&
+		LocalClientId >= 0 && LocalClientId < MAX_CLIENTS &&
 		Active && !Spectator && Visible && SameTeam;
 }
 
@@ -27,8 +44,9 @@ inline bool TcShouldMarkWaterHammer(int FreezeEnd, bool LiveFrozen, int CurrentW
 
 	const int WantedWeapon = pLocalInput ? pLocalInput->m_WantedWeapon : PreInput.m_WantedWeapon;
 	const int Fire = pLocalInput ? pLocalInput->m_Fire : PreInput.m_Fire;
-	return (FreezeEnd != 0 || LiveFrozen) &&
-		(WantedWeapon == WEAPON_HAMMER + 1 || CurrentWeapon == WEAPON_HAMMER) && (Fire & 1) != 0;
+	const int Hook = pLocalInput ? pLocalInput->m_Hook : PreInput.m_Hook;
+	const bool HammerHeld = (WantedWeapon == WEAPON_HAMMER + 1 || CurrentWeapon == WEAPON_HAMMER) && (Fire & 1) != 0;
+	return (FreezeEnd != 0 || LiveFrozen) && (HammerHeld || Hook != 0);
 }
 
 // Frozen katana is a drawing override, never a change to the shared character.
@@ -116,12 +134,12 @@ public:
 		}
 	}
 
-	void StorePreInput(int Connection, int ClientId, int IntendedTick, int WantedWeapon, int Fire)
+	void StorePreInput(int Connection, int ClientId, int IntendedTick, int WantedWeapon, int Fire, int Hook = 0)
 	{
 		if(!ValidConnection(Connection) || !ValidClient(ClientId))
 			return;
 		auto &Client = m_aConnections[Connection].m_aClients[ClientId];
-		Client.m_Input = {true, WantedWeapon, Fire};
+		Client.m_Input = {true, WantedWeapon, Fire, Hook};
 		Client.m_IntendedTick = IntendedTick;
 	}
 

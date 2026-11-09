@@ -1690,7 +1690,10 @@ void CHud::UpdateMovementInformationTextContainer(STextContainerIndex &TextConta
 
 	CTextCursor Cursor;
 	Cursor.m_FontSize = FontSize;
-	TextRender()->RecreateTextContainer(TextContainer, &Cursor, aBuf);
+	if(TextContainer.Valid())
+		TextRender()->RecreateTextContainerSoft(TextContainer, &Cursor, aBuf);
+	else
+		TextRender()->CreateTextContainer(TextContainer, &Cursor, aBuf);
 }
 
 void CHud::RenderMovementInformationTextContainer(STextContainerIndex &TextContainer, const ColorRGBA &Color, float X, float Y)

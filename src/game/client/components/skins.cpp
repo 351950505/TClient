@@ -516,32 +516,38 @@ void CSkins::OnShutdown()
 		}
 	}
 	m_Skins.clear();
+	m_HasPendingFinishedSkins = false;
 }
 
 void CSkins::OnUpdate()
 {
 	// Only update skins periodically to reduce FPS impact
 	const std::chrono::nanoseconds StartTime = time_get_nanoseconds();
-	const std::chrono::nanoseconds MaxTime = std::chrono::milliseconds(std::clamp(round_to_int(Client()->RenderFrameTime() * 50000.0f), 25, 500));
-	if(m_ContainerUpdateTime.has_value() && StartTime - m_ContainerUpdateTime.value() < MaxTime)
-	{
+	const std::chrono::nanoseconds UpdateInterval = std::chrono::milliseconds(std::clamp(round_to_int(Client()->RenderFrameTime() * 50000.0f), 25, 500));
+	const bool UpdateContainers = !m_ContainerUpdateTime.has_value() || StartTime - m_ContainerUpdateTime.value() >= UpdateInterval;
+	if(!UpdateContainers && !m_HasPendingFinishedSkins)
 		return;
-	}
-	m_ContainerUpdateTime = StartTime;
 
-	// Update loaded state of managed skins which are not retrieved with the FindOrNullptr function
-	GameClient()->CollectManagedTeeRenderInfos([&](const char *pSkinName) {
-		// This will update the loaded state of the container
-		dbg_assert(FindContainerOrNullptr(pSkinName) != nullptr, "No skin container found for managed tee render info: %s", pSkinName);
-	});
-	// Keep player and dummy skin loaded
-	FindContainerOrNullptr(g_Config.m_ClPlayerSkin);
-	FindContainerOrNullptr(g_Config.m_ClDummySkin);
+	if(UpdateContainers)
+	{
+		m_ContainerUpdateTime = StartTime;
+
+		// Update loaded state of managed skins which are not retrieved with the FindOrNullptr function
+		GameClient()->CollectManagedTeeRenderInfos([&](const char *pSkinName) {
+			// This will update the loaded state of the container
+			dbg_assert(FindContainerOrNullptr(pSkinName) != nullptr, "No skin container found for managed tee render info: %s", pSkinName);
+		});
+		// Keep player and dummy skin loaded
+		FindContainerOrNullptr(g_Config.m_ClPlayerSkin);
+		FindContainerOrNullptr(g_Config.m_ClDummySkin);
+
+		CSkinLoadingStats Stats = LoadingStats();
+		UpdateUnloadSkins(Stats);
+		UpdateStartLoading(Stats);
+	}
 
 	CSkinLoadingStats Stats = LoadingStats();
-	UpdateUnloadSkins(Stats);
-	UpdateStartLoading(Stats);
-	UpdateFinishLoading(Stats, StartTime, MaxTime);
+	UpdateFinishLoading(Stats, StartTime, std::chrono::microseconds(1500));
 }
 
 void CSkins::UpdateUnloadSkins(CSkinLoadingStats &Stats)
@@ -623,6 +629,8 @@ void CSkins::UpdateStartLoading(CSkinLoadingStats &Stats)
 
 void CSkins::UpdateFinishLoading(CSkinLoadingStats &Stats, std::chrono::nanoseconds StartTime, std::chrono::nanoseconds MaxTime)
 {
+	m_HasPendingFinishedSkins = false;
+	size_t LoadedThisFrame = 0;
 	for(auto &[_, pSkinContainer] : m_Skins)
 	{
 		if(Stats.m_NumLoading == 0)
@@ -638,21 +646,23 @@ void CSkins::UpdateFinishLoading(CSkinLoadingStats &Stats, std::chrono::nanoseco
 		{
 			continue;
 		}
-		Stats.m_NumLoading--;
 		if(pSkinContainer->m_pLoadJob->State() == IJob::STATE_DONE && pSkinContainer->m_pLoadJob->m_Data.m_Info.m_pData)
 		{
+			if(LoadedThisFrame >= 1 || time_get_nanoseconds() - StartTime >= MaxTime)
+			{
+				m_HasPendingFinishedSkins = true;
+				continue;
+			}
+			Stats.m_NumLoading--;
 			LoadSkinFinish(pSkinContainer.get(), pSkinContainer->m_pLoadJob->m_Data);
 			GameClient()->OnSkinUpdate(pSkinContainer->Name());
 			pSkinContainer->m_pLoadJob = nullptr;
 			Stats.m_NumLoaded++;
-			if(time_get_nanoseconds() - StartTime >= MaxTime)
-			{
-				// Avoid using too much frame time for loading skins
-				break;
-			}
+			LoadedThisFrame++;
 		}
 		else
 		{
+			Stats.m_NumLoading--;
 			if(pSkinContainer->m_pLoadJob->State() == IJob::STATE_DONE && pSkinContainer->m_pLoadJob->m_NotFound)
 			{
 				pSkinContainer->SetState(CSkinContainer::EState::NOT_FOUND);
@@ -698,6 +708,7 @@ void CSkins::Refresh(TSkinLoadedCallback &&SkinLoadedCallback)
 	}
 	m_Skins.clear();
 	m_SkinsUsageList.clear();
+	m_HasPendingFinishedSkins = false;
 
 	LoadSkinDirect("default");
 	SkinLoadedCallback();

@@ -16,6 +16,7 @@
 //     --target <absolute dir>       client installation directory
 //     --restart <absolute exe>      executable that is started after a successful update
 //     --log <absolute log path>     log file, appended to
+// 可选 --version <应用版本> 来自已验签清单；旧客户端省略时仍核验包内版本高于磁盘版本。
 //
 // Exit codes:
 //   0  success, the restart executable has been started
@@ -32,6 +33,8 @@
 //   8  the previous client could not be restarted
 //   9  the new client exited early or did not report startup health in time; update rolled back
 //  10  recovery is incomplete; retained backup requires manual recovery, no client restarted
+//  11  安装目录已有更新事务或无法取得事务锁，不执行恢复或重启
+//  12  包内版本、期望版本或磁盘版本核验失败
 //
 // Only method 0 (stored) and method 8 (deflate) zip entries are supported. Zip64 archives are
 // supported as long as the entries themselves use one of those two methods.
@@ -69,6 +72,8 @@ namespace
 	constexpr int EXIT_RESTART_FAILED = 8;
 	constexpr int EXIT_HEALTH_FAILED = 9;
 	constexpr int EXIT_RECOVERY_FAILED = 10;
+	constexpr int EXIT_TRANSACTION_BUSY = 11;
+	constexpr int EXIT_VERSION_REJECTED = 12;
 	bool g_PreviousClientRestored = false;
 
 	// Waiting for the client to exit, never kill it. The environment variable
@@ -467,43 +472,21 @@ namespace
 		0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
 		0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
-	bool Sha256File(const std::wstring &Path, std::string &OutHex, std::string &Error)
+	std::string Sha256Data(const unsigned char *pData, size_t Size)
 	{
-		HANDLE hFile = CreateFileW(LongPath(Path).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-		if(hFile == INVALID_HANDLE_VALUE)
-		{
-			Error = "could not open file for hashing: " + FormatLastError(GetLastError());
-			return false;
-		}
-
 		CSha256 Hash;
 		Hash.Init();
-		std::vector<unsigned char> Buffer(256 * 1024);
-		for(;;)
-		{
-			DWORD Read = 0;
-			if(!ReadFile(hFile, Buffer.data(), (DWORD)Buffer.size(), &Read, nullptr))
-			{
-				Error = "could not read file for hashing: " + FormatLastError(GetLastError());
-				CloseHandle(hFile);
-				return false;
-			}
-			if(Read == 0)
-				break;
-			Hash.Update(Buffer.data(), Read);
-		}
-		CloseHandle(hFile);
-
+		Hash.Update(pData, Size);
 		unsigned char aDigest[32];
 		Hash.Finish(aDigest);
 		static const char *S_HEX = "0123456789abcdef";
-		OutHex.clear();
+		std::string Hex;
 		for(unsigned char Byte : aDigest)
 		{
-			OutHex.push_back(S_HEX[Byte >> 4]);
-			OutHex.push_back(S_HEX[Byte & 0x0F]);
+			Hex.push_back(S_HEX[Byte >> 4]);
+			Hex.push_back(S_HEX[Byte & 0x0F]);
 		}
-		return true;
+		return Hex;
 	}
 
 	//////////////////////////////////////////////////////////////////////////
@@ -541,7 +524,10 @@ namespace
 		~CZipArchive() { Close(); }
 
 		bool Open(const std::wstring &Path, std::string &Error);
+		bool ParseCentralDirectory(std::string &Error);
 		void Close();
+
+		uint64_t Size() const { return m_Size; }
 
 		const std::vector<SZipEntry> &Entries() const { return m_Entries; }
 		const unsigned char *Data() const { return m_pData; }
@@ -551,7 +537,6 @@ namespace
 		bool GetEntryDataOffset(const SZipEntry &Entry, uint64_t &OutOffset, std::string &Error) const;
 
 	private:
-		bool ParseCentralDirectory(std::string &Error);
 		bool ParseZip64EndOfCentralDirectory(size_t EocdPosition, uint64_t &OutEntries, uint64_t &OutSize, uint64_t &OutOffset, std::string &Error) const;
 
 		HANDLE m_hFile = INVALID_HANDLE_VALUE;
@@ -614,7 +599,8 @@ namespace
 			return false;
 		}
 
-		return ParseCentralDirectory(Error);
+		// 保持同一个拒绝写入、删除的文件句柄，直到校验、解包和恢复全部结束。
+		return true;
 	}
 
 	bool CZipArchive::ParseZip64EndOfCentralDirectory(size_t EocdPosition, uint64_t &OutEntries, uint64_t &OutSize, uint64_t &OutOffset, std::string &Error) const
@@ -1023,6 +1009,11 @@ namespace
 			return EEntryCheck::REJECT;
 		}
 
+		if(ToLowerWide(Result) == L".tclient-update.lock")
+		{
+			Error = "entry uses the reserved installation transaction lock";
+			return EEntryCheck::REJECT;
+		}
 		OutRelativePath = Result;
 		if(IsProtectedUserPath(Slashed))
 			return EEntryCheck::SKIP_PROTECTED;
@@ -1222,11 +1213,174 @@ namespace
 	// command line
 	//////////////////////////////////////////////////////////////////////////
 
+	// 锁文件保留在目录中，避免关闭和删除之间出现另一个锁文件；进程退出会释放独占句柄。
+	class CInstallTransaction
+	{
+	public:
+		~CInstallTransaction()
+		{
+			if(m_hFile != INVALID_HANDLE_VALUE)
+				CloseHandle(m_hFile);
+		}
+		bool Acquire(const std::wstring &Target, std::string &Error)
+		{
+			const std::wstring Path = JoinPath(Target, L".tclient-update.lock");
+			if(!CheckNoReparsePoints(Path, Error))
+				return false;
+			m_hFile = CreateFileW(LongPath(Path).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_HIDDEN | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+			if(m_hFile == INVALID_HANDLE_VALUE)
+			{
+				Error = FormatLastError(GetLastError());
+				return false;
+			}
+			return true;
+		}
+
+	private:
+		HANDLE m_hFile = INVALID_HANDLE_VALUE;
+	};
+
+	bool ParseAppVersion(const std::string &Version, std::vector<unsigned> &Parts)
+	{
+		Parts.clear();
+		unsigned Value = 0;
+		unsigned Digits = 0;
+		for(char Character : Version)
+		{
+			if(Character >= '0' && Character <= '9')
+			{
+				if(++Digits > 6)
+					return false;
+				Value = Value * 10 + Character - '0';
+			}
+			else if(Character == '.' && Digits && Parts.size() < 7)
+			{
+				Parts.push_back(Value);
+				Value = Digits = 0;
+			}
+			else
+				return false;
+		}
+		if(!Digits)
+			return false;
+		Parts.push_back(Value);
+		return true;
+	}
+
+	int CompareAppVersion(const std::string &Left, const std::string &Right)
+	{
+		std::vector<unsigned> A, B;
+		ParseAppVersion(Left, A);
+		ParseAppVersion(Right, B);
+		for(size_t i = 0; i < std::max(A.size(), B.size()); ++i)
+		{
+			const unsigned X = i < A.size() ? A[i] : 0;
+			const unsigned Y = i < B.size() ? B[i] : 0;
+			if(X != Y)
+				return X > Y ? 1 : -1;
+		}
+		return 0;
+	}
+
+	bool ReadClientAppVersion(const std::wstring &Path, std::string &Version, std::string &Error)
+	{
+		HANDLE File = CreateFileW(LongPath(Path).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+		if(File == INVALID_HANDLE_VALUE)
+		{
+			Error = "could not read client version: " + FormatLastError(GetLastError());
+			return false;
+		}
+		LARGE_INTEGER Size;
+		if(!GetFileSizeEx(File, &Size) || Size.QuadPart < (LONGLONG)sizeof(IMAGE_DOS_HEADER) || Size.QuadPart > 256 * 1024 * 1024)
+		{
+			CloseHandle(File);
+			Error = "client executable has an unsupported size";
+			return false;
+		}
+		std::vector<unsigned char> Data((size_t)Size.QuadPart);
+		DWORD Read = 0;
+		const bool ReadOk = ReadFile(File, Data.data(), (DWORD)Data.size(), &Read, nullptr) && Read == Data.size();
+		CloseHandle(File);
+		if(!ReadOk)
+		{
+			Error = "could not read complete client executable";
+			return false;
+		}
+		// 只读 PE 的只读初始化数据段，不加载或执行 exe，也不把版本说明和文件尾附加内容当作版本。
+		IMAGE_DOS_HEADER Dos;
+		memcpy(&Dos, Data.data(), sizeof(Dos));
+		if(Dos.e_magic != IMAGE_DOS_SIGNATURE || Dos.e_lfanew < 0 || (size_t)Dos.e_lfanew > Data.size() - sizeof(DWORD) - sizeof(IMAGE_FILE_HEADER))
+		{
+			Error = "client is not a valid PE executable";
+			return false;
+		}
+		DWORD Signature;
+		IMAGE_FILE_HEADER Header;
+		memcpy(&Signature, Data.data() + Dos.e_lfanew, sizeof(Signature));
+		memcpy(&Header, Data.data() + Dos.e_lfanew + sizeof(Signature), sizeof(Header));
+		const size_t Sections = (size_t)Dos.e_lfanew + sizeof(Signature) + sizeof(Header) + Header.SizeOfOptionalHeader;
+		if(Signature != IMAGE_NT_SIGNATURE || Header.NumberOfSections == 0 || Header.NumberOfSections > 96 || Sections > Data.size() || Header.NumberOfSections > (Data.size() - Sections) / sizeof(IMAGE_SECTION_HEADER))
+		{
+			Error = "client has invalid PE sections";
+			return false;
+		}
+		std::set<std::string> Marked, Legacy;
+		static constexpr const char *VERSION_MARKER = "TClientAppVersion=";
+		for(unsigned i = 0; i < Header.NumberOfSections; ++i)
+		{
+			IMAGE_SECTION_HEADER Section;
+			memcpy(&Section, Data.data() + Sections + i * sizeof(Section), sizeof(Section));
+			if(!(Section.Characteristics & IMAGE_SCN_CNT_INITIALIZED_DATA) || !(Section.Characteristics & IMAGE_SCN_MEM_READ) || (Section.Characteristics & IMAGE_SCN_MEM_WRITE))
+				continue;
+			if(Section.PointerToRawData > Data.size() || Section.SizeOfRawData > Data.size() - Section.PointerToRawData)
+			{
+				Error = "client PE section is outside the file";
+				return false;
+			}
+			const unsigned char *Begin = Data.data() + Section.PointerToRawData;
+			const unsigned char *End = Begin + Section.SizeOfRawData;
+			for(const unsigned char *Start = Begin; Start < End;)
+			{
+				const unsigned char *Stop = std::find(Start, End, '\0');
+				if(Stop == End)
+					break;
+				if(Stop - Start > 0 && Stop - Start < 80)
+				{
+					const std::string Text((const char *)Start, (size_t)(Stop - Start));
+					std::vector<unsigned> Parts;
+					if(Text.compare(0, strlen(VERSION_MARKER), VERSION_MARKER) == 0)
+					{
+						const std::string Value = Text.substr(strlen(VERSION_MARKER));
+						if(!ParseAppVersion(Value, Parts))
+						{
+							Error = "client has an invalid application version marker";
+							return false;
+						}
+						Marked.insert(Value);
+					}
+					else if(ParseAppVersion(Text, Parts) && Parts.size() >= 4)
+						Legacy.insert(Text);
+				}
+				Start = Stop + 1;
+			}
+		}
+		// 老发行版没有专用标记，仅接受唯一的独立四段以上版本字符串；缺失或歧义时拒绝安装。
+		const auto &Versions = Marked.empty() ? Legacy : Marked;
+		if(Versions.size() != 1)
+		{
+			Error = "client application version is missing or ambiguous";
+			return false;
+		}
+		Version = *Versions.begin();
+		return true;
+	}
+
 	struct SOptions
 	{
 		unsigned long m_Pid = 0;
 		std::wstring m_ZipPath;
 		std::string m_Sha256;
+		std::string m_ExpectedVersion;
 		std::wstring m_TargetDir;
 		std::wstring m_RestartPath;
 		std::wstring m_LogPath;
@@ -1235,7 +1389,7 @@ namespace
 	void PrintUsage()
 	{
 		fprintf(stderr,
-			"Usage: TClientUpdater.exe --pid <pid> --zip <zip> --sha256 <hex> --target <dir> --restart <exe> --log <file>\n"
+			"Usage: TClientUpdater.exe --pid <pid> --zip <zip> --sha256 <hex> --target <dir> --restart <exe> --log <file> [--version <version>]\n"
 			"\n"
 			"Exit codes:\n"
 			"  0 success\n"
@@ -1248,7 +1402,9 @@ namespace
 			"  7 file system error\n"
 			"  8 restart executable could not be started\n"
 			"  9 new client startup health failed, previous files restored\n"
-			" 10 recovery incomplete, no client restarted\n");
+			" 10 recovery incomplete, no client restarted\n"
+			" 11 installation transaction lock unavailable\n"
+			" 12 installation version rejected\n");
 	}
 
 	bool ParseCommandLine(int argc, wchar_t **argv, SOptions &Options, std::string &Error)
@@ -1291,6 +1447,19 @@ namespace
 				if(!NextValue(Value))
 					return false;
 				Options.m_Sha256 = Utf8FromWide(Value);
+			}
+			else if(Argument == L"--version")
+			{
+				std::wstring Value;
+				if(!NextValue(Value))
+					return false;
+				Options.m_ExpectedVersion = Utf8FromWide(Value);
+				std::vector<unsigned> Parts;
+				if(!ParseAppVersion(Options.m_ExpectedVersion, Parts))
+				{
+					Error = "invalid application version for --version";
+					return false;
+				}
 			}
 			else if(Argument == L"--target")
 			{
@@ -2230,6 +2399,15 @@ namespace
 		if(!FileExists(RestartPath))
 			g_Logger.Warn("restart executable does not exist yet: %s", Utf8FromWide(RestartPath).c_str());
 
+		CInstallTransaction Transaction;
+		if(!Transaction.Acquire(TargetDir, FileError))
+		{
+			g_Logger.Error("could not acquire installation transaction lock: %s", FileError.c_str());
+			// 另一个更新器仍拥有此目录；不能重启、清扫进程或触碰它的备份。
+			return EXIT_TRANSACTION_BUSY;
+		}
+		g_Logger.Info("installation transaction lock acquired");
+
 		// 2. Confirm that the original client is gone before any operation that can fail and
 		// leave the user without a running client.
 		bool TimedOut = false;
@@ -2248,13 +2426,14 @@ namespace
 		}
 
 		// 3. Verify the sha256 of the downloaded archive.
-		std::string ActualSha256;
-		std::string HashError;
-		if(!Sha256File(ZipPath, ActualSha256, HashError))
+		CZipArchive Archive;
+		std::string ZipError;
+		if(!Archive.Open(ZipPath, ZipError))
 		{
-			g_Logger.Error("hashing the zip failed: %s", HashError.c_str());
+			g_Logger.Error("could not open zip archive: %s", ZipError.c_str());
 			return FinishFailure(EXIT_FILE_SYSTEM);
 		}
+		const std::string ActualSha256 = Sha256Data(Archive.Data(), (size_t)Archive.Size());
 		std::string ExpectedSha256 = Options.m_Sha256;
 		std::transform(ExpectedSha256.begin(), ExpectedSha256.end(), ExpectedSha256.begin(), [](unsigned char Character) { return (char)tolower(Character); });
 		g_Logger.Info("sha256: %s (expected %s)", ActualSha256.c_str(), ExpectedSha256.c_str());
@@ -2265,9 +2444,7 @@ namespace
 		}
 
 		// 4. Read the central directory and validate every entry before touching the target.
-		CZipArchive Archive;
-		std::string ZipError;
-		if(!Archive.Open(ZipPath, ZipError))
+		if(!Archive.ParseCentralDirectory(ZipError))
 		{
 			g_Logger.Error("invalid zip archive: %s", ZipError.c_str());
 			return FinishFailure(EXIT_ZIP_INVALID);
@@ -2360,6 +2537,32 @@ namespace
 			}
 		}
 		g_Logger.Info("extraction finished");
+
+		// 在停止现有客户端或备份前核对实际磁盘版本，兼容尚未传 --version 的旧客户端。
+		const std::wstring StagedClient = JoinPath(StagingDir, RestartPath.substr(RestartPath.find_last_of(L'\\') + 1));
+		std::string PackageVersion, CurrentVersion;
+		bool VersionOk = ReadClientAppVersion(StagedClient, PackageVersion, FileError);
+		if(VersionOk && !Options.m_ExpectedVersion.empty() && CompareAppVersion(PackageVersion, Options.m_ExpectedVersion) != 0)
+		{
+			FileError = "package version " + PackageVersion + " does not match expected version " + Options.m_ExpectedVersion;
+			VersionOk = false;
+		}
+		if(VersionOk && FileExists(RestartPath))
+		{
+			VersionOk = ReadClientAppVersion(RestartPath, CurrentVersion, FileError);
+			if(VersionOk && CompareAppVersion(PackageVersion, CurrentVersion) <= 0)
+			{
+				FileError = "package version " + PackageVersion + " is not newer than installed version " + CurrentVersion;
+				VersionOk = false;
+			}
+		}
+		if(!VersionOk)
+		{
+			g_Logger.Error("installation version rejected: %s", FileError.c_str());
+			RemoveTree(StagingDir, FileError);
+			return FinishFailure(EXIT_VERSION_REJECTED);
+		}
+		g_Logger.Info("installation version verified: installed=%s package=%s expected=%s", CurrentVersion.c_str(), PackageVersion.c_str(), Options.m_ExpectedVersion.c_str());
 
 		// Close only processes whose exact image path is an executable that this update plans to
 		// replace. Repeated sweeps catch monitor children that race their parent's shutdown.

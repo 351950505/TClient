@@ -216,12 +216,25 @@ static LRESULT CALLBACK FixtureWindowProc(HWND hWindow, UINT Message, WPARAM WPa
 
 int wmain(int argc, wchar_t **argv)
 {
+#if FIXTURE_KIND == 3 || FIXTURE_KIND == 4
+	std::puts("TClientAppVersion=1.7.8.70");
+#else
+	std::puts("TClientAppVersion=1.7.8.71");
+#endif
 	SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
 #if FIXTURE_KIND == 1 || FIXTURE_KIND == 6
 	if(!WriteEvent(L"TCLIENT_FIXTURE_NEW_EVENT"))
 		return 40;
 	if(!InitializeConsole(argc, argv, L"TCLIENT_FIXTURE_NEW_EVENT"))
 		return 55;
+	const std::wstring ReadyGate = Environment(L"TCLIENT_FIXTURE_READY_GATE");
+	const ULONGLONG GateStart = GetTickCount64();
+	while(!ReadyGate.empty() && GetFileAttributesW(ReadyGate.c_str()) == INVALID_FILE_ATTRIBUTES)
+	{
+		if(GetTickCount64() - GateStart > 10000)
+			return 56;
+		Sleep(10);
+	}
 	if(!WriteReadyMarker())
 		return 41;
 #if FIXTURE_KIND == 6
@@ -595,7 +608,7 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         shutil.copy2(self.old_client, self.target / "DDNet.exe")
         return file_sha256(self.target / "DDNet.exe")
 
-    def run_updater(self, executable: Path | None = None, sha256: str | None = None, timeout_ms: int = 3000, restart: Path | None = None, with_console: bool = False) -> int:
+    def run_updater(self, executable: Path | None = None, sha256: str | None = None, timeout_ms: int = 3000, restart: Path | None = None, with_console: bool = False, version: str | None = None) -> int:
         self.log.parent.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
         for name in READY_NAMES:
@@ -605,6 +618,8 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         env["TCLIENT_UPDATER_HEALTH_TIMEOUT_MS"] = str(timeout_ms)
         env["TCLIENT_UPDATER_NO_UI"] = "1"
         command = [str(executable or self.updater), "--pid", "0", "--zip", str(self.archive), "--sha256", sha256 or file_sha256(self.archive), "--target", str(self.target), "--restart", str(restart or self.target / "DDNet.exe"), "--log", str(self.log)]
+        if version is not None:
+            command += ["--version", version]
         capture = self.case / "helper-output.log"
         self.record["command"] = command
         self.record["cwd"] = str(self.target)
@@ -653,6 +668,111 @@ class TClientUpdaterInstallTest(unittest.TestCase):
     def passed(self, **observations) -> None:
         self.record.update(observations)
         self.record["passed"] = True
+
+    def test_manifest_version_mismatch_preserves_installed_client(self) -> None:
+        old_hash = self.install_old()
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])
+        log = self.assert_code(self.run_updater(version="1.7.8.72"), 12)
+        self.assertIn("package version", log)
+        self.assertTrue(self.alive(self.event_pid(self.old_event)))
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), old_hash)
+        self.assertFalse(self.new_event.exists())
+        self.assertFalse(list(self.target.glob("update_backup_*")))
+        self.passed(version_mismatch_rejected=True)
+
+    def test_stale_old_client_cannot_install_older_package(self) -> None:
+        old_hash = self.install_old()
+        payload = self.healthy.read_bytes().replace(b"TClientAppVersion=1.7.8.71", b"TClientAppVersion=1.7.8.64")
+        write_zip(self.archive, [("DDNet.exe", payload)])
+        log = self.assert_code(self.run_updater(), 12)
+        self.assertIn("not newer", log)
+        self.assertTrue(self.alive(self.event_pid(self.old_event)))
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), old_hash)
+        self.assertFalse(self.new_event.exists())
+        self.assertFalse(list(self.target.glob("update_backup_*")))
+        self.passed(legacy_caller_downgrade_rejected=True)
+
+    def test_install_transaction_lock_rejects_second_helper(self) -> None:
+        old_hash = self.install_old()
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        # 用同一目录文件的独占句柄模拟已持有事务锁的更新器，不启动游戏。
+        handle = kernel.CreateFileW(str(self.target / ".tclient-update.lock"), 0xC0000000, 0, None, 4, 0x02, None)
+        self.assertNotEqual(handle, ctypes.c_void_p(-1).value)
+        try:
+            log = self.assert_code(self.run_updater(), 11)
+        finally:
+            self.kernel32.CloseHandle(handle)
+        self.assertIn("transaction", log)
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), old_hash)
+        self.assertFalse(self.old_event.exists())
+        self.assertFalse(self.new_event.exists())
+        self.assertTrue(self.archive.exists())
+        self.passed(competing_helper_rejected_before_restart=True)
+
+    def test_expected_version_success(self) -> None:
+        self.install_old()
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])
+        self.assert_code(self.run_updater(version="1.7.8.71"), 0)
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), file_sha256(self.healthy))
+        self.assertTrue(self.alive(self.event_pid(self.new_event)))
+        self.passed(expected_version_installed=True)
+
+    def test_two_helpers_keep_transaction_and_archive_exclusive_until_health(self) -> None:
+        self.install_old()
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])
+        gate = self.case / "allow-ready"
+        first_log = self.case / "first-updater.log"
+        env = dict(self.environment, TCLIENT_FIXTURE_READY_GATE=str(gate), TCLIENT_UPDATER_HEALTH_TIMEOUT_MS="15000", TCLIENT_UPDATER_NO_UI="1")
+        first = self.start(self.updater, ["--pid", "0", "--zip", str(self.archive), "--sha256", file_sha256(self.archive), "--target", str(self.target), "--restart", str(self.target / "DDNet.exe"), "--log", str(first_log), "--version", "1.7.8.71"], env)
+        new_pid = self.event_pid(self.new_event)
+        installed_hash = file_sha256(self.target / "DDNet.exe")
+        replacement = self.case / "other-package.zip"
+        write_zip(replacement, [("DDNet.exe", self.old_client.read_bytes())])
+        # 健康检查尚未完成时，原 ZIP 不可被替换、删除或原地写入。
+        with self.assertRaises(OSError):
+            os.replace(replacement, self.archive)
+        with self.assertRaises(OSError):
+            self.archive.unlink()
+        with self.assertRaises(OSError):
+            with self.archive.open("r+b"):
+                pass
+        self.assert_code(self.run_updater(), 11)
+        self.assertTrue(self.alive(new_pid), "second helper must not stop the first helper's client")
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), installed_hash)
+        gate.touch()
+        self.assertEqual(first.wait(timeout=15), 0, first_log.read_text(encoding="utf-8"))
+        self.assertFalse(self.archive.exists())
+        self.assertTrue(self.alive(new_pid))
+        self.assertFalse(self.old_event.exists())
+        self.passed(two_real_helpers_serialized=True, archive_locked_through_health=True)
+
+    def test_equal_version_and_unreadable_versions_are_rejected(self) -> None:
+        old_hash = self.install_old()
+        original = self.healthy.read_bytes()
+        marker = b"TClientAppVersion=1.7.8.71"
+        for replacement in (b"TClientAppVersion=1.7.8.70", b"InvalidAppMarker=1.7.8.71", b"TClientAppVersion=invalid"):
+            with self.subTest(marker=replacement):
+                payload = original.replace(marker, replacement.ljust(len(marker), b"\0"))
+                write_zip(self.archive, [("DDNet.exe", payload)])
+                self.assert_code(self.run_updater(), 12)
+                self.assertTrue(self.alive(self.event_pid(self.old_event)))
+                self.assertEqual(file_sha256(self.target / "DDNet.exe"), old_hash)
+                self.assertFalse(self.new_event.exists())
+        self.passed(equal_missing_invalid_versions_rejected=True)
+
+    def test_legacy_client_version_literal_is_supported(self) -> None:
+        payload = self.old_client.read_bytes()
+        marker = b"TClientAppVersion=1.7.8.70"
+        legacy = b"\0" * len(b"TClientAppVersion=") + b"1.7.8.70"
+        self.assertIn(marker, payload)
+        (self.target / "DDNet.exe").write_bytes(payload.replace(marker, legacy))
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])
+        self.assert_code(self.run_updater(version="1.7.8.71"), 0)
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), file_sha256(self.healthy))
+        self.passed(legacy_installed_client_supported=True)
 
     def test_normal_success(self) -> None:
         self.install_old()
@@ -811,7 +931,7 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         for offset in range(-5, 61):
             backup = self.target / ("update_backup_" + (now + timedelta(seconds=offset)).strftime("%Y%m%d_%H%M%S"))
             self.make_junction(backup if root_link else backup / "data", outside)
-        write_zip(self.archive, [("data/must-survive.txt", b"replacement")])
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes()), ("data/must-survive.txt", b"replacement")])
         log = self.assert_code(self.run_updater(), 7)
         self.assertIn("refusing to follow reparse point", log)
         self.assertEqual(sentinel.read_bytes(), b"outside new backup sentinel")

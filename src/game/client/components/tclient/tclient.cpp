@@ -282,6 +282,8 @@ void CTClient::ConchainRandomColor(IConsole::IResult *pResult, void *pUserData, 
 
 void CTClient::OnInit()
 {
+	// 独立标记供更新器只读校验，不加载 exe，也不依赖 DDNet 协议版本。
+	log_info("tclient", "TClientAppVersion=" TCLIENT_APP_VERSION);
 #if defined(CONF_FAMILY_WINDOWS)
 	// TClient(2026-11-01):CPU 尖峰(网易云 webview GC、Defender 扫描、监控进程
 	// 的秒级轮询)抢占游戏线程会造成瞬时卡顿 —— 把进程提到高于普通一档,尖峰
@@ -1629,6 +1631,7 @@ void CTClient::UpdateInstallAndRestart()
 		"--pid", aPid,
 		"--zip", aZip,
 		"--sha256", m_UpdateRelease.m_aSha256,
+		"--version", m_UpdateRelease.m_aVersion,
 		"--target", aTarget,
 		"--restart", aExe,
 		"--log", aLog};

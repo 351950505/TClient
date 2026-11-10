@@ -862,6 +862,7 @@ public:
 		// Convenience constructor
 		Update(This, Data);
 	}
+	bool NeedsInitialization() const { return !m_Inited; }
 	void Reset(CGameClient &This)
 	{
 		for(auto &Part : m_vpParts)
@@ -1091,6 +1092,13 @@ void CNamePlates::RenderNamePlateGame(vec2 Position, const CNetObj_PlayerInfo *p
 
 	// Check if the nameplate is actually on screen
 	CNamePlate &NamePlate = m_pData->m_aNamePlates[pPlayerInfo->m_ClientId];
+	// 只分摊首次初始化；已有名字牌仍逐帧更新渐变、透明度和内容。
+	if(NamePlate.NeedsInitialization())
+	{
+		if(m_InitializedThisFrame >= 4)
+			return;
+		++m_InitializedThisFrame;
+	}
 	NamePlate.Update(*GameClient(), Data);
 	NamePlate.Render(*GameClient(), Position - vec2(0.0f, (float)g_Config.m_ClNamePlatesOffset));
 }
@@ -1187,6 +1195,7 @@ void CNamePlates::ResetNamePlates()
 
 void CNamePlates::OnRender()
 {
+	m_InitializedThisFrame = 0;
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return;
 

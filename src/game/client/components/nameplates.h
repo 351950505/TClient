@@ -13,6 +13,7 @@ class CNamePlates : public CComponent
 private:
 	class CNamePlatesData;
 	CNamePlatesData *m_pData;
+	int m_InitializedThisFrame = 0;
 
 public:
 	void RenderNamePlateGame(vec2 Position, const CNetObj_PlayerInfo *pPlayerInfo, float Alpha);

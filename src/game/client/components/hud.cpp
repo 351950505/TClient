@@ -46,6 +46,9 @@ CHud::CHud()
 
 void CHud::ResetHudContainers()
 {
+	m_GameTimerText.Reset(TextRender());
+	m_PauseNotificationText.Reset(TextRender());
+	m_SuddenDeathText.Reset(TextRender());
 	for(auto &ScoreInfo : m_aScoreInfo)
 	{
 		TextRender()->DeleteTextContainer(ScoreInfo.m_OptionalNameTextContainerIndex);
@@ -157,7 +160,8 @@ void CHud::RenderGameTimer()
 			float Alpha = Time <= 10 && (2 * time() / time_freq()) % 2 ? 0.5f : 1.0f;
 			TextRender()->TextColor(1.0f, 0.25f, 0.25f, Alpha);
 		}
-		TextRender()->Text(Half - w / 2, 2, FontSize, aBuf, -1.0f);
+		m_GameTimerText.Update(TextRender(), aBuf, FontSize);
+		m_GameTimerText.Render(TextRender(), vec2(Half - w / 2, 2), TextRender()->GetTextColor());
 		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 	}
 }
@@ -169,8 +173,9 @@ void CHud::RenderPauseNotification()
 	{
 		const char *pText = Localize("Game paused");
 		float FontSize = 20.0f;
-		float w = TextRender()->TextWidth(FontSize, pText, -1, -1.0f);
-		TextRender()->Text(150.0f * Graphics()->ScreenAspect() + -w / 2.0f, 50.0f, FontSize, pText, -1.0f);
+		m_PauseNotificationText.Update(TextRender(), pText, FontSize);
+		float w = m_PauseNotificationText.Width();
+		m_PauseNotificationText.Render(TextRender(), vec2(150.0f * Graphics()->ScreenAspect() + -w / 2.0f, 50.0f), TextRender()->GetTextColor());
 	}
 }
 
@@ -181,8 +186,9 @@ void CHud::RenderSuddenDeath()
 		float Half = m_Width / 2.0f;
 		const char *pText = Localize("Sudden Death");
 		float FontSize = 12.0f;
-		float w = TextRender()->TextWidth(FontSize, pText, -1, -1.0f);
-		TextRender()->Text(Half - w / 2, 2, FontSize, pText, -1.0f);
+		m_SuddenDeathText.Update(TextRender(), pText, FontSize);
+		float w = m_SuddenDeathText.Width();
+		m_SuddenDeathText.Render(TextRender(), vec2(Half - w / 2, 2), TextRender()->GetTextColor());
 	}
 }
 

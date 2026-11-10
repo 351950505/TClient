@@ -9,6 +9,7 @@
 #include <generated/protocol.h>
 
 #include <game/client/component.h>
+#include <game/client/ui.h>
 
 struct SScoreInfo
 {
@@ -48,6 +49,10 @@ class CHud : public CComponent
 
 	int m_HudQuadContainerIndex;
 	SScoreInfo m_aScoreInfo[2];
+	// 稳定文本只在内容或布局变化时重建，颜色仍逐帧应用。
+	CCachedText m_GameTimerText;
+	CCachedText m_PauseNotificationText;
+	CCachedText m_SuddenDeathText;
 	STextContainerIndex m_FPSTextContainerIndex;
 	STextContainerIndex m_DDRaceEffectsTextContainerIndex;
 	STextContainerIndex m_PlayerAngleTextContainerIndex;

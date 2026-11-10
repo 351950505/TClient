@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.72",
+  "version": "1.7.8.73",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17292745,
-  "sha256": "52ad9508ff16cefe4e04fcdacb269de9c8060cb6dff13077c922f9c24bc7c3fd",
-  "notes": "基于完整 1.7.8.71 的两项低风险渲染优化。\n\n- HUD 游戏计时器、暂停提示和突然死亡提示复用文本容器，仅在内容或布局变化时重建；保留原有位置、颜色和闪烁行为。\n- 名字牌首次初始化按每帧最多 4 个玩家 ID 分摊。已初始化名字牌仍即时更新，保留渐变、颜色、改名及设置预览；全局文字重置不对已有名字牌再次限流。\n- 保留 71 的更新器防回退修复，以及取消打开计分板时临时显示系统时间的行为。\n\n注意：首次同时出现大量玩家时，后续批次名字牌会稍晚显示。按 60 FPS 计算，64 个首次出现的 ID 最后一批比第一批晚约 250 ms，128 个约 516.7 ms；这是预算计算，不是实机延迟测量。\n\n本次只纳入 HUD 缓存和名字牌首次初始化分摊，不包含预测实体回收、地图并行解码或 Warlist 优化。此前短 Demo 对照没有证实整体 FPS 或 p95/p99 稳定收益，本版也不以此承诺提速。",
+  "size": 17292869,
+  "sha256": "feb8fb9edbba23beb2b495bfa3d09fff90b04b41a48588148ea4a80299b1d7c3",
+  "notes": "基于完整 1.7.8.72 的 BestClient-Light 快速输入权威对齐与更新镜像加固。\n\n- TClient 已有且与 BestClient-Light 重叠的模式 0、7–14，以 BestClient-Light main@c56daba94b2b0ff7b5590a16ca463d9ff5182b98 为行为权威：同步 Fast、Best、Saiko、Delta、F、Cloud、Light、Azure 和 BestClient-Light Ancient 的预测、插值、冻结及渲染时间线。\n- 保留 TClient 独有模式 1、2、3、5、6、历史编号 4 空洞，以及现有配置键、编号、默认值、双号、Dummy、Remove Anti、ghost/unpred 行为；未引入 SnapTap、Sub-Tick aiming 或 Auto margin。\n- Cloud PreInput ring、F 平滑状态及 hook/fire action latch 按主/分身物理连接隔离；任意模式切换立即重预测，Dummy 断线完整释放该连接的普通输入、快输缓存和派生状态。\n- 每次正式打包前从 github.akams.cn 获取当次镜像目录，验证 Ed25519 清单、完整更新 ZIP、helper、Range 和真实断点续传；将最多 3 条合格镜像编译进客户端，并保留原备用源与官方通道。\n- 两轮独立源码复审已闭环。自动验证覆盖 337 项权威行为、252 项 Remove Anti、17 项连接生命周期、完整 C++ 测试、更新器、发布编排器、镜像探测器和 HUD/nameplate 回归。\n\n本版未新增 BestClient-Light 中 TClient 原本没有的输入模式。真人主/分身双客户端联网手感与断线时序仍建议在更新后继续实机观察。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 359424,

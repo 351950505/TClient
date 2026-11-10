@@ -487,6 +487,7 @@ public:
 	CSnapState m_Snap;
 	int m_aLocalTuneZone[NUM_DUMMIES]; // current tunezone (0-255)
 	bool m_aReceivedTuning[NUM_DUMMIES]; // was tuning message received after zone change
+	bool m_aReceivedPreInput[NUM_DUMMIES]; // whether each connection has received server pre-input data
 	int m_aExpectingTuningForZone[NUM_DUMMIES]; // tunezone changed, waiting for tuning for that zone
 	int m_aExpectingTuningSince[NUM_DUMMIES]; // how many snaps received since tunezone changed
 	CTuningParams m_aTuning[NUM_DUMMIES]; // current local player tuning, only what the player/dummy has
@@ -571,9 +572,10 @@ public:
 		// TClient
 		CCharacterCore m_RegularPredicted;
 		CCharacterCore m_PrevRegularPredicted;
-		vec2 m_FInputExtra = vec2(0.0f, 0.0f);
-		int m_FInputGameTick = 0;
-		bool m_FInputValid = false;
+		vec2 m_aFInputExtra[NUM_DUMMIES] = {};
+		int m_aFInputGameTick[NUM_DUMMIES] = {};
+		float m_aFInputLastTime[NUM_DUMMIES] = {};
+		bool m_aFInputValid[NUM_DUMMIES] = {};
 
 		// TClient
 		vec2 m_ImprovedPredPos = vec2(0, 0);
@@ -610,7 +612,7 @@ public:
 		CNetObj_Character m_Snapped;
 		CNetObj_Character m_Evolved;
 
-		CNetMsg_Sv_PreInput m_aPreInputs[200];
+		CNetMsg_Sv_PreInput m_aaPreInputs[NUM_DUMMIES][200];
 
 		// rendered characters
 		CNetObj_Character m_RenderCur;
@@ -1036,11 +1038,15 @@ public:
 	// 快速输入多模式（对齐 MeowClient-Next alpha 普通预测路径）。
 	int FastInputMode() const;
 	bool FastInputActive(int ClientId, bool Others) const;
+	bool IsSnapshotInputMode() const;
+	bool FastInputImmediateOthers() const;
+	int SnapshotInputMaxTick(int ClientId) const;
+	bool SnapshotTryGetPredPos(int ClientId, int Tick, float Intra, vec2 &Pos) const;
 	int GetFastInputPredictionTicks() const;
 	int GetFastInputOtherTicks() const;
 	bool IsFastInputLocal(int ClientId) const;
 	void ApplyFastInputOffset(int ClientId, int &Tick, float &Intra);
-	bool ReadFastInputPos(int ClientId, int Tick, float Intra, int UpperTick, vec2 &Pos, bool Salatik = false) const;
+	bool ReadFastInputPos(int ClientId, int Tick, float Intra, int UpperTick, vec2 &Pos, int InterpolationMode = 0) const;
 	vec2 GetFInputPos(int ClientId);
 	float GetAncientInputAmount(int ClientId);
 	vec2 ApplyAncientInputPost(int ClientId, vec2 BasePos);

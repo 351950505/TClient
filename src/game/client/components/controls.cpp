@@ -34,13 +34,9 @@ void CControls::OnReset()
 {
 	ResetInput(0);
 	ResetInput(1);
-	for(int Mode = 12; Mode < NUM_FAST_INPUT_MODES; ++Mode)
-	{
-		for(auto &Input : m_aaModeFastInput[Mode])
-			Input = {};
-		m_aModeFastInputHookAction[Mode] = false;
-		m_aModeFastInputFireAction[Mode] = false;
-	}
+	ResetFastInput(0);
+	ResetFastInput(1);
+	m_ActiveFastInputMode = 0;
 
 	for(int &AmmoCount : m_aAmmoCount)
 		AmmoCount = 0;
@@ -60,6 +56,19 @@ void CControls::ResetInput(int Dummy)
 
 	m_aInputDirectionLeft[Dummy] = 0;
 	m_aInputDirectionRight[Dummy] = 0;
+}
+
+void CControls::ResetFastInput(int Dummy)
+{
+	m_aFastInput[Dummy] = {};
+	m_FastInputHookAction[Dummy] = false;
+	m_FastInputFireAction[Dummy] = false;
+	for(auto &aModeInputs : m_aaModeFastInput)
+		aModeInputs[Dummy] = {};
+	for(auto &aModeHookActions : m_aModeFastInputHookAction)
+		aModeHookActions[Dummy] = false;
+	for(auto &aModeFireActions : m_aModeFastInputFireAction)
+		aModeFireActions[Dummy] = false;
 }
 
 void CControls::OnPlayerDeath()
@@ -274,11 +283,13 @@ int CControls::SnapInput(int *pData)
 		else
 			Pos = GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy];
 
-		m_FastInputHookAction = false;
-		m_FastInputFireAction = false;
-		// alpha 的 SnapInput 同时释放 Ancient、Snow、F 的动作方向锁存。
-		std::fill(std::begin(m_aModeFastInputHookAction), std::end(m_aModeFastInputHookAction), false);
-		std::fill(std::begin(m_aModeFastInputFireAction), std::end(m_aModeFastInputFireAction), false);
+		m_FastInputHookAction[g_Config.m_ClDummy] = false;
+		m_FastInputFireAction[g_Config.m_ClDummy] = false;
+		// alpha 的 SnapInput 同时释放当前物理连接的 Ancient、Snow、F 动作方向锁存。
+		for(auto &aModeHookActions : m_aModeFastInputHookAction)
+			aModeHookActions[g_Config.m_ClDummy] = false;
+		for(auto &aModeFireActions : m_aModeFastInputFireAction)
+			aModeFireActions[g_Config.m_ClDummy] = false;
 
 		if(g_Config.m_TcScaleMouseDistance && !GameClient()->m_Snap.m_SpecInfo.m_Active)
 		{
@@ -529,16 +540,16 @@ bool CControls::CheckNewInput()
 	int Mode = GameClient()->FastInputMode();
 	if(!GameClient()->FastInputActive(GameClient()->m_Snap.m_LocalClientId, false))
 		Mode = 0;
-	bool NewInput = Mode != m_ActiveFastInputMode && (Mode >= 12 || m_ActiveFastInputMode >= 12);
+	bool NewInput = Mode != m_ActiveFastInputMode;
 	if(Mode >= 12 && Mode != m_ActiveFastInputMode)
 	{
-		m_aModeFastInputHookAction[Mode] = false;
-		m_aModeFastInputFireAction[Mode] = false;
+		std::fill(std::begin(m_aModeFastInputHookAction[Mode]), std::end(m_aModeFastInputHookAction[Mode]), false);
+		std::fill(std::begin(m_aModeFastInputFireAction[Mode]), std::end(m_aModeFastInputFireAction[Mode]), false);
 	}
 	m_ActiveFastInputMode = Mode;
 	CNetObj_PlayerInput *pFastInputs = Mode == 0 ? m_aFastInput : m_aaModeFastInput[Mode];
-	bool &HookAction = Mode == 0 ? m_FastInputHookAction : m_aModeFastInputHookAction[Mode];
-	bool &FireAction = Mode == 0 ? m_FastInputFireAction : m_aModeFastInputFireAction[Mode];
+	bool &HookAction = Mode == 0 ? m_FastInputHookAction[g_Config.m_ClDummy] : m_aModeFastInputHookAction[Mode][g_Config.m_ClDummy];
+	bool &FireAction = Mode == 0 ? m_FastInputFireAction[g_Config.m_ClDummy] : m_aModeFastInputFireAction[Mode][g_Config.m_ClDummy];
 	const bool DirectAim = Mode == 1 || Mode == 3 || Mode == 5 || Mode == 9 || Mode == 11 || Mode == 13 || Mode == 14;
 	const bool ActiveOnly = Mode == 3 || Mode == 5 || Mode == 9;
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; Dummy++)

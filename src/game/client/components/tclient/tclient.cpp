@@ -66,6 +66,9 @@ static constexpr const char *TCLIENT_UPDATE_GH_REPO_PATH = "351950505/TClient";
 // 2026-11-08 晚：ghfast 从首位下移。它在故障期间持续超时，放在第一位会让每次检查
 // 都先白等一整个 15 秒超时；镜像已验证可用且走 api 回源，先试它们能把最常见的
 // 「有更新」路径缩短到一次请求。
+#if defined(CONF_TCLIENT_RELEASE_MIRRORS)
+#include <generated/tclient_update_mirrors.h>
+#else
 static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {
 	"https://github1.me3.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
 	"https://github2.me3.dpdns.org/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json",
@@ -84,10 +87,11 @@ static const char *const TCLIENT_UPDATE_SOURCE_SIBLING_BASES[] = {
 	"@api",
 	nullptr,
 };
+#endif
 // @api 不是清单源（api 不回 manifest），下载入口比清单源多一个。
 static_assert(std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES) == std::size(TCLIENT_UPDATE_MANIFEST_SOURCES) + 1);
-// raw 不托管大文件；前五个 Release 入口每个阶段最多尝试一次。
-static constexpr int TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT = 5;
+// raw 不托管大文件；每个 Release 入口每个阶段最多尝试一次。
+static constexpr int TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT = std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES) - 1;
 static_assert(std::size(TCLIENT_UPDATE_SOURCE_SIBLING_BASES) == TCLIENT_UPDATE_DOWNLOAD_SOURCE_COUNT + 1);
 static bool UpdateSourceIsApi(const char *pBase)
 {

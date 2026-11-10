@@ -42,15 +42,15 @@ public:
 
 	// 原版 Tater 输入保持独立；Ancient 动态量也会读取这里，不能被其他模式覆盖。
 	CNetObj_PlayerInput m_aFastInput[NUM_DUMMIES] = {};
-	bool m_FastInputHookAction = false;
-	bool m_FastInputFireAction = false;
+	bool m_FastInputHookAction[NUM_DUMMIES] = {};
+	bool m_FastInputFireAction[NUM_DUMMIES] = {};
 
 	// alpha 各模式分别保留两号输入和动作锁存；切换模式不覆盖其他模式缓存。
 	// mode 0~7 = alpha 七模式（4 为历史空位），8~11 = BestClient 四模式（Best/Saiko/Delta/Cloud）。
 	static constexpr int NUM_FAST_INPUT_MODES = 15;
 	CNetObj_PlayerInput m_aaModeFastInput[NUM_FAST_INPUT_MODES][NUM_DUMMIES] = {};
-	bool m_aModeFastInputHookAction[NUM_FAST_INPUT_MODES] = {};
-	bool m_aModeFastInputFireAction[NUM_FAST_INPUT_MODES] = {};
+	bool m_aModeFastInputHookAction[NUM_FAST_INPUT_MODES][NUM_DUMMIES] = {};
+	bool m_aModeFastInputFireAction[NUM_FAST_INPUT_MODES][NUM_DUMMIES] = {};
 	int m_ActiveFastInputMode = 0;
 
 	CControls();
@@ -66,6 +66,7 @@ public:
 	int SnapInput(int *pData);
 	void ClampMousePos();
 	void ResetInput(int Dummy);
+	void ResetFastInput(int Dummy);
 	bool CheckNewInput();
 	CNetObj_PlayerInput &GetFastInput(int Dummy) { return m_ActiveFastInputMode == 0 ? m_aFastInput[Dummy] : m_aaModeFastInput[m_ActiveFastInputMode][Dummy]; }
 	const CNetObj_PlayerInput &GetFastInput(int Dummy) const { return m_ActiveFastInputMode == 0 ? m_aFastInput[Dummy] : m_aaModeFastInput[m_ActiveFastInputMode][Dummy]; }

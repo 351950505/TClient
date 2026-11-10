@@ -9,6 +9,45 @@
 // 快速输入的纯数值部分；与预测世界分开，便于对拍原始机器码。
 namespace FastInput
 {
+inline int PredictionTicks(float Amount)
+{
+	return Amount > 0.0f ? static_cast<int>(std::ceil(Amount)) : 0;
+}
+
+inline float BestAmount(int Offset, int Smoothing, int Latency)
+{
+	float Amount = std::clamp(Offset, 0, 1000) / 100.0f;
+	if(Smoothing > 0)
+		Amount *= 1.0f - std::clamp(Smoothing, 0, 100) / 200.0f;
+	if(Latency > 0)
+		Amount *= 1.0f + std::clamp(Latency, 0, 50) / 100.0f;
+	return Amount;
+}
+
+inline float InterpolationIntra(float Intra, float Distance, int Mode)
+{
+	const float Linear = std::clamp(Intra, 0.0f, 1.0f);
+	const float Square = Linear * Linear;
+	const float Cubic = 3.0f * Square - 2.0f * Square * Linear;
+	switch(std::clamp(Mode, 1, 3))
+	{
+	case 2:
+		return Cubic;
+	case 3:
+		return Linear + (Cubic - Linear) * std::clamp(Distance / 1000.0f, 0.0f, 1.0f);
+	default:
+		return Linear;
+	}
+}
+
+inline float FBlendAlpha(float ExtraTime, float DeltaTime)
+{
+	const float AlphaReference = 1.0f / (1.0f + std::max(ExtraTime, 0.0f) * 0.5f);
+	const float Tau = -(1.0f / 144.0f) / std::log(std::max(1.0f - AlphaReference, 0.0001f));
+	const float Dt = std::clamp(DeltaTime, 0.0f, 0.1f);
+	return 1.0f - std::exp(-Dt / Tau);
+}
+
 inline void OffsetTicks(float Amount, int &Tick, float &Intra)
 {
 	if(Amount <= 0.0f)
@@ -104,28 +143,12 @@ inline void OffsetAncient(float Millis, int &Tick, float &Intra)
 
 inline float SalatikAmount(int Offset, int Smoothing, int Latency)
 {
-	float Amount = std::clamp(Offset, 0, 1000) / 100.0f;
-	if(Smoothing > 0)
-		Amount *= 1.0f - std::clamp(Smoothing, 0, 100) / 200.0f;
-	if(Latency > 0)
-		Amount *= 1.0f + std::clamp(Latency, 0, 50) / 100.0f;
-	return Amount;
+	return BestAmount(Offset, Smoothing, Latency);
 }
 
 inline float SalatikIntra(float Intra, float Distance, int Mode)
 {
-	const float Linear = std::clamp(Intra, 0.0f, 1.0f);
-	const float Square = Linear * Linear;
-	const float Cubic = 3.0f * Square - (2.0f * Square) * Linear;
-	switch(std::clamp(Mode, 1, 3))
-	{
-	case 2:
-		return Cubic;
-	case 3:
-		return Linear + (Cubic - Linear) * std::clamp(Distance / 1000.0f, 0.0f, 1.0f);
-	default:
-		return Linear;
-	}
+	return InterpolationIntra(Intra, Distance, Mode);
 }
 }
 

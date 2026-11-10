@@ -42,13 +42,20 @@ def main():
         "vec2 CGameClient::GetFastInputPos(", "vec2 CGameClient::GetFreezePos(",
         "vec2 CGameClient::ApplyAncientInputPost(",
     ]
+    signatures[1:1] = [signature for signature in (
+        "bool CGameClient::IsSnapshotInputMode()",
+        "bool CGameClient::FastInputImmediateOthers()",
+        "int CGameClient::SnapshotInputMaxTick(",
+        "bool CGameClient::SnapshotTryGetPredPos(",
+    ) if signature in game]
     methods = [extract(game, signature) for signature in signatures]
     control_methods = [extract(controls, s) for s in (
-        "bool CControls::CheckNewInput()", "void CControls::OnReset()", "void CControls::ResetInput(")]
+        "bool CControls::CheckNewInput()", "void CControls::OnReset()", "void CControls::ResetInput(", "void CControls::ResetFastInput(")]
     declarations = []
     for method in methods:
         decl = method[:method.index("{")].strip().replace("CGameClient::", "")
-        decl = decl.replace("bool Salatik)", "bool Salatik = false)")
+        decl = decl.replace("bool Salatik) const", "bool Salatik = false) const")
+        decl = decl.replace("int InterpolationMode) const", "int InterpolationMode = 0) const")
         declarations.append(decl + ";")
     clock_method = extract((root / "src/engine/client/client.cpp").read_text(encoding="utf-8"), "void CClient::GetSmoothFreezeTick(").replace("CClient::", "CClock::")
     fields = sorted(set(re.findall(r"g_Config\.(m_\w+)", "\n".join(methods + control_methods + [clock_method]))) | {
@@ -118,10 +125,10 @@ struct CControls {
     CNetObj_PlayerInput m_aInputData[2]{},m_aLastData[2]{},m_aFastInput[2]{},m_aaModeFastInput[15][2]{};
     vec2 m_aMousePos[2];
     int m_aInputDirectionLeft[2]{},m_aInputDirectionRight[2]{},m_aAmmoCount[6]{},m_LastSendTime=0;
-    bool m_FastInputHookAction=false,m_FastInputFireAction=false,m_aModeFastInputHookAction[15]{},m_aModeFastInputFireAction[15]{};
+    bool m_FastInputHookAction[2]{},m_FastInputFireAction[2]{},m_aModeFastInputHookAction[15][2]{},m_aModeFastInputFireAction[15][2]{};
     int m_ActiveFastInputMode=0;
     CNetObj_PlayerInput &GetFastInput(int Slot){return m_ActiveFastInputMode==0 ? m_aFastInput[Slot] : m_aaModeFastInput[m_ActiveFastInputMode][Slot];}
-    bool CheckNewInput(); void OnReset(); void ResetInput(int Dummy);
+    bool CheckNewInput(); void OnReset(); void ResetInput(int Dummy); void ResetFastInput(int Dummy);
 };
 struct CGameClient {
     CClock m_Clock;
@@ -137,6 +144,7 @@ struct CGameClient {
     } m_aClients[MAX_CLIENTS];
     CControls m_Controls;
     FastInput::CAncientState m_aAncientInputState[2],m_aLightAncientInputState[2];
+    bool m_aReceivedPreInput[NUM_DUMMIES]{};
     CWorld m_PredictedWorld,m_ExtraPredictedWorld;
     int m_SmoothTick=0; float m_SmoothIntraTick=0;
     vec2 GetSmoothPos(int){return {};}
@@ -145,7 +153,7 @@ struct CGameClient {
 '''
     tests = r'''
 int main(){
-    int Failures=0;
+    int Cases=0,Checks=0,Failures=0;
     const char *Names[] = {"Tater","Meow","Snow","Next","unused","Salatik","Ancient","F","Best","Saiko","Delta","Cloud","Light","Azure","BCLAncient"};
     for(int Stage=0;Stage<3;++Stage) for(int Window=0;Window<2;++Window) for(int Mode : {0,1,2,3,5,6,7,8,9,10,11,12,13,14}) {
         CGameClient G;
@@ -157,7 +165,8 @@ int main(){
         g_Config.m_TcSalatikInputOthers=g_Config.m_TcFInputOthers=g_Config.m_TcBestInputOthers=g_Config.m_TcSaikoInputOthers=g_Config.m_TcDeltaInputOthers=g_Config.m_TcCloudInputOthers=1;
         g_Config.m_TcAncientInputOthers=1;g_Config.m_TcAncientInputOthersAmount=20;
         g_Config.m_TcLightInputOthers=g_Config.m_TcAzureInputOthers=g_Config.m_TcLightAncientInputOthers=1;g_Config.m_TcLightAncientInputOthersAmount=20;
-        g_Config.m_TcSalatikInputInterpolation=1;
+        g_Config.m_TcSalatikInputInterpolation=1;g_Config.m_TcBestInputInterpolation=1;
+        G.m_aReceivedPreInput[0]=G.m_aReceivedPreInput[1]=true;
         g_Config.m_TcUnfreezeLagTicks=5;g_Config.m_TcUnfreezeLagDelayTicks=25;
         NEW_CONFIG
         auto &D=G.m_aClients[0];D.m_RegularPredicted.m_Pos={100,0};D.m_Predicted.m_Pos={100,0};D.m_PrevPredicted.m_Pos={99,0};
@@ -165,7 +174,9 @@ int main(){
         G.m_Snap.m_aCharacters[0].m_Active=true;G.m_Snap.m_aCharacters[2].m_Active=true;
         auto &R=G.m_aClients[2];R.m_RegularPredicted.m_Pos={100,0};R.m_Predicted.m_Pos={100,0};R.m_PrevPredicted.m_Pos={99,0};
         for(int Tick=80;Tick<120;++Tick){D.m_aPredTick[Tick%200]=Tick;D.m_aPredPos[Tick%200]={float(Tick),0};R.m_aPredTick[Tick%200]=Tick;R.m_aPredPos[Tick%200]={float(Tick),0};}
-        if(!G.FastInputActive(0,false))continue;
+        ++Cases;++Checks;
+        const bool Active=G.FastInputActive(0,false);
+        if(!Active){++Failures;std::printf("%s window=%d mode=%-10s configured_active=0 FAIL\n",Stage==0?"unfrozen":Stage==1?"frozen":"thawed",Window,Names[Mode]);}
         G.m_PredictedWorld.m_Character.m_FreezeAccumulation=Stage?25:0;
         G.m_PredictedWorld.m_Character.m_FreezeTime=Stage==1?150:0;
         G.m_ExtraPredictedWorld.m_Character.m_AliveAccumulation=Stage==2?5:0;
@@ -174,14 +185,25 @@ int main(){
         int T;float F;G.Client()->GetSmoothFreezeTick(&T,&F,Stage==1?0.0f:1.0f);
         const float Base=float(T-1)+F,Expected=Base+1;
         bool Good=std::fabs(With-Expected)<.0002f;
+        ++Checks;
         std::printf("%s window=%d mode=%-10s baseline=%.2f extra=%.2f expected_extra=1.00 %s\n",Stage==0?"unfrozen":Stage==1?"frozen":"thawed",Window,Names[Mode],Base,With-Base,Good?"PASS":"FAIL");
         if(!Good)++Failures;
         const float Other=G.GetFreezePos(2).x;
-        const bool OtherGood=std::fabs((Other-Base)-1.0f)<.0002f;
-        std::printf("%s window=%d mode=%-10s other_extra=%.2f expected_extra=1.00 %s\n",Stage==0?"unfrozen":Stage==1?"frozen":"thawed",Window,Names[Mode],Other-Base,OtherGood?"PASS":"FAIL");
+        // 上游 Best/Saiko/Delta 立即使用 Others；Light/Azure/Ancient 直接使用远端快照时钟。
+        // Cloud 保留冻结时间线，再在该时间线上施加快照偏移。
+        const bool DirectOtherClock=(Mode>=8 && Mode<=10) || (Mode>=12 && Mode<=14);
+        const float OtherExpected=DirectOtherClock ? float(G.m_Clock.m_Tick-1)+G.m_Clock.m_Intra+1.0f : Expected;
+        const bool OtherGood=std::fabs(Other-OtherExpected)<.0002f;
+        ++Checks;
+        std::printf("%s window=%d mode=%-10s other=%.2f expected=%.2f %s\n",Stage==0?"unfrozen":Stage==1?"frozen":"thawed",Window,Names[Mode],Other,OtherExpected,OtherGood?"PASS":"FAIL");
         if(!OtherGood)++Failures;
     }
-    std::printf("failures=%d\n",Failures);return Failures?1:0;
+    constexpr int ExpectedCases=84,ExpectedChecks=252;
+    const int ExecutedChecks=Checks;
+    const bool CountGood=Cases==ExpectedCases && ExecutedChecks==ExpectedChecks;
+    if(!CountGood)++Failures;
+    std::printf("cases=%d expected_cases=%d executed_checks=%d expected_checks=%d count_assertion=%s failures=%d\n",Cases,ExpectedCases,ExecutedChecks,ExpectedChecks,CountGood?"PASS":"FAIL",Failures);
+    return Failures?1:0;
 }
 '''
     tests = tests.replace('NEW_CONFIG', '' if args.revision else 'g_Config.m_TcLightInput=100;g_Config.m_TcAzureInput=100;g_Config.m_TcLightAncientInput=20;')

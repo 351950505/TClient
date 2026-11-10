@@ -1,7 +1,7 @@
 """TClient one-command release orchestrator (two-phase).
 
-Default phase performs the complete LOCAL release: preflight, build, test,
-stage, Authenticode evidence, packaging, Ed25519 manifest signature and full
+Default phase performs the complete LOCAL release: preflight, mirror probe, build,
+test, stage, Authenticode evidence, packaging, Ed25519 manifest signature and full
 byte verification — exactly the flow used for v1.7.8.55-v1.7.8.59, but driven
 from one spec file instead of hand-derived per-version scripts.
 
@@ -21,6 +21,7 @@ Exit codes: 0 success, 1 failed requirement, 2 failed requirement during a
 resumed phase.
 """
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import json
@@ -118,16 +119,64 @@ def phase_preflight(spec, paths, state):
     return {"tree": git(repo, "rev-parse", f'{spec["target_commit"]}^{{tree}}')}
 
 
+def mirror_files(spec, paths):
+    return paths["root"] / "update-mirrors.json", Path(spec["build_dir"]) / "src/generated/tclient_update_mirrors.h"
+
+
+def verify_mirror_inputs(spec, paths, state, client=None, fresh=False):
+    report_path, header = mirror_files(spec, paths)
+    require(report_path.is_file() and header.is_file(), "release mirror evidence is missing; run mirror_probe before building")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    require(report.get("schema") == 1 and report.get("catalog_url") == "https://github.akams.cn/", "mirror report has an unexpected source or schema")
+    require(report.get("release_version") == spec["version"] and report.get("source_commit") == spec["target_commit"], "mirror report belongs to a different release or commit")
+    require(report.get("header_sha256") == sha256_of(header), "mirror header differs from its tested report; rebuild from a fresh probe")
+    selected = report.get("selected", [])
+    require(1 <= len(selected) <= 3, "no verified release mirrors selected")
+    prefixes = [item["prefix"] for item in selected]
+    require(len(set(prefixes)) == len(prefixes) and all(re.fullmatch(r"https://[a-z0-9.-]+/", prefix) for prefix in prefixes), "invalid or repeated mirror prefix")
+    record = {"report": str(report_path), "report_sha256": sha256_of(report_path), "header_sha256": sha256_of(header), "selected": prefixes, "reference": report["reference"]}
+    frozen = state.get("phases", {}).get("mirror_probe")
+    if frozen:
+        require(record == frozen, "mirror inputs changed after the probe phase; start a new release build")
+    if fresh:
+        checked = datetime.fromisoformat(report["fetched_at"].replace("Z", "+00:00"))
+        require(checked.tzinfo is not None, "mirror report timestamp lacks a timezone")
+        age = (datetime.now(timezone.utc) - checked).total_seconds()
+        require(0 <= age <= 24 * 60 * 60, "mirror probe is older than 24 hours; run a new probe and rebuild")
+    if client is not None:
+        for prefix in prefixes:
+            url = prefix + "https://github.com/" + GITHUB_REPO + "/releases/latest/download/TClient-update-win64.json"
+            require(url.encode("ascii") in client, "client lacks a tested update mirror: " + prefix)
+    return record
+
+
+def phase_mirror_probe(spec, paths, state):
+    script = Path(spec["repo"]) / "tclient_scripts/probe_update_mirrors.py"
+    require(script.is_file(), f"mirror probe missing: {script}")
+    report, header = mirror_files(spec, paths)
+    subprocess.run([
+        sys.executable, "-I", str(script), "--repo", str(spec["repo"]),
+        "--output", str(report), "--header", str(header),
+        "--release-version", spec["version"], "--source-commit", spec["target_commit"],
+    ], check=True, timeout=1800)
+    record = verify_mirror_inputs(spec, paths, state, fresh=True)
+    shutil.copyfile(header, paths["root"] / "update-mirrors.h")
+    return record
+
+
 def phase_build(spec, paths, state):
     cmake = Path("C:/VS2026/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe")
     require(cmake.is_file(), "VS2026 cmake not found")
+    verify_mirror_inputs(spec, paths, state, fresh=True)
     build_dir = Path(spec["build_dir"])
+    subprocess.run([str(cmake), "-S", str(spec["repo"]), "-B", str(build_dir), "-DTCLIENT_RELEASE_MIRRORS=ON"], check=True, timeout=600)
     subprocess.run([str(cmake), "--build", str(build_dir), "--config", "Release", "--target", "game-client", "--target", "TClientUpdater", "--parallel"], check=True, timeout=3600)
     repo = Path(spec["repo"])
     libs = repo / "ddnet-libs"
     env = dict(os.environ)
     for sub in ("sqlite3", "curl", "freetype", "opus", "opusfile", "png", "sdl", "zlib"):
         env["PATH"] = str(libs / sub / "windows" / "lib64") + os.pathsep + env["PATH"]
+    env["PATH"] = str(build_dir) + os.pathsep + str(build_dir / "Release") + os.pathsep + env["PATH"]
     result = subprocess.run([str(build_dir / "Release" / "testrunner.exe")], capture_output=True, timeout=1800, env=env, cwd=str(repo))
     if result.returncode != 0:
         tail = (result.stdout or b"")[-1500:].decode(errors="replace")
@@ -135,13 +184,22 @@ def phase_build(spec, paths, state):
         raise RuntimeError(f"testrunner failed: {result.returncode}\nSTDOUT:{tail}\nSTDERR:{err}")
     client = build_dir / "Release" / "DDNet.exe"
     data = client.read_bytes()
+    verify_mirror_inputs(spec, paths, state, client=data)
     require(f'{spec["version"]}\0'.encode() in data, "client does not embed the release version")
     short = git(repo, "rev-parse", "--short", spec["target_commit"])
     require(short.encode() in data, "client does not embed the release commit")
     return {"client_sha256": sha256_of(client), "client_size": client.stat().st_size, "testrunner": "pass"}
 
 
+def verify_client_phase(state, phase, client_path):
+    expected = state.get("phases", {}).get(phase, {}).get("client_sha256")
+    require(expected and sha256_of(client_path) == expected, f"client differs from the frozen {phase} phase; rebuild the release")
+
+
 def phase_stage(spec, paths, state):
+    client_path = Path(spec["build_dir"]) / "Release/DDNet.exe"
+    verify_client_phase(state, "build", client_path)
+    verify_mirror_inputs(spec, paths, state, client=client_path.read_bytes(), fresh=True)
     stage = paths["stage"]
     require(not stage.exists(), f"stage directory already exists: {stage}")
     script = Path(spec["repo"]) / "tclient_scripts" / "prepare_release_stage.py"
@@ -164,7 +222,9 @@ def phase_stage(spec, paths, state):
     subprocess.run(command, check=True, timeout=1800)
     # 递归计数必须是「每个 rglob 命中是否普通文件」；旧写法用 Path(_).name 拼回
     # stage 根目录，嵌套文件全部被判为不存在，1031 个文件会报成 31。
-    return {"stage_files": sum(1 for path in stage.rglob("*") if path.is_file())}
+    staged_client = stage / "DDNet.exe"
+    verify_client_phase(state, "build", staged_client)
+    return {"stage_files": sum(1 for path in stage.rglob("*") if path.is_file()), "client_sha256": sha256_of(staged_client)}
 
 
 def phase_package(spec, paths, state):
@@ -189,7 +249,10 @@ def phase_package(spec, paths, state):
             origin = Path(entry["origin"])
             require(origin.is_file() and assets.sha256_of(origin) == entry["sha256"], "first-party build origin differs: " + entry["path"])
 
-    client = (stage / "DDNet.exe").read_bytes()
+    client_path = stage / "DDNet.exe"
+    verify_client_phase(state, "stage", client_path)
+    client = client_path.read_bytes()
+    mirrors = verify_mirror_inputs(spec, paths, state, client=client, fresh=True)
     previous = "1.7.8." + str(int(version.rsplit(".", 1)[1]) - 1)
     require(f"{version}\0".encode() in client and f"{previous}\0".encode() not in client, "stage client version is wrong")
     require(git(repo, "rev-parse", "--short", spec["target_commit"]).encode() in client, "stage client lacks the release commit")
@@ -242,6 +305,7 @@ def phase_package(spec, paths, state):
         "source_commit": spec["target_commit"],
         "source_tree": git(Path(spec["repo"]), "rev-parse", spec["target_commit"] + "^{tree}"),
         "parent": spec["parent_commit"],
+        "update_mirrors": mirrors,
         "helper_lock": "passed",
         "assets": [
             {"name": path.name, "path": str(path), "size": path.stat().st_size, "sha256": sha256_of(path)}
@@ -315,6 +379,8 @@ def phase_publish(spec, paths, state):
     token = github_token(Path(spec["repo"]))
     assets_record = json.loads((paths["root"] / "local-assets.json").read_text(encoding="utf-8-sig"))
     asset_paths = {record["name"]: Path(record["path"]) for record in assets_record["assets"]}
+    mirrors = verify_mirror_inputs(spec, paths, state, client=asset_paths["DDNet.exe"].read_bytes(), fresh=True)
+    require(assets_record.get("update_mirrors") == mirrors, "packaged assets do not match the frozen mirror probe")
     release = gh_api_json(paths["root"], "repos/" + GITHUB_REPO + "/releases", token, "POST", {
         "tag_name": f'v{spec["version"]}',
         "target_commitish": spec["target_commit"],
@@ -360,9 +426,15 @@ def phase_master_sync(spec, paths, state):
     return json.loads(result.stdout) if result.stdout.strip().startswith("{") else {"synced": True}
 
 
-LOCAL_PHASES = ("preflight", "build", "stage", "package")
+LOCAL_PHASES = ("preflight", "mirror_probe", "build", "stage", "package")
 PUBLISH_PHASES = ("publish", "master_sync")
 PHASES = LOCAL_PHASES + PUBLISH_PHASES
+
+
+def validate_resume_state(state):
+    completed = state.get("completed", [])
+    require(completed == list(PHASES[:len(completed)]), "release state uses an incompatible phase order; start a new build with mirror_probe")
+    require(all(phase in state.get("phases", {}) for phase in completed), "release state is missing completed phase evidence")
 
 
 def main():
@@ -403,6 +475,11 @@ def main():
         phase_preflight(spec, paths, state)
         print(json.dumps({"dry_run": True, "phases_planned": plan}, indent=2))
         return 0
+
+    if args.resume:
+        validate_resume_state(state)
+        if "mirror_probe" in completed:
+            verify_mirror_inputs(spec, paths, state, fresh=True)
 
     for phase in plan:
         if args.resume and phase in completed:

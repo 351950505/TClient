@@ -5,6 +5,7 @@ plan selection, state resume, release-body encoding, master-sync invocation and
 the translation gate. Build/stage/package/publish phases are deliberately not
 executed here; they require the real toolchain.
 """
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import subprocess
@@ -72,12 +73,12 @@ class SpecValidationTests(unittest.TestCase):
     def test_two_phase_plan_without_publish(self):
         # without --publish the plan must stop after "package"
         publish = False
-        plan = ["preflight", "build", "stage", "package"] + (["publish", "master_sync"] if publish else [])
-        self.assertEqual(plan, ["preflight", "build", "stage", "package"])
+        plan = list(release_orchestrator.LOCAL_PHASES) + (list(release_orchestrator.PUBLISH_PHASES) if publish else [])
+        self.assertEqual(plan, ["preflight", "mirror_probe", "build", "stage", "package"])
 
     def test_publish_extends_plan(self):
         publish = True
-        plan = ["preflight", "build", "stage", "package"] + (["publish", "master_sync"] if publish else [])
+        plan = list(release_orchestrator.LOCAL_PHASES) + (list(release_orchestrator.PUBLISH_PHASES) if publish else [])
         self.assertEqual(plan[-2:], ["publish", "master_sync"])
 
     def test_version_step_policy_helper(self):
@@ -85,6 +86,83 @@ class SpecValidationTests(unittest.TestCase):
         version = "1.7.8.59"
         previous = "1.7.8." + str(int(version.rsplit(".", 1)[1]) - 1)
         self.assertEqual(previous, "1.7.8.58")
+
+
+class MirrorEvidenceTests(unittest.TestCase):
+    def fixture(self, tmp):
+        root = Path(tmp)
+        spec = {"version": "1.7.8.73", "target_commit": "a" * 40, "build_dir": str(root / "build")}
+        paths = {"root": root}
+        report_path, header = release_orchestrator.mirror_files(spec, paths)
+        header.parent.mkdir(parents=True)
+        header.write_text("// tested mirrors\n", encoding="utf-8")
+        report = {"schema": 1, "catalog_url": "https://github.akams.cn/", "fetched_at": datetime.now(timezone.utc).isoformat(), "release_version": spec["version"], "source_commit": spec["target_commit"], "header_sha256": release_orchestrator.sha256_of(header), "selected": [{"prefix": "https://mirror.example/"}], "reference": {"tag": "v1.7.8.72"}}
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        return spec, paths, report, report_path, header
+
+    def test_probe_is_required_before_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = {"build_dir": tmp}
+            with self.assertRaisesRegex(RuntimeError, "evidence is missing"):
+                release_orchestrator.verify_mirror_inputs(spec, {"root": Path(tmp)}, {})
+
+    def test_untested_or_previous_release_inputs_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec, paths, report, report_path, header = self.fixture(tmp)
+            report["release_version"] = "1.7.8.72"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "different release"):
+                release_orchestrator.verify_mirror_inputs(spec, paths, {})
+            report["release_version"] = spec["version"]
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            header.write_text("// modified after testing\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "header differs"):
+                release_orchestrator.verify_mirror_inputs(spec, paths, {})
+
+    def test_resume_rejects_changed_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec, paths, report, report_path, _ = self.fixture(tmp)
+            frozen = release_orchestrator.verify_mirror_inputs(spec, paths, {})
+            report["reference"]["tag"] = "v1.7.8.71"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "changed after the probe"):
+                release_orchestrator.verify_mirror_inputs(spec, paths, {"phases": {"mirror_probe": frozen}})
+
+    def test_stale_probe_blocks_new_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec, paths, report, report_path, _ = self.fixture(tmp)
+            report["fetched_at"] = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "older than 24 hours"):
+                release_orchestrator.verify_mirror_inputs(spec, paths, {}, fresh=True)
+
+    def test_resume_requires_current_phase_prefix(self):
+        for completed in (["preflight", "build", "stage", "package"], ["mirror_probe"], ["preflight", "preflight"]):
+            with self.subTest(completed=completed), self.assertRaisesRegex(RuntimeError, "incompatible phase order"):
+                release_orchestrator.validate_resume_state({"completed": completed})
+        completed = ["preflight", "mirror_probe", "build"]
+        release_orchestrator.validate_resume_state({"completed": completed, "phases": {phase: {} for phase in completed}})
+        with self.assertRaisesRegex(RuntimeError, "missing completed phase evidence"):
+            release_orchestrator.validate_resume_state({"completed": completed, "phases": {}})
+
+    def test_client_cannot_change_between_phases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = Path(tmp) / "DDNet.exe"
+            client.write_bytes(b"tested build")
+            state = {"phases": {"build": {"client_sha256": release_orchestrator.sha256_of(client)}}}
+            release_orchestrator.verify_client_phase(state, "build", client)
+            client.write_bytes(b"different executable with the same mirror URLs")
+            with self.assertRaisesRegex(RuntimeError, "differs from the frozen build"):
+                release_orchestrator.verify_client_phase(state, "build", client)
+
+    def test_packaged_client_must_embed_selected_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec, paths, _, _, _ = self.fixture(tmp)
+            with self.assertRaisesRegex(RuntimeError, "client lacks"):
+                release_orchestrator.verify_mirror_inputs(spec, paths, {}, client=b"old client")
+            data = b"https://mirror.example/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json"
+            record = release_orchestrator.verify_mirror_inputs(spec, paths, {}, client=data, fresh=True)
+            self.assertEqual(record["selected"], ["https://mirror.example/"])
 
 
 class ReleaseBodyEncodingTests(unittest.TestCase):

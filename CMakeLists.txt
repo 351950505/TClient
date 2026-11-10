@@ -145,6 +145,7 @@ option(WEBSOCKETS "Enable websockets support" OFF)
 option(MYSQL "Enable mysql support" OFF)
 option(TEST_MYSQL "Test mysql support in unit tests (also sets -DMYSQL=ON)" OFF)
 option(AUTOUPDATE "Enable the autoupdater" OFF)
+option(TCLIENT_RELEASE_MIRRORS "Embed mirrors verified for this release build" OFF)
 option(INFORM_UPDATE "Inform about available updates" ON)
 option(VIDEORECORDER "Enable video recording support via FFmpeg" ON)
 option(UPNP "Enable UPnP support" OFF)
@@ -3306,6 +3307,13 @@ if(CLIENT)
     set_own_rpath(game-client)
   endif()
 
+  if(TCLIENT_RELEASE_MIRRORS)
+    if(NOT EXISTS "${PROJECT_BINARY_DIR}/src/generated/tclient_update_mirrors.h")
+      message(FATAL_ERROR "Run the release mirror probe before enabling TCLIENT_RELEASE_MIRRORS")
+    endif()
+    target_compile_definitions(game-client PRIVATE CONF_TCLIENT_RELEASE_MIRRORS)
+  endif()
+
   if(GLEW_BUNDLED)
     target_compile_definitions(game-client PRIVATE CONF_GLEW_HAS_CONTEXT_INIT)
   endif()
@@ -3748,6 +3756,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     str_test.cpp
     swap_endian_test.cpp
     tclient_console_filter_test.cpp
+    tclient_fastinput_test.cpp
     tclient_gradient_test.cpp
     tclient_jitter_buffer_test.cpp
     tclient_relay_test.cpp

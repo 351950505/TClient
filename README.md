@@ -13,7 +13,7 @@
 - **抗延迟工具**:预测量、延迟补偿、冻结时禁用预测、被冻结时不预测其他玩家、冻结专用预测值。
 - **平滑预测**:可选新平滑算法、稳定方向下的积极预测、延长网络波动判断时间、不确定性持续时间。
 - **自适应快照插值缓冲(抗网络抖动)**:实时统计最近 64 个快照的到达间隔抖动,按 2×平均绝对偏差自动加一点渲染延迟(上限可调,默认 30ms),让早到/晚到的快照都落在缓冲里,画面不再跟着网络抖动抽搐。缓冲每次快照最多动 1ms,不会自己变成新的抖动源;网络平稳时按同样节奏收回。
-- **快速输入(11 种模式)**:Tater / Ancient / Next / Meow / Snow / Salatik / F / Best / Saiko / Delta / Cloud。每种模式可独立调预测量、钩锁逻辑与数量,也可以只作用于自己、不作用于其他玩家。
+- **快速输入(14 种有效模式)**:Tater / Meow / Snow / Next / Salatik / Ancient / F / Best / Saiko / Delta / Cloud / Light / Azure / BestClient-Light Ancient。与 BestClient-Light 重叠的 Tater、F、Best、Saiko、Delta、Cloud、Light、Azure、BCL Ancient 以固定上游实现为行为权威,同时保留本客户端的双号、Dummy、Remove Anti 和独有模式适配。每种模式可独立调预测量及 Others 选项。
 - 丢包率与补救次数可在控制台查看。
 
 ### 灵动岛(音乐悬浮条)
@@ -82,7 +82,8 @@
 - **[DDNet](https://github.com/ddnet/ddnet)** — 整个游戏本体、物理、网络协议与地图格式的基础。
 - **[TaterClient / TClient](https://github.com/TaterClient/TClient)** — 直接上游分支,本仓库在它的基础上做定制。
 - **MeowClient (MeowClient-Next)** — 快速输入的 Meow / Next / Snow 等模式对齐它的预测路径与钩锁逻辑。
-- **[BestClient](https://github.com/BestProjectTeam/BestClient)** — 快速输入的 Best / Saiko / Delta / Cloud 四种模式移植自它;名称/战队/皮肤/全局文字渐变功能也整体移植自它的 `bc_nameplate_gradient` 系列实现(保持 MIT 声明),并补齐了它对 0.7/Sixup 皮肤不生效的缺口。
+- **[BestClient-Light](https://github.com/BestProjectTeam/BestClient-Light)** — 快速输入重叠模式的行为权威来源。Tater/F/Best/Saiko/Delta/Cloud/Light/Azure/BCL Ancient 的算法与预测时间线固定对照该项目提交 `c56daba94b2b0ff7b5590a16ca463d9ff5182b98`,并保留 TClient 必需的双号与独有模式兼容层。
+- **[BestClient](https://github.com/BestProjectTeam/BestClient)** — 名称/战队/皮肤/全局文字渐变功能整体移植自它的 `bc_nameplate_gradient` 系列实现(保持 MIT 声明),并补齐了它对 0.7/Sixup 皮肤不生效的缺口。
 - **[QmClient](https://github.com/wxj881027/QmClient)** — 参考与移植了多处:素材编辑器(Assets Editor)整体移植、主播模式、观战选择器好友分列、聊天 Ping 图标化、控制台分类筛选的初始思路,以及更新清单的 Ed25519 签名方案。
 - **[ddnet-custom-clients](https://github.com/M0REKZ/ddnet-custom-clients)** — 客户端标识采用的皮肤颜色识别标准(把客户端 ID 编进皮肤颜色 alpha 字节),Kaizo / Chillerbot-UX / Duck & Infclass / Rushie / Ascend 等客户端在用。
 

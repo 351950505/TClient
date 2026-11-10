@@ -1,5 +1,25 @@
 # Windows 发布签名与打包
 
+## 当前本地发布：每次打包重新测速（2026-11-11）
+
+本地正式包统一通过 `release_orchestrator.py run --spec <spec.json>` 生成。阶段顺序为 `preflight → mirror_probe → build → stage → package`；需要上传时再显式使用 `--publish`。下文 CI 与 `.55` 的例子保留作历史签名说明，不能替代本节镜像步骤。
+
+`mirror_probe` 每次从 `https://github.akams.cn/` 获取当次目录，使用客户端的 User-Agent、IPv4、TLS 校验与重定向限制测试当时最新已发布的更新资产。先核对签名清单，再对候选源下载完整更新 ZIP、helper，并验证真实断点续传、大小与 SHA-256；按完整传输表现选出最多 3 个源。没有合格源时停止构建。
+
+测速生成本次 `release-<版本数字>/update-mirrors.json` 和构建目录 `src/generated/tclient_update_mirrors.h`，编排器以 `-DTCLIENT_RELEASE_MIRRORS=ON` 编译进客户端。选中源排在原有备用源与官方直链之前；原有 Ed25519/SHA-256 校验继续生效。新包尚未公开时，以已发布包测速，不依赖待发布资产。
+
+报告绑定本次版本、源码提交和生成头文件哈希；构建、stage、打包与发布前校验 24 小时有效期，并核对实际程序中的镜像及阶段 SHA-256。`--resume` 只接受当前阶段顺序的连续完成记录。旧记录缺测速阶段、证据被修改或过期时，需使用新的发布工作根目录重新测速和构建，不能跳过门禁复用旧包。
+
+仅调试探测器可手动运行（正式包仍走编排器）：
+
+```powershell
+python -I "$repo/tclient_scripts/probe_update_mirrors.py" `
+  --repo $repo --release-version '<本次版本>' --source-commit '<完整提交哈希>' `
+  --output '<本次发布目录>/update-mirrors.json' `
+  --header "$vsBuild/src/generated/tclient_update_mirrors.h"
+if ($LASTEXITCODE -ne 0) { throw 'Mirror probe failed' }
+```
+
 `release.yml` 将 Windows 正式资产的生成放在固定的 `windows-2022` runner，使用 Visual Studio 2022。只有来源核对、干净 stage、Authenticode 签名、Ed25519 清单签名和最终资产验证全部成功，Ubuntu 发布任务才会创建 GitHub Release。
 
 本次修复不代表已经签出正式的 `1.7.8.55` 资产。当前没有可用的正式代码签名证书；提供真实证书并补齐构建产物前，发布应当失败。不要用自签证书、修改信任库或放宽验签要求绕过门槛。

@@ -396,6 +396,12 @@ int main() {
 
 class UpdateRetryTest(unittest.TestCase):
 	def test_production_updater_methods(self):
+		self.run_production_updater_methods(False)
+
+	def test_release_mirror_updater_methods(self):
+		self.run_production_updater_methods(True)
+
+	def run_production_updater_methods(self, release_mirrors):
 		compiler = os.environ.get("CXX") or next((path for name in ("cl", "c++", "g++", "clang++") if (path := shutil.which(name))), None)
 		if not compiler:
 			self.skipTest("requires a standalone C++17 compiler on PATH")
@@ -442,15 +448,21 @@ class UpdateRetryTest(unittest.TestCase):
 		fixtures += "const std::vector<std::pair<std::vector<unsigned char>, std::vector<unsigned char>>> s_InvalidVersions = {{s_BadPathManifest, s_BadPathSignature}, {s_TooLongManifest, s_TooLongSignature}};\n"
 		with tempfile.TemporaryDirectory(prefix="tclient-updater-test-") as temporary:
 			root = Path(temporary)
+			if release_mirrors:
+				generated = root / "generated"
+				generated.mkdir()
+				manifest_sources = ["https://mirror-a.example/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json", "https://mirror-b.example/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json", "https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json", "https://raw.githubusercontent.com/351950505/TClient/master/update/TClient-update-win64.json"]
+				bases = ["https://mirror-a.example/", "https://mirror-b.example/", "", "@api"]
+				generated.joinpath("tclient_update_mirrors.h").write_text("static const char *const TCLIENT_UPDATE_MANIFEST_SOURCES[] = {" + ",".join(json.dumps(url) for url in manifest_sources) + "};\nstatic const char *const TCLIENT_UPDATE_SOURCE_SIBLING_BASES[] = {" + ",".join(json.dumps(base) for base in bases) + ",nullptr};\n", encoding="utf-8")
 			cpp = root / "retry.cpp"
 			exe = root / ("retry.exe" if os.name == "nt" else "retry")
 			cpp.write_text(HARNESS + constants + "\n".join(helpers) + fixtures + client + "\n".join(methods) + SCENARIOS, encoding="utf-8")
 			external = ROOT / "src/engine/external"
 			dependencies = [external / "json-parser/json.c"] + [external / "ed25519" / (name + ".c") for name in ["verify", "fe", "ge", "sc", "sha512"]]
 			if Path(compiler).name.lower() in ("cl", "cl.exe"):
-				command = [compiler, "/nologo", "/utf-8", "/std:c++17", "/EHsc", "/I" + str(ROOT / "src"), str(cpp), *map(str, dependencies), "/Fe:" + str(exe)]
+				command = [compiler, "/nologo", "/utf-8", "/std:c++17", "/EHsc", "/I" + str(ROOT / "src"), "/I" + str(root), *(["/DCONF_TCLIENT_RELEASE_MIRRORS"] if release_mirrors else []), str(cpp), *map(str, dependencies), "/Fe:" + str(exe)]
 			else:
-				command = [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT / "src"), str(cpp), *map(str, dependencies), "-o", str(exe)]
+				command = [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT / "src"), "-I" + str(root), *(["-DCONF_TCLIENT_RELEASE_MIRRORS"] if release_mirrors else []), str(cpp), *map(str, dependencies), "-o", str(exe)]
 			# Localized compiler diagnostics must not hide the actual exit status.
 			compiled = subprocess.run(command, cwd=root, capture_output=True, text=True, errors="replace")
 			self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)

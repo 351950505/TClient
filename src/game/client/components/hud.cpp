@@ -1993,7 +1993,7 @@ void CHud::RenderSpectatorHud()
 
 void CHud::RenderLocalTime(float x)
 {
-	if(!g_Config.m_ClShowLocalTimeAlways && !GameClient()->m_Scoreboard.IsActive())
+	if(!g_Config.m_ClShowLocalTimeAlways)
 		return;
 
 	const bool Seconds = g_Config.m_TcShowLocalTimeSeconds; // TClient

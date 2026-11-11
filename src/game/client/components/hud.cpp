@@ -1540,18 +1540,33 @@ void CHud::RenderSpectatorCount()
 	}
 
 	int Count = 0;
+	int aSpectatorIds[MAX_CLIENTS];
+	int NumSpectatorIds = 0;
+	bool ReliableNames = false;
+	auto AddSpectator = [&](int ClientId) {
+		if(ClientId < 0 || ClientId >= MAX_CLIENTS)
+			return;
+		for(int i = 0; i < NumSpectatorIds; i++)
+			if(aSpectatorIds[i] == ClientId)
+				return;
+		aSpectatorIds[NumSpectatorIds++] = ClientId;
+	};
+	const int LocalId = GameClient()->m_aLocalIds[0];
+	const int DummyId = Client()->DummyConnected() ? GameClient()->m_aLocalIds[1] : -1;
 	if(Client()->IsSixup())
 	{
 		for(int i = 0; i < MAX_CLIENTS; i++)
 		{
-			if(i == GameClient()->m_aLocalIds[0] || (GameClient()->Client()->DummyConnected() && i == GameClient()->m_aLocalIds[1]))
+			if(i == LocalId || i == DummyId)
 				continue;
 
 			if(Client()->m_TranslationContext.m_aClients[i].m_PlayerFlags7 & protocol7::PLAYERFLAG_WATCHING)
 			{
-				Count++;
+				AddSpectator(i);
 			}
 		}
+		Count = NumSpectatorIds;
+		ReliableNames = true;
 	}
 	else
 	{
@@ -1562,6 +1577,22 @@ void CHud::RenderSpectatorCount()
 			return;
 		}
 		Count = pSpectatorCount->m_NumSpectators;
+		if(g_Config.m_TcShowSpectatorNames && Count > 0)
+		{
+			for(int i = 0; i < MAX_CLIENTS; i++)
+			{
+				if(i == LocalId || i == DummyId)
+					continue;
+
+				const CNetObj_PlayerInfo *pInfo = GameClient()->m_Snap.m_apPlayerInfos[i];
+				if(!pInfo || !GameClient()->m_aClients[i].m_Active)
+					continue;
+
+				if(pInfo->m_Team == TEAM_SPECTATORS || GameClient()->m_aClients[i].m_Spec || GameClient()->m_aClients[i].m_Paused)
+					AddSpectator(i);
+			}
+			ReliableNames = NumSpectatorIds == Count;
+		}
 	}
 
 	if(Count == 0)
@@ -1608,6 +1639,34 @@ void CHud::RenderSpectatorCount()
 	TextRender()->Text(x, y, Fontsize, FontIcon::EYE, -1.0f);
 	TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
 	TextRender()->Text(x + Fontsize + 3.f, y, Fontsize, aBuf, -1.0f);
+
+	if(g_Config.m_TcShowSpectatorNames && ReliableNames && NumSpectatorIds > 0)
+	{
+		const char *apNameLines[6] = {};
+		int NumLines = 0;
+		for(int i = 0; i < NumSpectatorIds && NumLines < 5; i++)
+		{
+			const char *pName = GameClient()->m_aClients[aSpectatorIds[i]].m_aName;
+			if(pName[0] == '\0')
+				continue;
+			apNameLines[NumLines++] = pName;
+		}
+
+		char aRemaining[16];
+		if(Count > NumLines)
+		{
+			str_format(aRemaining, sizeof(aRemaining), "+%d", Count - NumLines);
+			apNameLines[NumLines++] = aRemaining;
+		}
+
+		const float LineHeight = Fontsize + 1.0f;
+		const float BaseY = StartY - 3.0f;
+		for(int i = 0; i < NumLines; i++)
+		{
+			const float NameWidth = TextRender()->TextWidth(Fontsize, apNameLines[i]);
+			TextRender()->Text(m_Width - 2.0f - NameWidth, BaseY - (NumLines - 1 - i) * LineHeight, Fontsize, apNameLines[i], -1.0f);
+		}
+	}
 }
 
 void CHud::RenderDummyActions()

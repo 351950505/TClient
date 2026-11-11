@@ -981,6 +981,9 @@ void CGameClient::OnDummyDisconnect()
 	m_Controls.ResetInput(1);
 	m_Controls.m_aInputData[1].m_Hook = 0;
 	m_Controls.ResetFastInput(1);
+	m_DummyInput = {};
+	m_HammerInput = {};
+	m_DummyFire = 0;
 	m_aAncientInputState[1] = {};
 	m_aLightAncientInputState[1] = {};
 	for(auto &Client : m_aClients)
@@ -3193,6 +3196,7 @@ void CGameClient::OnPredict()
 		ApplyPreInputs(SmoothTick, false, m_PredSmoothingWorld);
 		m_PredSmoothingWorld.Tick();
 
+		const int GameTick = Client()->GameTick(g_Config.m_ClDummy) + static_cast<int>(Client()->IntraGameTick(g_Config.m_ClDummy));
 		for(int i = 0; i < MAX_CLIENTS; i++)
 		{
 			if(!m_Snap.m_aCharacters[i].m_Active || !m_aLastActive[i])
@@ -3223,13 +3227,6 @@ void CGameClient::OnPredict()
 			}
 
 			vec2 PrevPredPos = pChar->GetCore().m_Pos;
-
-			// Cursed hack to get the game tick consistently
-			int GameTick = Client()->GameTick(g_Config.m_ClDummy) + (int)Client()->IntraGameTick(g_Config.m_ClDummy);
-			static int s_PrevGameTick = 0;
-			if(s_PrevGameTick == GameTick)
-				GameTick++;
-			s_PrevGameTick = Client()->GameTick(g_Config.m_ClDummy) + (int)Client()->IntraGameTick(g_Config.m_ClDummy);
 
 			vec2 ServerPos = m_aClients[i].m_aPredPos[GameTick % 200];
 			vec2 PrevServerPos = m_aClients[i].m_aPredPos[(GameTick - 1) % 200];
@@ -5220,7 +5217,7 @@ float CGameClient::GetAncientInputAmount(int ClientId)
 	const vec2 Velocity = m_aClients[ClientId].m_Predicted.m_Vel;
 	if(LightAncient)
 		return FastInput::AncientAmount(m_aLightAncientInputState[Slot], Main, m_Controls.GetFastInput(Slot).m_Direction, Velocity.x, Velocity.y, Client()->PredGameTick(g_Config.m_ClDummy));
-	return FastInput::AncientAmount(m_aAncientInputState[Slot], Main, m_Controls.m_aFastInput[Slot].m_Direction, Velocity.x, Velocity.y, Client()->PredGameTick(g_Config.m_ClDummy));
+	return FastInput::AncientAmount(m_aAncientInputState[Slot], Main, m_Controls.GetFastInput(Slot).m_Direction, Velocity.x, Velocity.y, Client()->PredGameTick(g_Config.m_ClDummy));
 }
 
 vec2 CGameClient::ApplyAncientInputPost(int ClientId, vec2 BasePos)

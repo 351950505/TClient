@@ -127,6 +127,21 @@ check(
     "dummy disconnect clears F smoothing state for connection 1",
     all(name in dummy_disconnect for name in ("m_aFInputExtra[1]", "m_aFInputGameTick[1]", "m_aFInputLastTime[1]", "m_aFInputValid[1]")),
 )
+check(
+    "dummy disconnect clears every actual dummy send cache",
+    all(name in dummy_disconnect for name in ("m_DummyInput = {}", "m_HammerInput = {}", "m_DummyFire = 0")),
+)
+
+improved_block_start = GAME_CPP.index("// New antiping smoothing")
+improved_block_end = GAME_CPP.index("void CGameClient::UpdateRenderedCharacters()", improved_block_start)
+improved_antiping = GAME_CPP[improved_block_start:improved_block_end]
+player_loop = improved_antiping[improved_antiping.index("for(int i = 0; i < MAX_CLIENTS; i++)"):]
+check(
+    "Improved AntiPing computes one loop-invariant game tick without static state",
+    "static int s_PrevGameTick" not in improved_antiping
+    and player_loop.find("int GameTick =") < 0
+    and improved_antiping.find("const int GameTick =") >= 0,
+)
 
 failures = [name for name, passed in checks if not passed]
 print(f"checks={len(checks)} failures={len(failures)}")

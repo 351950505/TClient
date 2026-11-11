@@ -27,7 +27,11 @@ def main():
     args = parser.parse_args()
     root = args.repo
     game = (root / "src/game/client/gameclient.cpp").read_text(encoding="utf-8")
+    game_header = (root / "src/game/client/gameclient.h").read_text(encoding="utf-8")
     controls = (root / "src/game/client/components/controls.cpp").read_text(encoding="utf-8")
+    client_stats = extract(game_header, "class CClientStats")
+    stats_methods = [extract(game, signature) for signature in (
+        "CGameClient::CClientStats::CClientStats()", "void CGameClient::CClientStats::Reset()")]
     on_predict = extract(game, "void CGameClient::OnPredict()")
     if "PredPos = GetFastInputPos(i);" in on_predict:
         raise RuntimeError("snapshot Improved must not call the final fast-input position path")
@@ -73,7 +77,7 @@ def main():
 #include <iterator>
 #include <limits>
 #include <game/client/fastinput.h>
-constexpr int MAX_CLIENTS = 128, NUM_DUMMIES = 2, INPUT_STATE_MASK = 63;
+constexpr int MAX_CLIENTS = 128, NUM_DUMMIES = 2, INPUT_STATE_MASK = 63, NUM_WEAPONS = 6;
 struct vec2 {
     float x=0,y=0;
     vec2() = default;
@@ -169,7 +173,9 @@ struct CGameClient {
     int m_SmoothCalls=0;
     vec2 GetFInputPos(int){return {};}
     CGameClient(){m_Controls.m_Game=this;}
+__CLIENT_STATS__
 '''
+    header = header.replace("__CLIENT_STATS__", client_stats + ";")
     tests = r'''
 int g_Checks=0,g_Failures=0;
 void Check(bool Pass,const char *What,int Mode=-1) {
@@ -424,6 +430,15 @@ int main(){
     {
         CGameClient G;Ready(G,0);g_Config.m_TcFastInputAmount=20;assert(G.GetFastInputPredictionTicks()==1);
         g_Config.m_TcFastInputMode=6;g_Config.m_TcAncientInput=20;assert(G.GetFastInputPredictionTicks()==1);
+        G.m_Controls.m_ActiveFastInputMode=6;
+        G.m_Controls.m_aFastInput[0].m_Direction=G.m_Controls.m_aFastInput[1].m_Direction=1;
+        G.m_Controls.m_aaModeFastInput[6][0].m_Direction=G.m_Controls.m_aaModeFastInput[6][1].m_Direction=1;
+        Near(G.GetAncientInputAmount(0),20,"Ancient reads mode 6 cache before reversal",6);
+        Near(G.GetAncientInputAmount(1),20,"Ancient keeps dummy mode 6 cache isolated",6);
+        G.m_aClients[0].m_Predicted.m_Vel={0,4};G.m_aClients[1].m_Predicted.m_Vel={0,4};
+        G.m_Controls.m_aaModeFastInput[6][0].m_Direction=-1;
+        Near(G.GetAncientInputAmount(0),13.7f,"Ancient reversal reads selected mode 6 cache",6);
+        Near(G.GetAncientInputAmount(1),20,"Ancient reversal does not leak across connections",6);
         g_Config.m_TcLightAncientInput=100;assert(G.GetFastInputPredictionTicks()==1);
         g_Config.m_TcFastInputMode=4;assert(!G.FastInputActive(0,false));
         std::puts("PASS: original Tater/Ancient settings and reserved mode remain independent");
@@ -443,14 +458,28 @@ int main(){
         Check(!C.CheckNewInput(),"stable Best cache does not repredict again",8);
         std::puts("CHECKED: every mode transition forces one immediate reprediction");
     }
-    constexpr int ExpectedChecks=337;
+    {
+        CGameClient::CClientStats Stats;
+        Check(Stats.GetIngameTicks(100)==0,"spectator reads do not accumulate ingame ticks");
+        Stats.m_Frags=1;
+        Check(std::isfinite(Stats.GetFPM(0,50)) && Stats.GetFPM(0,50)==0.0f,"zero-tick FPM is finite zero");
+        Stats.m_Frags=0;
+        Stats.JoinGame(100);Stats.JoinSpec(110);Stats.JoinSpec(120);
+        Check(Stats.GetIngameTicks(130)==10,"duplicate JoinSpec is idempotent");
+        Stats.JoinGame(200);Stats.JoinGame(205);
+        Check(Stats.GetIngameTicks(210)==20,"duplicate JoinGame preserves the original join tick");
+        Stats.JoinSpec(210);Stats.JoinSpec(220);
+        Check(Stats.GetIngameTicks(230)==20,"inactive GetIngameTicks stays stable after repeated transitions");
+        std::puts("CHECKED: client stats active transitions, spectator reads and zero-tick FPM");
+    }
+    constexpr int ExpectedChecks=346;
     const int ExecutedChecks=g_Checks;
-    Check(ExecutedChecks==ExpectedChecks,"executed exactly 337 authority checks");
+    Check(ExecutedChecks==ExpectedChecks,"executed exactly 346 authority checks");
     std::printf("executed_checks=%d expected_checks=%d count_assertion=%s failures=%d\n",ExecutedChecks,ExpectedChecks,ExecutedChecks==ExpectedChecks?"PASS":"FAIL",g_Failures);
     return g_Failures ? 1 : 0;
 }
 '''
-    source = header + "\n".join(declarations) + "\n};\n" + config + "\n".join(methods + control_methods) + tests
+    source = header + "\n".join(declarations) + "\n};\n" + config + "\n".join(methods + control_methods + stats_methods) + tests
     msvc = max(Path("C:/VS2026/BuildTools/VC/Tools/MSVC").iterdir(), key=lambda p: tuple(map(int, p.name.split('.'))))
     kits = Path("C:/Program Files (x86)/Windows Kits/10")
     sdk = max((kits / "Include").glob("10.*"), key=lambda p: tuple(map(int, p.name.split('.')))).name

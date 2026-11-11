@@ -677,16 +677,26 @@ public:
 		bool IsActive() const { return m_Active; }
 		void JoinGame(int Tick)
 		{
+			if(m_Active)
+				return;
 			m_Active = true;
 			m_JoinTick = Tick;
 		}
 		void JoinSpec(int Tick)
 		{
-			m_Active = false;
+			if(!m_Active)
+				return;
 			m_IngameTicks += Tick - m_JoinTick;
+			m_Active = false;
 		}
-		int GetIngameTicks(int Tick) const { return m_IngameTicks + Tick - m_JoinTick; }
-		float GetFPM(int Tick, int TickSpeed) const { return (float)(m_Frags * TickSpeed * 60) / GetIngameTicks(Tick); }
+		int GetIngameTicks(int Tick) const { return m_IngameTicks + (m_Active ? Tick - m_JoinTick : 0); }
+		float GetFPM(int Tick, int TickSpeed) const
+		{
+			const int IngameTicks = GetIngameTicks(Tick);
+			if(IngameTicks <= 0)
+				return 0.0f;
+			return static_cast<float>(m_Frags) * static_cast<float>(TickSpeed) * 60.0f / static_cast<float>(IngameTicks);
+		}
 	};
 
 	CClientStats m_aStats[MAX_CLIENTS];

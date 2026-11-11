@@ -1,15 +1,15 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.73",
+  "version": "1.7.8.74",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17292869,
-  "sha256": "feb8fb9edbba23beb2b495bfa3d09fff90b04b41a48588148ea4a80299b1d7c3",
-  "notes": "基于完整 1.7.8.72 的 BestClient-Light 快速输入权威对齐与更新镜像加固。\n\n- TClient 已有且与 BestClient-Light 重叠的模式 0、7–14，以 BestClient-Light main@c56daba94b2b0ff7b5590a16ca463d9ff5182b98 为行为权威：同步 Fast、Best、Saiko、Delta、F、Cloud、Light、Azure 和 BestClient-Light Ancient 的预测、插值、冻结及渲染时间线。\n- 保留 TClient 独有模式 1、2、3、5、6、历史编号 4 空洞，以及现有配置键、编号、默认值、双号、Dummy、Remove Anti、ghost/unpred 行为；未引入 SnapTap、Sub-Tick aiming 或 Auto margin。\n- Cloud PreInput ring、F 平滑状态及 hook/fire action latch 按主/分身物理连接隔离；任意模式切换立即重预测，Dummy 断线完整释放该连接的普通输入、快输缓存和派生状态。\n- 每次正式打包前从 github.akams.cn 获取当次镜像目录，验证 Ed25519 清单、完整更新 ZIP、helper、Range 和真实断点续传；将最多 3 条合格镜像编译进客户端，并保留原备用源与官方通道。\n- 两轮独立源码复审已闭环。自动验证覆盖 337 项权威行为、252 项 Remove Anti、17 项连接生命周期、完整 C++ 测试、更新器、发布编排器、镜像探测器和 HUD/nameplate 回归。\n\n本版未新增 BestClient-Light 中 TClient 原本没有的输入模式。真人主/分身双客户端联网手感与断线时序仍建议在更新后继续实机观察。",
+  "size": 17293175,
+  "sha256": "905874ec44ce9f88e2395aac33374227c55c578544331523299ef7270e853517",
+  "notes": "基于 1.7.8.73 的运行时正确性修复与水锤判定调整。\n\n- 观战 ID 入口增加 0..127 边界校验；网络地址解析拒绝超长整数，避免越界和溢出。\n- 分身断线时清理该连接的普通输入、实际发送缓存、hammer/fire 状态与快输缓存；Ancient mode 6 改读当前模式缓存；AntiPing 的稳定 tick 移出玩家循环；观战统计不再重复累计，零 tick 的 FPM 返回 0。\n- FastInput 绝对偏移改为整数 tick 与小数拆分，修复大 tick 下的精度损失。\n- 冻结水锤/卡钩高亮改为持续按住 0.5 秒后才显示，快速点按不再闪烁。\n- 每次打包的更新镜像上限由 3 个提高到 5 个，仍按当次完整包测速排序，并保留原备用源与官方直链。\n- 自动验证覆盖完整 C++ 451 项、权威夹具 346 项、Remove Anti 252 项、连接生命周期 19 项、水锤专项 21 项，以及更新器、镜像探测器和发布编排器测试。\n\n本版未改变模式编号、配置键或更新协议；真人双号联网手感与断线时序仍建议更新后继续观察。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 359424,
-    "sha256": "886b7c0022e0432df1f6843e46ce7591500265f9cf8072c8c1b6ff193f833e79"
+    "sha256": "40100657af3ef6413a8d01f1e73afb9901be6f3196808f9d56fb48c7f2861842"
   }
 }

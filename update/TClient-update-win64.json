@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.75",
+  "version": "1.7.8.76",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17295568,
-  "sha256": "aaca97ae1b81a33d2de8ef335e82a94458a5575c3a3501d2eed59f085eb000f1",
-  "notes": "基于 1.7.8.74 的三项体验修复与观战名单 HUD。\n\n- 观战人数 HUD 增加兜底观战者名单：0.6 服务器只在本地观战/暂停人数与服务端上报人数一致时显示名字，0.7 使用 PLAYERFLAG_WATCHING；最多显示 5 个名字 + \"+N\"，位置在小眼睛下方。新增 tc_show_spectator_names（默认开启）。\n- Finish Name 增加终点扫描半径设置 tc_finish_name_scan_radius（默认 10 tiles，范围 1–50），设置页可直接调整。\n- Steam 隐藏开关取消勾选后立即尝试重新连接 Steam，不再强制重启；如果 SteamAPI_Init 失败，会提示重启客户端。\n- 灵动岛歌词 lrclib 请求增加最多 3 次尝试（失败后 3 秒重试），连接/总超时提高到 15/45 秒；新增 tc_island_lrclib_base 可配置镜像或代理，改善加速器用户的歌词获取。\n- 自动验证：完整 C++ 451 项、翻译门禁 501 个 key 全部通过。\n\n边界：0.6 观战名单仍是兜底逻辑，不是逐人精确；服务端不提供逐 ID 时无法知道“谁在看你”。Steam 重连取决于 SteamAPI 能否重新初始化。歌词获取仍受网络与第三方接口可用性影响。",
+  "size": 17296356,
+  "sha256": "35555e4b6b5b694ebc39253e40dcc575f0737a6764ca27451c815617489d29d8",
+  "notes": "基于 1.7.8.75 的上游修复回移与包络渲染优化。\n\n- 回移 DDNet 上游修复：重复收藏地址崩溃与 0.7 地址截断、bind 自解绑 use-after-free、multiview + freeview/follow 越界读、分身 moderator alert、IPv6 TCP SO_REUSEADDR、客户端端口/网络重置启动守卫。\n- Windows 目录遍历改用 FindFirstFileExW 大块读取，降低资源与菜单扫描开销。\n- 包络渲染缓存：构造时缓存包络项列表，每帧只计算一次时间，减少多包络地图/动画背景的重复查找与求值。\n- 自动验证：完整 C++ 451/451、权威夹具 346/346、Remove Anti 252/252、连接生命周期 19/19、翻译门禁 501 key。\n\n边界：包络优化未做独立 FPS 基准，建议在有动态背景/包络的地图实机观察；其余行为不变。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 359424,

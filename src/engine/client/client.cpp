@@ -4164,7 +4164,8 @@ void CClient::Con_Ping(IConsole::IResult *pResult, void *pUserData)
 void CClient::ConNetReset(IConsole::IResult *pResult, void *pUserData)
 {
 	CClient *pSelf = (CClient *)pUserData;
-	pSelf->ResetSocket();
+	if(pSelf->m_LocalStartTime > 0)
+		pSelf->ResetSocket();
 }
 
 void CClient::AutoScreenshot_Start()
@@ -5059,7 +5060,7 @@ void CClient::ConchainNetReset(IConsole::IResult *pResult, void *pUserData, ICon
 {
 	CClient *pSelf = (CClient *)pUserData;
 	pfnCallback(pResult, pCallbackUserData);
-	if(pResult->NumArguments())
+	if(pResult->NumArguments() && pSelf->m_LocalStartTime > 0)
 		pSelf->ResetSocket();
 }
 

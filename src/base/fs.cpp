@@ -136,7 +136,7 @@ void fs_listdir(const char *dir, FS_LISTDIR_CALLBACK cb, int type, void *user)
 	const std::wstring wide_buffer = windows_utf8_to_wide(buffer);
 
 	WIN32_FIND_DATAW finddata;
-	HANDLE handle = FindFirstFileW(wide_buffer.c_str(), &finddata);
+	HANDLE handle = FindFirstFileExW(wide_buffer.c_str(), FindExInfoBasic, &finddata, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
 	if(handle == INVALID_HANDLE_VALUE)
 		return;
 
@@ -188,7 +188,7 @@ void fs_listdir_fileinfo(const char *dir, FS_LISTDIR_CALLBACK_FILEINFO cb, int t
 	const std::wstring wide_buffer = windows_utf8_to_wide(buffer);
 
 	WIN32_FIND_DATAW finddata;
-	HANDLE handle = FindFirstFileW(wide_buffer.c_str(), &finddata);
+	HANDLE handle = FindFirstFileExW(wide_buffer.c_str(), FindExInfoBasic, &finddata, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
 	if(handle == INVALID_HANDLE_VALUE)
 		return;
 
@@ -628,7 +628,7 @@ int fs_file_time(const char *name, time_t *created, time_t *modified)
 #if defined(CONF_FAMILY_WINDOWS)
 	WIN32_FIND_DATAW finddata;
 	const std::wstring wide_name = windows_utf8_to_wide(name);
-	HANDLE handle = FindFirstFileW(wide_name.c_str(), &finddata);
+	HANDLE handle = FindFirstFileExW(wide_name.c_str(), FindExInfoBasic, &finddata, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
 	if(handle == INVALID_HANDLE_VALUE)
 		return 1;
 

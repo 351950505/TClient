@@ -164,7 +164,9 @@ bool CBinds::OnInput(const IInput::CEvent &Event)
 			// Have to check for nullptr again because the previous execute can unbind itself
 			if(m_aapKeyBindings[ActiveBind->m_ModifierMask][ActiveBind->m_Key])
 			{
-				Console()->ExecuteLineStroked(1, m_aapKeyBindings[ActiveBind->m_ModifierMask][ActiveBind->m_Key], IConsole::CLIENT_ID_UNSPECIFIED);
+				// Copy the bind: executing it can unbind/replace itself.
+				const std::string Bind = m_aapKeyBindings[ActiveBind->m_ModifierMask][ActiveBind->m_Key];
+				Console()->ExecuteLineStroked(1, Bind.c_str(), IConsole::CLIENT_ID_UNSPECIFIED);
 			}
 			Handled = true;
 		}

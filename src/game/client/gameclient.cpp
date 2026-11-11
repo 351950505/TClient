@@ -1243,6 +1243,10 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker, int Conn, bool Dumm
 				m_Chat.OnMessage(MsgId, pRawMsg);
 			}
 		}
+		else if(MsgId == NETMSGTYPE_SV_MODERATORALERT)
+		{
+			m_ImportantAlert.OnMessage(MsgId, pRawMsg);
+		}
 		return; // no need of all that stuff for the dummy
 	}
 

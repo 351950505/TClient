@@ -1609,8 +1609,34 @@ void CHud::RenderSpectatorCount()
 	str_format(aBuf, sizeof(aBuf), "%d", Count);
 
 	const float Fontsize = 6.0f;
-	const float BoxHeight = 14.f;
-	const float BoxWidth = 13.f + TextRender()->TextWidth(Fontsize, aBuf);
+	const float LineHeight = Fontsize + 1.0f;
+
+	const char *apNameLines[6] = {};
+	int NumNameLines = 0;
+	char aRemaining[16] = {};
+	if(g_Config.m_TcShowSpectatorNames && ReliableNames && NumSpectatorIds > 0)
+	{
+		for(int i = 0; i < NumSpectatorIds && NumNameLines < 5; i++)
+		{
+			const char *pName = GameClient()->m_aClients[aSpectatorIds[i]].m_aName;
+			if(pName[0] == '\0')
+				continue;
+			apNameLines[NumNameLines++] = pName;
+		}
+
+		if(Count > NumNameLines)
+		{
+			str_format(aRemaining, sizeof(aRemaining), "+%d", Count - NumNameLines);
+			apNameLines[NumNameLines++] = aRemaining;
+		}
+	}
+
+	float MaxNameWidth = 0.0f;
+	for(int i = 0; i < NumNameLines; i++)
+		MaxNameWidth = std::max(MaxNameWidth, TextRender()->TextWidth(Fontsize, apNameLines[i]));
+
+	const float BoxWidth = std::max(13.0f + TextRender()->TextWidth(Fontsize, aBuf), MaxNameWidth + 4.0f);
+	const float BoxHeight = 14.0f + NumNameLines * LineHeight;
 
 	float StartX = m_Width - BoxWidth;
 	float StartY = 285.0f - BoxHeight - 4; // 4 units distance to the next display;
@@ -1632,7 +1658,7 @@ void CHud::RenderSpectatorCount()
 
 	Graphics()->DrawRect(StartX, StartY, BoxWidth, BoxHeight, ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f), IGraphics::CORNER_L, 5.0f);
 
-	float y = StartY + BoxHeight / 3;
+	float y = StartY + 4.0f;
 	float x = StartX + 2;
 
 	TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
@@ -1640,32 +1666,11 @@ void CHud::RenderSpectatorCount()
 	TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
 	TextRender()->Text(x + Fontsize + 3.f, y, Fontsize, aBuf, -1.0f);
 
-	if(g_Config.m_TcShowSpectatorNames && ReliableNames && NumSpectatorIds > 0)
+	float NameY = StartY + 14.0f + 1.0f;
+	for(int i = 0; i < NumNameLines; i++)
 	{
-		const char *apNameLines[6] = {};
-		int NumLines = 0;
-		for(int i = 0; i < NumSpectatorIds && NumLines < 5; i++)
-		{
-			const char *pName = GameClient()->m_aClients[aSpectatorIds[i]].m_aName;
-			if(pName[0] == '\0')
-				continue;
-			apNameLines[NumLines++] = pName;
-		}
-
-		char aRemaining[16];
-		if(Count > NumLines)
-		{
-			str_format(aRemaining, sizeof(aRemaining), "+%d", Count - NumLines);
-			apNameLines[NumLines++] = aRemaining;
-		}
-
-		const float LineHeight = Fontsize + 1.0f;
-		const float BaseY = StartY - 3.0f;
-		for(int i = 0; i < NumLines; i++)
-		{
-			const float NameWidth = TextRender()->TextWidth(Fontsize, apNameLines[i]);
-			TextRender()->Text(m_Width - 2.0f - NameWidth, BaseY - (NumLines - 1 - i) * LineHeight, Fontsize, apNameLines[i], -1.0f);
-		}
+		TextRender()->Text(x, NameY, Fontsize, apNameLines[i], -1.0f);
+		NameY += LineHeight;
 	}
 }
 

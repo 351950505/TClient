@@ -342,7 +342,7 @@ MACRO_CONFIG_STR(TcTranslateDeeplKey, tc_translate_deepl_key, 128, "", CFGFLAG_C
 MACRO_CONFIG_STR(TcTranslateLlmEndpoint, tc_translate_llm_endpoint, 256, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "LLM 翻译端点（OpenAI 兼容，base URL 或完整 chat/completions 地址）")
 MACRO_CONFIG_STR(TcTranslateLlmKey, tc_translate_llm_key, 256, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "LLM 翻译 API 密钥（本地端点可留空）")
 MACRO_CONFIG_STR(TcTranslateLlmModel, tc_translate_llm_model, 128, "gpt-4o-mini", CFGFLAG_CLIENT | CFGFLAG_SAVE, "LLM 翻译使用的模型名")
-MACRO_CONFIG_INT(TcTranslateAuto, tc_translate_auto, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically translate incoming messages")
+MACRO_CONFIG_INT(TcTranslateAuto, tc_translate_auto, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically translate incoming messages")
 MACRO_CONFIG_INT(TcTranslateOutgoing, tc_translate_outgoing, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Translate your own outgoing chat messages into another language before sending them")
 MACRO_CONFIG_STR(TcTranslateOutgoingTarget, tc_translate_outgoing_target, 16, "en", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Language to translate your outgoing messages into (must be 2 character ISO 639 code)")
 

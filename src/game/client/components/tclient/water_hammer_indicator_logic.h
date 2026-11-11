@@ -43,6 +43,22 @@ inline float TcAdvanceWaterHammerHighlight(float Current, bool Marked, float Del
 	return Marked ? std::min(Current + Step, 1.0f) : std::max(Current - Step, 0.0f);
 }
 
+// The highlight is a readiness signal, not an input flash. Require the frozen
+// hammer/hook state to persist before marking it visible.
+inline constexpr float TcWaterHammerMarkDelaySeconds = 0.5f;
+
+inline bool TcUpdateWaterHammerHold(float &HoldSeconds, bool Marked, float DeltaSeconds)
+{
+	if(!Marked)
+	{
+		HoldSeconds = 0.0f;
+		return false;
+	}
+	const float Step = std::max(DeltaSeconds, 0.0f);
+	HoldSeconds = std::min(HoldSeconds + Step, TcWaterHammerMarkDelaySeconds);
+	return HoldSeconds >= TcWaterHammerMarkDelaySeconds;
+}
+
 inline bool TcIsWaterHammerTarget(int ClientId, int LocalClientId, bool Active, bool Spectator, bool Visible, bool SameTeam)
 {
 	return ClientId >= 0 && ClientId < MAX_CLIENTS &&

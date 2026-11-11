@@ -21,6 +21,23 @@ TEST(WaterHammer, FreezeAndMissingInput)
 	EXPECT_TRUE(TcShouldMarkWaterHammer(0, true, WEAPON_HAMMER, Held, nullptr));
 }
 
+TEST(WaterHammer, MarkDelayRequiresPersistentState)
+{
+	float Hold = 0.0f;
+	EXPECT_FALSE(TcUpdateWaterHammerHold(Hold, false, 1.0f));
+	EXPECT_FALSE(TcUpdateWaterHammerHold(Hold, true, 0.25f));
+	EXPECT_FALSE(TcUpdateWaterHammerHold(Hold, true, 0.24f));
+	EXPECT_TRUE(TcUpdateWaterHammerHold(Hold, true, 0.02f));
+
+	// Releasing the input starts the delay from zero.
+	EXPECT_FALSE(TcUpdateWaterHammerHold(Hold, false, 0.016f));
+	EXPECT_FALSE(TcUpdateWaterHammerHold(Hold, true, 0.1f));
+
+	// A negative frame delta must not rewind the hold timer.
+	float NegativeHold = 0.0f;
+	EXPECT_FALSE(TcUpdateWaterHammerHold(NegativeHold, true, -1.0f));
+}
+
 TEST(WaterHammer, WeaponAndFireCounter)
 {
 	EXPECT_TRUE(TcShouldMarkWaterHammer(100, false, WEAPON_GUN, {true, WEAPON_HAMMER + 1, 1}, nullptr));

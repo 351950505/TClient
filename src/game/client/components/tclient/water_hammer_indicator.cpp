@@ -8,6 +8,14 @@
 void CWaterHammerIndicator::OnReset()
 {
 	m_Inputs.Reset();
+	m_aHoldSeconds = {};
+}
+
+void CWaterHammerIndicator::OnUpdate()
+{
+	const float DeltaSeconds = Client()->RenderFrameTime();
+	for(int i = 0; i < MAX_CLIENTS; ++i)
+		TcUpdateWaterHammerHold(m_aHoldSeconds[i], IsMarkedNow(i), DeltaSeconds);
 }
 
 void CWaterHammerIndicator::OnSnapshot(int Connection, int SnapshotTick, const CSnapshot *pSnapshot)
@@ -34,6 +42,8 @@ void CWaterHammerIndicator::OnPreInput(int Connection, const CNetMsg_Sv_PreInput
 void CWaterHammerIndicator::OnClientDrop(int Connection, int ClientId)
 {
 	m_Inputs.ResetClient(Connection, ClientId);
+	if(ClientId >= 0 && ClientId < MAX_CLIENTS)
+		m_aHoldSeconds[ClientId] = 0.0f;
 }
 
 void CWaterHammerIndicator::OnDummyDisconnect()
@@ -59,6 +69,12 @@ void CWaterHammerIndicator::OnDummySwap()
 }
 
 bool CWaterHammerIndicator::IsMarked(int ClientId) const
+{
+	return g_Config.m_TcWaterHammerHighlight && ClientId >= 0 && ClientId < MAX_CLIENTS &&
+		m_aHoldSeconds[ClientId] >= TcWaterHammerMarkDelaySeconds;
+}
+
+bool CWaterHammerIndicator::IsMarkedNow(int ClientId) const
 {
 	if(!g_Config.m_TcWaterHammerHighlight || ClientId < 0 || ClientId >= MAX_CLIENTS)
 		return false;

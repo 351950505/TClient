@@ -10,10 +10,14 @@ class CSnapshot;
 class CWaterHammerIndicator : public CComponent
 {
 	CTcWaterHammerInputCache m_Inputs;
+	std::array<float, MAX_CLIENTS> m_aHoldSeconds{};
+
+	bool IsMarkedNow(int ClientId) const;
 
 public:
 	int Sizeof() const override { return sizeof(*this); }
 	void OnReset() override;
+	void OnUpdate() override;
 
 	void OnSnapshot(int Connection, int SnapshotTick, const CSnapshot *pSnapshot);
 	void OnPreInput(int Connection, const CNetMsg_Sv_PreInput &Message);

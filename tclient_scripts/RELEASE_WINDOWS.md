@@ -4,7 +4,7 @@
 
 本地正式包统一通过 `release_orchestrator.py run --spec <spec.json>` 生成。阶段顺序为 `preflight → mirror_probe → build → stage → package`；需要上传时再显式使用 `--publish`。下文 CI 与 `.55` 的例子保留作历史签名说明，不能替代本节镜像步骤。
 
-`mirror_probe` 每次从 `https://github.akams.cn/` 获取当次目录，使用客户端的 User-Agent、IPv4、TLS 校验与重定向限制测试当时最新已发布的更新资产。先核对签名清单，再对候选源下载完整更新 ZIP、helper，并验证真实断点续传、大小与 SHA-256；按完整传输表现选出最多 3 个源。没有合格源时停止构建。
+`mirror_probe` 每次从 `https://github.akams.cn/` 获取当次目录，使用客户端的 User-Agent、IPv4、TLS 校验与重定向限制测试当时最新已发布的更新资产。先核对签名清单，再对候选源下载完整更新 ZIP、helper，并验证真实断点续传、大小与 SHA-256；按完整传输表现选出最多 5 个源。没有合格源时停止构建。
 
 测速生成本次 `release-<版本数字>/update-mirrors.json` 和构建目录 `src/generated/tclient_update_mirrors.h`，编排器以 `-DTCLIENT_RELEASE_MIRRORS=ON` 编译进客户端。选中源排在原有备用源与官方直链之前；原有 Ed25519/SHA-256 校验继续生效。新包尚未公开时，以已发布包测速，不依赖待发布资产。
 

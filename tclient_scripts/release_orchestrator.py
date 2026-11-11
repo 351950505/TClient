@@ -131,7 +131,7 @@ def verify_mirror_inputs(spec, paths, state, client=None, fresh=False):
     require(report.get("release_version") == spec["version"] and report.get("source_commit") == spec["target_commit"], "mirror report belongs to a different release or commit")
     require(report.get("header_sha256") == sha256_of(header), "mirror header differs from its tested report; rebuild from a fresh probe")
     selected = report.get("selected", [])
-    require(1 <= len(selected) <= 3, "no verified release mirrors selected")
+    require(1 <= len(selected) <= 5, "no verified release mirrors selected")
     prefixes = [item["prefix"] for item in selected]
     require(len(set(prefixes)) == len(prefixes) and all(re.fullmatch(r"https://[a-z0-9.-]+/", prefix) for prefix in prefixes), "invalid or repeated mirror prefix")
     record = {"report": str(report_path), "report_sha256": sha256_of(report_path), "header_sha256": sha256_of(header), "selected": prefixes, "reference": report["reference"]}

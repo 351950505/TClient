@@ -373,11 +373,11 @@ def main(argv=None):
     parser.add_argument("--release-version", required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--max-candidates", type=int, default=12)
-    parser.add_argument("--max-selected", type=int, default=3)
+    parser.add_argument("--max-selected", type=int, default=5)
     args = parser.parse_args(argv)
-    if (not 1 <= args.max_candidates <= 12 or not 1 <= args.max_selected <= 3
+    if (not 1 <= args.max_candidates <= 12 or not 1 <= args.max_selected <= 5
             or not re.fullmatch(VERSION, args.release_version) or not re.fullmatch(r"[a-fA-F0-9]{40}", args.source_commit)):
-        parser.error("require candidates=1..12, selected=1..3, numeric dotted version and full 40-hex commit")
+        parser.error("require candidates=1..12, selected=1..5, numeric dotted version and full 40-hex commit")
     args.repo, args.output, args.header = args.repo.resolve(), args.output.resolve(), args.header.resolve()
     if args.output == args.header:
         parser.error("output and header must be different paths")

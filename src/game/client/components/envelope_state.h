@@ -4,23 +4,29 @@
 #include <game/client/component.h>
 #include <game/map/render_interfaces.h>
 #include <game/map/render_map.h>
+#include <game/mapitems.h>
 
+#include <chrono>
 #include <memory>
+#include <vector>
 
 class CEnvelopeState : public CComponent, public IEnvelopeEval
 {
 public:
 	CEnvelopeState() :
-		m_pEnvelopePoints(nullptr), m_pMap(nullptr) {}
+		m_pEnvelopePoints(nullptr), m_OnlineOnly(false) {}
 	CEnvelopeState(IMap *pMap, bool OnlineOnly);
+
+	void Update();
 	void EnvelopeEval(int TimeOffsetMillis, int EnvelopeIndex, ColorRGBA &Result, size_t Channels) const override;
 
 	int Sizeof() const override { return sizeof(*this); }
 
 private:
 	std::shared_ptr<CMapBasedEnvelopePointAccess> m_pEnvelopePoints;
-	IMap *m_pMap;
+	std::vector<const CMapItemEnvelope *> m_vpEnvelopes;
 	bool m_OnlineOnly;
+	std::chrono::nanoseconds m_CachedTime{};
 };
 
 #endif

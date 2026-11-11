@@ -35,3 +35,15 @@ TEST(TcFastInputAuthority, FSmoothingIsFrameRateIndependent)
 		At144Hz += (1.0f - At144Hz) * FastInput::FBlendAlpha(ExtraTime, 1.0f / 144.0f);
 	EXPECT_NEAR(At60Hz, At144Hz, 0.00001f);
 }
+
+TEST(TcFastInputAuthority, OffsetAbsolutePreservesFractionAtLargeTicks)
+{
+	for(const int InitialTick : {1 << 23, 1 << 24, 0x6fffffff})
+	{
+		int Tick = InitialTick;
+		float Intra = 0.25f;
+		FastInput::OffsetAbsolute(0.5f, Tick, Intra);
+		EXPECT_EQ(Tick, InitialTick);
+		EXPECT_FLOAT_EQ(Intra, 0.75f);
+	}
+}

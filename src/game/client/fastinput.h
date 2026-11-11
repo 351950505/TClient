@@ -68,17 +68,9 @@ inline void OffsetMillis(int Millis, int &Tick, float &Intra)
 
 inline void OffsetAbsolute(float Amount, int &Tick, float &Intra)
 {
-	if(Amount <= 0.0f)
-		return;
-	const float Total = static_cast<float>(Tick - 1) + Intra + Amount;
-	const int Whole = static_cast<int>(Total);
-	Tick = Whole + 1;
-	Intra = Total - static_cast<float>(Whole);
-	if(Intra < 0.0f && Tick > 0)
-	{
-		--Tick;
-		Intra += 1.0f;
-	}
+	// Keep the absolute tick out of floating-point arithmetic. Large game ticks are
+	// not precise enough to retain Intra when converted to float.
+	OffsetTicks(Amount, Tick, Intra);
 }
 
 struct CAncientState

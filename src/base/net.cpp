@@ -12,6 +12,7 @@
 
 #include <chrono>
 #include <iterator> // std::size
+#include <limits>
 #include <string_view>
 
 #if defined(CONF_WEBSOCKETS)
@@ -329,7 +330,10 @@ static int parse_int(int *out, const char **str)
 			return 0;
 		}
 
-		i = (i * 10) + (**str - '0');
+		const int Digit = **str - '0';
+		if(i > (std::numeric_limits<int>::max() - Digit) / 10)
+			return -1;
+		i = i * 10 + Digit;
 		(*str)++;
 	}
 

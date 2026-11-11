@@ -510,9 +510,16 @@ bool CTClient::ChatDoSpecId(const char *pInput)
 	return true;
 }
 
+static bool IsValidSpecClientId(int ClientId)
+{
+	return ClientId >= 0 && ClientId < MAX_CLIENTS;
+}
+
 void CTClient::SpecId(int ClientId)
 {
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+		return;
+	if(!IsValidSpecClientId(ClientId))
 		return;
 
 	if(Client()->State() == IClient::STATE_DEMOPLAYBACK || GameClient()->m_Snap.m_SpecInfo.m_Active)
@@ -521,8 +528,6 @@ void CTClient::SpecId(int ClientId)
 		return;
 	}
 
-	if(ClientId < 0 || ClientId > (int)std::size(GameClient()->m_aClients))
-		return;
 	const auto &Player = GameClient()->m_aClients[ClientId];
 	if(!Player.m_Active)
 		return;

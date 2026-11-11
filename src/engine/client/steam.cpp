@@ -17,6 +17,7 @@ class CSteam : public ISteam
 	NETADDR m_ConnectAddr;
 	// [STEAM-HIDE] 运行中隐藏后不再调用任何 SteamAPI 函数（句柄已失效）
 	bool m_Hidden = false;
+	bool m_Shutdown = false;
 
 public:
 	CSteam()
@@ -31,7 +32,8 @@ public:
 	}
 	~CSteam() override
 	{
-		SteamAPI_Shutdown();
+		if(!m_Shutdown)
+			SteamAPI_Shutdown();
 	}
 
 	void ParseConnectString(const char *pConnect)
@@ -144,6 +146,7 @@ public:
 		m_Hidden = true;
 		SteamAPI_ISteamFriends_ClearRichPresence(m_pSteamFriends);
 		SteamAPI_Shutdown();
+		m_Shutdown = true;
 	}
 };
 
@@ -158,11 +161,80 @@ class CSteamStub : public ISteam
 	void HideFromSteam() override {}
 };
 
+static CSteam *CreateRealSteam()
+{
+	if(!SteamAPI_Init())
+		return nullptr;
+	return new CSteam();
+}
+
+// [STEAM-HIDE] 运行中切换 Steam 连接：
+// 隐藏时关闭 SteamAPI，取消隐藏时尝试重新 Init，避免必须重启客户端。
+class CSteamProxy : public ISteam
+{
+	ISteam *m_pImpl;
+	bool m_Hidden;
+	bool m_Real;
+
+public:
+	CSteamProxy(ISteam *pImpl, bool Hidden, bool Real) :
+		m_pImpl(pImpl), m_Hidden(Hidden), m_Real(Real) {}
+	~CSteamProxy() override { delete m_pImpl; }
+
+	const char *GetPlayerName() override { return m_Hidden ? nullptr : m_pImpl->GetPlayerName(); }
+	const NETADDR *GetConnectAddress() override { return m_Hidden ? nullptr : m_pImpl->GetConnectAddress(); }
+	void ClearConnectAddress() override
+	{
+		if(!m_Hidden)
+			m_pImpl->ClearConnectAddress();
+	}
+	void Update() override
+	{
+		if(!m_Hidden)
+			m_pImpl->Update();
+	}
+	void ClearGameInfo() override
+	{
+		if(!m_Hidden)
+			m_pImpl->ClearGameInfo();
+	}
+	void SetGameInfo(const NETADDR &ServerAddr, const char *pMapName, bool AnnounceAddr) override
+	{
+		if(!m_Hidden)
+			m_pImpl->SetGameInfo(ServerAddr, pMapName, AnnounceAddr);
+	}
+	void HideFromSteam() override
+	{
+		if(m_Hidden)
+			return;
+		m_pImpl->HideFromSteam();
+		m_Hidden = true;
+	}
+	bool Reconnect() override
+	{
+		if(m_Real && !m_Hidden)
+			return true;
+		CSteam *pNew = CreateRealSteam();
+		if(!pNew)
+			return false;
+		delete m_pImpl;
+		m_pImpl = pNew;
+		m_Hidden = false;
+		m_Real = true;
+		return true;
+	}
+};
+
 ISteam *CreateSteam(bool HideFromSteam)
 {
-	if(HideFromSteam || !SteamAPI_Init())
+	ISteam *pImpl = nullptr;
+	bool Real = false;
+	if(!HideFromSteam)
 	{
-		return new CSteamStub();
+		pImpl = CreateRealSteam();
+		Real = pImpl != nullptr;
 	}
-	return new CSteam();
+	if(!pImpl)
+		pImpl = new CSteamStub();
+	return new CSteamProxy(pImpl, HideFromSteam, Real);
 }

@@ -685,6 +685,9 @@ Finish Name
 Finish Name:
 == 恰分名称:
 
+Finish scan radius
+== 终点扫描半径
+
 Font Size
 == 字体大小
 
@@ -1859,8 +1862,11 @@ Steam
 Hide from Steam (don't connect Steam, friends can't see you playing)
 == 对 Steam 隐藏（不连接 Steam，好友看不到你在玩）
 
-Unchecking takes effect at the next client start (Steam won't reconnect while running).
-== 取消勾选将在下次启动客户端时生效（运行中不会重新连接 Steam）。
+Unchecking reconnects Steam immediately; if Steam is unavailable, restart the client.
+== 取消勾选会立即重新连接 Steam；如果 Steam 不可用，请重启客户端。
+
+Steam reconnect failed; restart the client to connect again
+== Steam 重连失败；请重启客户端后再连接。
 
 Resolving update source...
 == 正在解析更新源……

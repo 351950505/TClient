@@ -358,6 +358,7 @@ MACRO_CONFIG_INT(TcPetAlpha, tc_pet_alpha, 90, 10, 100, CFGFLAG_CLIENT | CFGFLAG
 // Change name near finish
 MACRO_CONFIG_INT(TcChangeNameNearFinish, tc_change_name_near_finish, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Attempt to change your name when near finish")
 MACRO_CONFIG_STR(TcFinishName, tc_finish_name, 16, "nameless tee", CFGFLAG_CLIENT | CFGFLAG_SAVE | CFGFLAG_INSENSITIVE, "Name to change to when near finish when tc_change_name_near_finish is 1")
+MACRO_CONFIG_INT(TcFinishNameScanRadius, tc_finish_name_scan_radius, 10, 1, 50, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Radius in tiles to scan for the finish tile when tc_change_name_near_finish is 1")
 
 // Flags
 MACRO_CONFIG_INT(TcTClientSettingsTabs, tc_tclient_settings_tabs, 0, 0, 65536, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Bit flags to disable settings tabs")
@@ -408,6 +409,7 @@ MACRO_CONFIG_STR(TcIslandFont, tc_island_font, 128, "", CFGFLAG_CLIENT | CFGFLAG
 MACRO_CONFIG_INT(TcIslandSize, tc_island_size, 100, 60, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island size (%)")
 MACRO_CONFIG_INT(TcIslandWidth, tc_island_width, 650, 320, 1600, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island capsule width in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandNetease, tc_island_netease, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island read NetEase CloudMusic desktop via window title monitor")
+MACRO_CONFIG_STR(TcIslandLrclibBase, tc_island_lrclib_base, 128, "https://lrclib.net", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island lrclib API base URL (use a proxy/mirror if lrclib.net is unreachable)")
 MACRO_CONFIG_INT(TcIslandLyricOffset, tc_island_lyric_offset, 0, -30000, 30000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island lyric timing offset in ms (negative = earlier / ahead)")
 MACRO_CONFIG_INT(TcIslandKaraokeLead, tc_island_karaoke_lead, 60, -500, 500, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island karaoke green fill lead in ms (how far the green wipe runs ahead of the lyric; negative = wipe lags behind)")
 

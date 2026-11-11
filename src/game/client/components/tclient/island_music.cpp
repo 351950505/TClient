@@ -1541,10 +1541,21 @@ public:
 		auto It = m_NeteaseData.find(Key);
 		if(It != m_NeteaseData.end())
 		{
-			It->second.m_TriedLrclib = true;
-			It->second.m_LyricState = Entry.m_State;
-			It->second.m_vLines = Entry.m_vLines;
-			++It->second.m_LinesRevision;
+			SNeteaseMeta &Meta = It->second;
+			Meta.m_vLines = Entry.m_vLines;
+			++Meta.m_LinesRevision;
+			if(Entry.m_State == ELyricsState::OFFLINE && m_pHttp != nullptr && Meta.m_LrclibAttempts < 3)
+			{
+				// 加速器/代理偶发超时：保留 LOADING，3 秒后重试；三次仍失败才置 OFFLINE。
+				Meta.m_TriedLrclib = false;
+				Meta.m_LyricState = ELyricsState::LOADING;
+				Meta.m_LrclibRetryAt = time_get() + time_freq() * 3;
+			}
+			else
+			{
+				Meta.m_TriedLrclib = true;
+				Meta.m_LyricState = Entry.m_State;
+			}
 		}
 #endif
 		if(Key == m_ActiveKey)
@@ -1591,6 +1602,14 @@ public:
 		EscapeUrl(aEscapedArtist, Track.m_Artist.c_str());
 		EscapeUrl(aEscapedAlbum, Track.m_Album.c_str());
 
+		char aBase[128];
+		str_copy(aBase, g_Config.m_TcIslandLrclibBase[0] ? g_Config.m_TcIslandLrclibBase : "https://lrclib.net", sizeof(aBase));
+		int BaseLen = str_length(aBase);
+		while(BaseLen > 0 && aBase[BaseLen - 1] == '/')
+			aBase[--BaseLen] = '\0';
+		if(aBase[0] == '\0')
+			str_copy(aBase, "https://lrclib.net", sizeof(aBase));
+
 		// IMPORTANT: use /api/search (fuzzy) rather than /api/get (exact match).
 		// SMTC titles often carry suffixes ("(Live)", "- Remastered"), missing album,
 		// or slightly different artist strings, which make the exact /api/get 404.
@@ -1598,15 +1617,15 @@ public:
 		// We keep duration in the query to help ranking when available.
 		char aUrl[2048];
 		if(DurationSec >= 1 && DurationSec <= 3600)
-			str_format(aUrl, sizeof(aUrl), "https://lrclib.net/api/search?track_name=%s&artist_name=%s&duration=%d",
-				aEscapedTitle, aEscapedArtist, DurationSec);
+			str_format(aUrl, sizeof(aUrl), "%s/api/search?track_name=%s&artist_name=%s&duration=%d",
+				aBase, aEscapedTitle, aEscapedArtist, DurationSec);
 		else
-			str_format(aUrl, sizeof(aUrl), "https://lrclib.net/api/search?track_name=%s&artist_name=%s",
-				aEscapedTitle, aEscapedArtist);
+			str_format(aUrl, sizeof(aUrl), "%s/api/search?track_name=%s&artist_name=%s",
+				aBase, aEscapedTitle, aEscapedArtist);
 
 		m_pRequest = HttpGet(aUrl);
 		m_pRequest->MaxResponseSize(LYRICS_MAX_BYTES);
-		m_pRequest->Timeout(CTimeout{10000, 30000, 500, 10});
+		m_pRequest->Timeout(CTimeout{15000, 45000, 500, 10});
 		m_pRequest->LogProgress(HTTPLOG::FAILURE);
 		m_pRequest->FailOnErrorStatus(false);
 		m_pRequest->HeaderString("Lrclib-Client", "TClient (github.com/TaterClient)");
@@ -1756,6 +1775,8 @@ public:
 		bool m_TriedQQ = false; // QQ search/lyric completed, successfully or not
 		bool m_TriedKugou = false; // 酷狗 search/candidate/lyric completed
 		bool m_TriedLrclib = false;
+		int m_LrclibAttempts = 0;
+		int64_t m_LrclibRetryAt = 0;
 		std::string m_QQMid;
 		std::string m_KugouHash;
 		std::string m_KugouLyricId;
@@ -1931,7 +1952,8 @@ public:
 	void UpdateNetease(const STrack &Track)
 	{
 		const std::string Key = NeteaseCacheKey(Track);
-		if(Key != m_ActiveKey)
+		const bool NewTrack = Key != m_ActiveKey;
+		if(NewTrack)
 		{
 			AbortRequest();
 			AbortNetease();
@@ -1961,6 +1983,11 @@ public:
 			}
 		}
 		SNeteaseMeta &Meta = m_NeteaseData[Key];
+		if(NewTrack)
+		{
+			Meta.m_LrclibAttempts = 0;
+			Meta.m_LrclibRetryAt = 0;
+		}
 		Meta.m_Title = Track.m_Title;
 		Meta.m_Artist = Track.m_Artist;
 		Meta.m_Album = Track.m_Album;
@@ -2038,9 +2065,10 @@ public:
 						Started = true;
 					}
 				}
-				if(!Started && Meta.m_TriedQQ && Meta.m_TriedKugou && !Meta.m_TriedLrclib && !m_pRequest)
+				if(!Started && Meta.m_TriedQQ && Meta.m_TriedKugou && !Meta.m_TriedLrclib && !m_pRequest && time_get() >= Meta.m_LrclibRetryAt)
 				{
 					Meta.m_TriedLrclib = true;
+					++Meta.m_LrclibAttempts;
 					Meta.m_LyricState = ELyricsState::LOADING;
 					StartRequest(Track);
 				}

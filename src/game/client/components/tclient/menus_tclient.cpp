@@ -1782,8 +1782,11 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	Column.HSplitTop(MarginSmall, nullptr, &Column);
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcChangeNameNearFinish, TCLocalize("Attempt to change your name when near finish"), &g_Config.m_TcChangeNameNearFinish, &Column, LineSize);
-	// Column.HSplitTop(LineSize, &Button, &Column); // TODO finish scan radius
-	// Ui()->DoScrollbarOption(&g_Config.m_TcPetSize, &g_Config.m_TcPetSize, &Button, TCLocalize("Pet size"), 10, 500, &CUi::ms_LinearScrollbarScale, 0, "%");
+	if(g_Config.m_TcChangeNameNearFinish)
+	{
+		Column.HSplitTop(LineSize, &Button, &Column);
+		Ui()->DoScrollbarOption(&g_Config.m_TcFinishNameScanRadius, &g_Config.m_TcFinishNameScanRadius, &Button, TCLocalize("Finish scan radius"), 1, 50, &CUi::ms_LinearScrollbarScale, 0, " tiles");
+	}
 	Column.HSplitTop(LineSize + MarginExtraSmall, &Button, &Column);
 	Button.VSplitMid(&Label, &Button);
 	Ui()->DoLabel(&Label, TCLocalize("Finish Name:"), FontSize, TEXTALIGN_ML);
@@ -4101,15 +4104,19 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
 	if(DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeSteamHide, TCLocalize("Hide from Steam (don't connect Steam, friends can't see you playing)"), &g_Config.m_MeSteamHide, &LeftView, LineSize))
 	{
+		ISteam *pSteam = Kernel()->RequestInterface<ISteam>();
 		if(g_Config.m_MeSteamHide)
 		{
-			// 勾选时立即断开；取消勾选需要重启客户端才能重新连上 Steam
-			if(ISteam *pSteam = Kernel()->RequestInterface<ISteam>())
+			if(pSteam)
 				pSteam->HideFromSteam();
+		}
+		else if(pSteam && !pSteam->Reconnect())
+		{
+			GameClient()->Echo(TCLocalize("Steam reconnect failed; restart the client to connect again"));
 		}
 	}
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
-	Ui()->DoLabel(&Label, TCLocalize("Unchecking takes effect at the next client start (Steam won't reconnect while running)."), EditBoxFontSize, TEXTALIGN_TL);
+	Ui()->DoLabel(&Label, TCLocalize("Unchecking reconnects Steam immediately; if Steam is unavailable, restart the client."), EditBoxFontSize, TEXTALIGN_TL);
 
 		// 地图图层
 		LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);

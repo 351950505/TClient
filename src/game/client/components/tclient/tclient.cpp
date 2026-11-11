@@ -734,7 +734,7 @@ void CTClient::DoFinishCheck()
 	const char *NewName = g_Config.m_TcFinishName;
 	if(str_comp(Player.m_aName, NewName) == 0)
 		return;
-	if(!NearTile(Player.m_RenderPos, 10, TILE_FINISH))
+	if(!NearTile(Player.m_RenderPos, g_Config.m_TcFinishNameScanRadius, TILE_FINISH))
 		return;
 	char aBuf[64];
 	str_format(aBuf, sizeof(aBuf), TCLocalize("Changing name to %s near finish"), NewName);

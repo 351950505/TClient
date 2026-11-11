@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.76",
+  "version": "1.7.8.77",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17296356,
-  "sha256": "35555e4b6b5b694ebc39253e40dcc575f0737a6764ca27451c815617489d29d8",
-  "notes": "基于 1.7.8.75 的上游修复回移与包络渲染优化。\n\n- 回移 DDNet 上游修复：重复收藏地址崩溃与 0.7 地址截断、bind 自解绑 use-after-free、multiview + freeview/follow 越界读、分身 moderator alert、IPv6 TCP SO_REUSEADDR、客户端端口/网络重置启动守卫。\n- Windows 目录遍历改用 FindFirstFileExW 大块读取，降低资源与菜单扫描开销。\n- 包络渲染缓存：构造时缓存包络项列表，每帧只计算一次时间，减少多包络地图/动画背景的重复查找与求值。\n- 自动验证：完整 C++ 451/451、权威夹具 346/346、Remove Anti 252/252、连接生命周期 19/19、翻译门禁 501 key。\n\n边界：包络优化未做独立 FPS 基准，建议在有动态背景/包络的地图实机观察；其余行为不变。",
+  "size": 17296363,
+  "sha256": "1e32637b2bd50fc97fc3d6b116fb9b7444eefe15f2daada1f2376ddb48966937",
+  "notes": "修复自动翻译在未勾选时仍于每次启动默认启用的问题。\n\n- tc_translate_auto 默认值由 1 改为 0；没有显式保存过该开关的用户，启动后自动翻译保持关闭。\n- 曾经手动勾选并保存为 1 的用户保持开启，不受影响。\n- 本版无其他功能、协议或渲染改动。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 359424,

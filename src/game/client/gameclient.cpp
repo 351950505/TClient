@@ -2128,7 +2128,10 @@ void CGameClient::OnNewSnapshot(bool DummySwapped)
 			}
 			else if(Item.m_Type == NETOBJTYPE_SPECTATORCOUNT)
 			{
-				m_Snap.m_pSpectatorCount = (const CNetObj_SpectatorCount *)Item.m_pData;
+				const CNetObj_SpectatorCount *pSpectatorCount = (const CNetObj_SpectatorCount *)Item.m_pData;
+				if(g_Config.m_Debug)
+					dbg_msg("spec-count", "id=%d spectators=%d", Item.m_Id, pSpectatorCount->m_NumSpectators);
+				m_Snap.m_pSpectatorCount = pSpectatorCount;
 			}
 			else if(Item.m_Type == NETOBJTYPE_GAMEINFO)
 			{

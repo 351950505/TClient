@@ -1828,10 +1828,11 @@ void CTClient::ApplyForcedAspect()
 	// FNG 地图禁用宽高比（实体在非 16:9 下错位）
 	if(IsBlockedByFng() || IsAspectBlocked())
 		CustomAspect = 0;
-	// tc_aspect_ratio_full 0=仅游戏内（菜单恢复正常比例），1=完整（菜单也应用）
-	if(!g_Config.m_TcAspectRatioFull && GameClient()->m_Menus.IsActive())
-		CustomAspect = 0;
-	Graphics()->SetForcedAspect(Force, CustomAspect, g_Config.m_TcAspectRatioStretch);
+	// 菜单内强制拉伸模式（不裁视口），防止 UI 面板被截断
+	int Stretch = g_Config.m_TcAspectRatioStretch;
+	if(GameClient()->m_Menus.IsActive())
+		Stretch = 1;
+	Graphics()->SetForcedAspect(Force, CustomAspect, Stretch);
 }
 
 bool CTClient::IsBlockedByFng() const

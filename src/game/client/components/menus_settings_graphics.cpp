@@ -481,11 +481,11 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 			Ui()->DoLabel(&AspectLabel, TCLocalize("Custom ratio"), 14.0f, TEXTALIGN_ML);
 			{
 				CUIRect NumBox, ColonRect, DenBox, ApplyBox;
-				Button.VSplitLeft(60.0f, &NumBox, &Button);
-				Button.VSplitLeft(10.0f, &ColonRect, &Button);
-				Button.VSplitLeft(60.0f, &DenBox, &Button);
-				Button.VSplitLeft(8.0f, nullptr, &Button);
-				Button.VSplitLeft(80.0f, &ApplyBox, &Button);
+				Button.VSplitLeft(45.0f, &NumBox, &Button);
+				Button.VSplitLeft(8.0f, &ColonRect, &Button);
+				Button.VSplitLeft(45.0f, &DenBox, &Button);
+				Button.VSplitLeft(4.0f, nullptr, &Button);
+				Button.VSplitLeft(70.0f, &ApplyBox, nullptr);
 				if(g_Config.m_TcAspectRatioNum != (int)s_LastNum || g_Config.m_TcAspectRatioDen != (int)s_LastDen)
 				{
 					if(g_Config.m_TcAspectRatioNum > 0)

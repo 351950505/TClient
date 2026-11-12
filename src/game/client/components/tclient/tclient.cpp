@@ -1825,11 +1825,6 @@ void CTClient::ApplyForcedAspect()
 		Force = false;
 	// TClient: 自定义宽高比（移植自 BestClient-Light）；>=100 时覆盖旧 5:4 强制
 	int CustomAspect = g_Config.m_TcAspectRatio;
-	// 自定义分子/分母覆盖预设值
-	if(g_Config.m_TcAspectRatioNum > 0 && g_Config.m_TcAspectRatioDen > 0)
-	{
-		CustomAspect = std::clamp((int)std::lround((double)g_Config.m_TcAspectRatioNum * 100.0 / (double)g_Config.m_TcAspectRatioDen), 100, 1000);
-	}
 	// FNG 地图禁用宽高比（实体在非 16:9 下错位）
 	if(IsBlockedByFng() || IsAspectBlocked())
 		CustomAspect = 0;

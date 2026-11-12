@@ -38,6 +38,11 @@ MACRO_CONFIG_INT(TcAllowAnyRes, tc_allow_any_res, 0, 0, 1, CFGFLAG_CLIENT | CFGF
 MACRO_CONFIG_INT(TcAllowAnyRes, tc_allow_any_res, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Whether to allow any resolution in game when zoom is allowed (buggy on Windows)")
 #endif
 
+// TClient: 自定义宽高比（移植自 BestClient-Light）
+MACRO_CONFIG_INT(TcAspectRatio, tc_aspect_ratio, 0, 0, 1000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Custom aspect ratio value x100 (0=off, 125=5:4, 133=4:3, 150=3:2, 178=16:9)")
+MACRO_CONFIG_INT(TcAspectRatioStretch, tc_aspect_ratio_stretch, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Custom aspect ratio display: 0=black bars (viewport cropped), 1=stretch (no black bars, game world stretched to fill)")
+MACRO_CONFIG_INT(TcAspectRatioCursorNative, tc_aspect_ratio_cursor_native, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Keep ingame cursor movement as if the aspect ratio was not stretched")
+
 MACRO_CONFIG_INT(TcShowChatClient, tc_show_chat_client, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show chat messages from the client such as echo")
 
 MACRO_CONFIG_INT(TcShowFrozenText, tc_frozen_tees_text, 0, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show how many tees in your team are currently frozen. (0 - off, 1 - show alive, 2 - show frozen)")

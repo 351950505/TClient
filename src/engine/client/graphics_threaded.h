@@ -1275,7 +1275,7 @@ public:
 	TGLBackendReadPresentedImageData &GetReadPresentedImageDataFuncUnsafe() override;
 
 	// TClient
-	void SetForcedAspect(bool Force) override;
+	void SetForcedAspect(bool Force, int CustomAspect = 0, int StretchMode = 0) override;
 };
 
 extern bool g_GraphicsForcedAspect;

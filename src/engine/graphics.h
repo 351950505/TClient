@@ -248,6 +248,9 @@ protected:
 	int m_ScreenRefreshRate;
 	float m_ScreenHiDPIScale;
 	ivec2 m_DesktopSize;
+	// TClient: 自定义宽高比（0=禁用，>=100 = 比例×100）和拉伸模式
+	int m_CustomAspect = 0;
+	int m_CustomAspectStretch = 0;
 
 public:
 	enum
@@ -277,7 +280,13 @@ public:
 	int ScreenWidth() const { return m_ScreenWidth; }
 	int ScreenHeight() const { return m_ScreenHeight; }
 	vec2 ScreenSize() const { return vec2(m_ScreenWidth, m_ScreenHeight); }
-	float ScreenAspect() const { return (float)ScreenWidth() / (float)ScreenHeight(); }
+	// TClient: 拉伸模式下返回自定义宽高比，否则返回视口自然比例
+	float ScreenAspect() const
+	{
+		if(m_CustomAspect >= 100 && m_CustomAspectStretch)
+			return m_CustomAspect / 100.0f;
+		return (float)m_ScreenWidth / (float)m_ScreenHeight;
+	}
 	float ScreenHiDPIScale() const { return m_ScreenHiDPIScale; }
 	int WindowWidth() const { return m_ScreenWidth / m_ScreenHiDPIScale; }
 	int WindowHeight() const { return m_ScreenHeight / m_ScreenHiDPIScale; }
@@ -675,7 +684,7 @@ protected:
 
 public:
 	// TClient
-	virtual void SetForcedAspect(bool Force) = 0;
+	virtual void SetForcedAspect(bool Force, int CustomAspect = 0, int StretchMode = 0) = 0;
 };
 
 class IEngineGraphics : public IGraphics

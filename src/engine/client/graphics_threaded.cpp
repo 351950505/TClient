@@ -2245,13 +2245,16 @@ int CGraphics_Threaded::IssueInit()
 
 // TClient
 bool g_GraphicsForcedAspect = true;
-void CGraphics_Threaded::SetForcedAspect(bool Force)
+void CGraphics_Threaded::SetForcedAspect(bool Force, int CustomAspect, int StretchMode)
 {
 	if(!IsBackendInitialized())
 		return;
-	if(g_GraphicsForcedAspect == Force)
+	// TClient: 自定义宽高比（>=100 启用）和拉伸模式。改变时总是重建视口。
+	if(g_GraphicsForcedAspect == Force && m_CustomAspect == CustomAspect && m_CustomAspectStretch == StretchMode)
 		return;
 	g_GraphicsForcedAspect = Force;
+	m_CustomAspect = CustomAspect;
+	m_CustomAspectStretch = StretchMode;
 	const int PrevViewportX = m_ViewportX;
 	const int PrevScreenWidth = m_ScreenWidth;
 	const int PrevScreenHeight = m_ScreenHeight;
@@ -2281,7 +2284,31 @@ void CGraphics_Threaded::AdjustViewport(bool SendViewportChangeToBackend)
 
 	// adjust the viewport to only allow certain aspect ratios
 	// keep this in sync with backend_vulkan GetSwapImageSize's check
-	if(m_ScreenHeight > 4 * m_ScreenWidth / 5 && g_GraphicsForcedAspect)
+	// TClient: 自定义宽高比 >=100 时根据模式裁剪视口（黑边）或保持全窗口（拉伸）
+	if(m_CustomAspect >= 100)
+	{
+		m_IsForcedViewport = false;
+		if(!m_CustomAspectStretch)
+		{
+			// 黑边模式：视口裁剪为自定义比例，周围留黑边
+			const float CustomAspect = m_CustomAspect / 100.0f;
+			const float WindowAspect = (float)m_ScreenWidth / (float)m_DrawableHeight;
+			if(WindowAspect > CustomAspect)
+			{
+				// 窗口比目标宽 → 裁宽度（左右黑边）
+				const int FullWidth = m_ScreenWidth;
+				m_ScreenWidth = (int)(m_DrawableHeight * CustomAspect);
+				m_ViewportX += (FullWidth - m_ScreenWidth) / 2;
+			}
+			else
+			{
+				// 窗口比目标高 → 裁高度（上下黑边）
+				m_ScreenHeight = (int)(m_ScreenWidth / CustomAspect);
+			}
+		}
+		// 拉伸模式：不裁视口，ScreenAspect() 返回自定义比例，游戏世界拉伸铺满窗口
+	}
+	else if(m_ScreenHeight > 4 * m_ScreenWidth / 5 && g_GraphicsForcedAspect)
 	{
 		m_IsForcedViewport = true;
 		m_ScreenHeight = 4 * m_ScreenWidth / 5;

@@ -1931,6 +1931,51 @@ Delta
 Cloud
 == Cloud
 
+Aspect ratio
+== 宽高比
+
+Display mode
+== 显示模式
+
+Black bars
+== 黑边
+
+Stretch
+== 拉伸
+
+Cursor as without stretch
+== 光标不受拉伸影响
+
+Off
+== 关闭
+
+1:1
+== 1:1
+
+10:9
+== 10:9
+
+5:4
+== 5:4
+
+4:3
+== 4:3
+
+3:2
+== 3:2
+
+16:10
+== 16:10
+
+16:9
+== 16:9
+
+2:1
+== 2:1
+
+5:2
+== 5:2
+
 [data_version.txt]
 %s not found
 == %s 未找到

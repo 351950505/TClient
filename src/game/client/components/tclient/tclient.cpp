@@ -632,6 +632,20 @@ void CTClient::OnConsoleInit()
 		},
 		this);
 
+	// TClient: 自定义宽高比变化时重新应用视口
+	Console()->Chain(
+		"tc_aspect_ratio", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
+			pfnCallback(pResult, pCallbackUserData);
+			((CTClient *)pUserData)->QueueForcedAspectUpdate();
+		},
+		this);
+	Console()->Chain(
+		"tc_aspect_ratio_stretch", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
+			pfnCallback(pResult, pCallbackUserData);
+			((CTClient *)pUserData)->QueueForcedAspectUpdate();
+		},
+		this);
+
 	Console()->Chain(
 		"tc_regex_chat_ignore", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
 			if(pResult->NumArguments() == 1)
@@ -1803,7 +1817,8 @@ void CTClient::ApplyForcedAspect()
 		Force = false;
 	else if(State == CClient::EClientState::STATE_ONLINE && GameClient()->m_GameInfo.m_AllowZoom && !GameClient()->m_Menus.IsActive())
 		Force = false;
-	Graphics()->SetForcedAspect(Force);
+	// TClient: 自定义宽高比（移植自 BestClient-Light）；>=100 时覆盖旧 5:4 强制
+	Graphics()->SetForcedAspect(Force, g_Config.m_TcAspectRatio, g_Config.m_TcAspectRatioStretch);
 }
 
 void CTClient::OnUpdate()

@@ -737,19 +737,13 @@ void CGraphics_Threaded::TextureSet(CTextureHandle TextureId)
 
 void CGraphics_Threaded::Clear(float r, float g, float b, bool ForceClearNow)
 {
-	// TClient: 黑边模式下强制清屏色为黑，否则视口外区域显示地图背景色（白色等）
-	if(m_CustomAspect >= 100 && !m_CustomAspectStretch)
-	{
-		r = 0;
-		g = 0;
-		b = 0;
-	}
 	CCommandBuffer::SCommand_Clear Cmd;
 	Cmd.m_Color.r = r;
 	Cmd.m_Color.g = g;
 	Cmd.m_Color.b = b;
 	Cmd.m_Color.a = 0;
 	Cmd.m_ForceClear = ForceClearNow;
+	Cmd.m_BlackBars = m_CustomAspect >= 100 && !m_CustomAspectStretch;
 	AddCmd(Cmd);
 }
 

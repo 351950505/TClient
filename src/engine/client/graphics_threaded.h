@@ -210,6 +210,7 @@ public:
 			SCommand(CMD_CLEAR) {}
 		SColorf m_Color;
 		bool m_ForceClear;
+		bool m_BlackBars = false;
 	};
 
 	struct SCommand_Signal : public SCommand

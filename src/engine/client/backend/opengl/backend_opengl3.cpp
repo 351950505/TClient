@@ -738,12 +738,16 @@ void CCommandProcessorFragment_OpenGL3_3::Cmd_Clear(const CCommandBuffer::SComma
 	{
 		glDisable(GL_SCISSOR_TEST);
 	}
-	if(m_HasDisplayCutout)
+	// TClient: 黑边模式先全帧缓冲清黑，再 scissor 到视口区填地图背景色
+	const bool NeedBlackBars = pCommand->m_BlackBars && m_ViewportWidth > 0 &&
+				   ((uint32_t)m_ViewportWidth < m_CanvasWidth || (uint32_t)m_ViewportHeight < m_CanvasHeight);
+	if(m_HasDisplayCutout || NeedBlackBars)
 	{
+		glDisable(GL_SCISSOR_TEST);
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		m_ClearColor.r = m_ClearColor.g = m_ClearColor.b = 0.0f;
 		glClear(GL_COLOR_BUFFER_BIT);
-		glScissor(m_ViewportX, m_ViewportY, m_CanvasWidth, m_CanvasHeight);
+		glScissor(m_ViewportX, m_ViewportY, m_ViewportWidth, m_ViewportHeight);
 		glEnable(GL_SCISSOR_TEST);
 	}
 	if(pCommand->m_Color.r != m_ClearColor.r || pCommand->m_Color.g != m_ClearColor.g || pCommand->m_Color.b != m_ClearColor.b)
@@ -756,7 +760,7 @@ void CCommandProcessorFragment_OpenGL3_3::Cmd_Clear(const CCommandBuffer::SComma
 	{
 		glEnable(GL_SCISSOR_TEST);
 	}
-	else if(m_HasDisplayCutout)
+	else if(m_HasDisplayCutout || NeedBlackBars)
 	{
 		glDisable(GL_SCISSOR_TEST);
 	}

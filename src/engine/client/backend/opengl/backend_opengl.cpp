@@ -48,6 +48,8 @@ void CCommandProcessorFragment_OpenGL::Cmd_Update_Viewport(const CCommandBuffer:
 	// OpenGL places it relative to the bottom left.
 	m_ViewportX = pCommand->m_X;
 	m_ViewportY = pCommand->m_DrawableHeight - pCommand->m_Y - pCommand->m_Height;
+	m_ViewportWidth = pCommand->m_Width;
+	m_ViewportHeight = pCommand->m_Height;
 	if(pCommand->m_ByResize)
 	{
 		m_CanvasWidth = (uint32_t)pCommand->m_Width;
@@ -962,11 +964,15 @@ void CCommandProcessorFragment_OpenGL::Cmd_Clear(const CCommandBuffer::SCommand_
 	{
 		glDisable(GL_SCISSOR_TEST);
 	}
-	if(m_HasDisplayCutout)
+	// TClient: 黑边模式先全帧缓冲清黑，再 scissor 到视口区填地图背景色
+	const bool NeedBlackBars = pCommand->m_BlackBars && m_ViewportWidth > 0 &&
+				   ((uint32_t)m_ViewportWidth < m_CanvasWidth || (uint32_t)m_ViewportHeight < m_CanvasHeight);
+	if(m_HasDisplayCutout || NeedBlackBars)
 	{
+		glDisable(GL_SCISSOR_TEST);
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		glScissor(m_ViewportX, m_ViewportY, m_CanvasWidth, m_CanvasHeight);
+		glScissor(m_ViewportX, m_ViewportY, m_ViewportWidth, m_ViewportHeight);
 		glEnable(GL_SCISSOR_TEST);
 	}
 	glClearColor(pCommand->m_Color.r, pCommand->m_Color.g, pCommand->m_Color.b, 0.0f);
@@ -975,7 +981,7 @@ void CCommandProcessorFragment_OpenGL::Cmd_Clear(const CCommandBuffer::SCommand_
 	{
 		glEnable(GL_SCISSOR_TEST);
 	}
-	else if(m_HasDisplayCutout)
+	else if(m_HasDisplayCutout || NeedBlackBars)
 	{
 		glDisable(GL_SCISSOR_TEST);
 	}

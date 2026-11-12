@@ -57,6 +57,8 @@ protected:
 	// the origin of the drawable area when the viewport is clamped.
 	int m_ViewportX = 0;
 	int m_ViewportY = 0;
+	int m_ViewportWidth = 0;
+	int m_ViewportHeight = 0;
 	uint32_t m_CanvasWidth = 0;
 	uint32_t m_CanvasHeight = 0;
 	bool m_HasDisplayCutout = false;

@@ -4190,11 +4190,11 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 				if(ScopeNew != ScopeOld)
 					g_Config.m_TcAspectRatioFull = ScopeNew;
 				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &LeftView, LineSize);
-				// 自定义分子/分母
+				// 自定义分子/分母（输入后点确认才生效）
 				LeftView.HSplitTop(LineSize, &Label, &LeftView);
 				Ui()->DoLabel(&Label, TCLocalize("Custom ratio (width:height)"), FontSize, TEXTALIGN_ML);
 				{
-					CUIRect NumBox, DenBox;
+					CUIRect NumBox, DenBox, ApplyBtn;
 					LeftView.HSplitTop(LineSize + MarginExtraSmall, &NumBox, &LeftView);
 					static char s_aInputNum[16] = "";
 					static char s_aInputDen[16] = "";
@@ -4213,16 +4213,23 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 					static CLineInput s_DenInput(s_aInputDen, sizeof(s_aInputDen));
 					Ui()->DoEditBox(&s_NumInput, &NumBox, EditBoxFontSize);
 					Ui()->DoEditBox(&s_DenInput, &DenBox, EditBoxFontSize);
-					int InputNum = 0, InputDen = 0;
-					if(s_aInputNum[0] != '\0')
-						InputNum = str_toint(s_aInputNum);
-					if(s_aInputDen[0] != '\0')
-						InputDen = str_toint(s_aInputDen);
-					if(InputNum > 0 && InputDen > 0 && (InputNum != g_Config.m_TcAspectRatioNum || InputDen != g_Config.m_TcAspectRatioDen))
+					static CButtonContainer s_AspectApplyButton;
+					LeftView.HSplitTop(LineSize, &ApplyBtn, &LeftView);
+					if(DoButton_Menu(&s_AspectApplyButton, TCLocalize("Apply custom ratio"), 0, &ApplyBtn))
 					{
-						g_Config.m_TcAspectRatioNum = InputNum;
-						g_Config.m_TcAspectRatioDen = InputDen;
-						g_Config.m_TcAspectRatio = std::clamp((int)std::lround((double)InputNum * 100.0 / (double)InputDen), 100, 1000);
+						int InputNum = 0, InputDen = 0;
+						if(s_aInputNum[0] != '\0')
+							InputNum = str_toint(s_aInputNum);
+						if(s_aInputDen[0] != '\0')
+							InputDen = str_toint(s_aInputDen);
+						if(InputNum > 0 && InputDen > 0)
+						{
+							g_Config.m_TcAspectRatioNum = InputNum;
+							g_Config.m_TcAspectRatioDen = InputDen;
+							g_Config.m_TcAspectRatio = std::clamp((int)std::lround((double)InputNum * 100.0 / (double)InputDen), 100, 1000);
+							s_LastNum = InputNum;
+							s_LastDen = InputDen;
+						}
 					}
 				}
 			}

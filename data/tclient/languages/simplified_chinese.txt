@@ -1958,6 +1958,9 @@ Full
 Custom ratio (width:height)
 == 自定义比例（宽:高）
 
+Apply custom ratio
+== 应用自定义比例
+
 Keep this aspect ratio? Reverting in %d...
 == 保持此宽高比？%d 秒后自动回退…
 

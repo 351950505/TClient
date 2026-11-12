@@ -408,7 +408,103 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 	if(CheckSettings)
 	{
 		m_NeedRestartGraphics = !(s_GfxFsaaSamples == g_Config.m_GfxFsaaSamples &&
-					  !s_GfxBackendChanged &&
-					  !s_GfxGpuChanged);
+				  !s_GfxBackendChanged &&
+				  !s_GfxGpuChanged);
+	}
+
+	// TClient: 自定义宽高比（移植自 BestClient-Light）
+	MainView.HSplitTop(10.0f, nullptr, &MainView);
+	CUIRect AspectLabel;
+	{
+		static const std::vector<int> s_aAspectValues = {0, 100, 111, 125, 133, 150, 160, 178, 200, 250};
+		static std::vector<const char *> s_aAspectNames;
+		s_aAspectNames = {TCLocalize("Off"), TCLocalize("1:1"), TCLocalize("10:9"), TCLocalize("5:4"), TCLocalize("4:3"), TCLocalize("3:2"), TCLocalize("16:10"), TCLocalize("16:9"), TCLocalize("2:1"), TCLocalize("5:2")};
+		static char s_aInputNum[16] = "";
+		static char s_aInputDen[16] = "";
+		static float s_LastNum = 0, s_LastDen = 0;
+		int AspectSelectedOld = -1;
+		for(size_t i = 0; i < s_aAspectValues.size(); ++i)
+		{
+			if(s_aAspectValues[i] == g_Config.m_TcAspectRatio)
+				AspectSelectedOld = i;
+		}
+		MainView.HSplitTop(20.0f, &Button, &MainView);
+		Button.VSplitLeft(160.0f, &AspectLabel, &Button);
+		Ui()->DoLabel(&AspectLabel, TCLocalize("Aspect ratio"), 14.0f, TEXTALIGN_ML);
+		static CUi::SDropDownState s_AspectDropDownState;
+		static CScrollRegion s_AspectDropDownScrollRegion;
+		s_AspectDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_AspectDropDownScrollRegion;
+		const int AspectSelectedNew = Ui()->DoDropDown(&Button, AspectSelectedOld, s_aAspectNames.data(), s_aAspectNames.size(), s_AspectDropDownState);
+		if(AspectSelectedNew >= 0 && AspectSelectedNew < (int)s_aAspectValues.size())
+			g_Config.m_TcAspectRatio = s_aAspectValues[AspectSelectedNew];
+
+		if(g_Config.m_TcAspectRatio >= 100)
+		{
+			static const char *apStretchNames[] = {TCLocalize("Black bars"), TCLocalize("Stretch")};
+			MainView.HSplitTop(20.0f, &Button, &MainView);
+			Button.VSplitLeft(160.0f, &AspectLabel, &Button);
+			Ui()->DoLabel(&AspectLabel, TCLocalize("Display mode"), 14.0f, TEXTALIGN_ML);
+			const int StretchOld = g_Config.m_TcAspectRatioStretch;
+			static CUi::SDropDownState s_StretchDropDownState;
+			static CScrollRegion s_StretchDropDownScrollRegion;
+			s_StretchDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_StretchDropDownScrollRegion;
+			const int StretchNew = Ui()->DoDropDown(&Button, StretchOld, apStretchNames, 2, s_StretchDropDownState);
+			if(StretchNew != StretchOld)
+				g_Config.m_TcAspectRatioStretch = StretchNew;
+
+			static const char *apScopeNames[] = {TCLocalize("In game"), TCLocalize("Full")};
+			MainView.HSplitTop(20.0f, &Button, &MainView);
+			Button.VSplitLeft(160.0f, &AspectLabel, &Button);
+			Ui()->DoLabel(&AspectLabel, TCLocalize("Apply to"), 14.0f, TEXTALIGN_ML);
+			const int ScopeOld = g_Config.m_TcAspectRatioFull;
+			static CUi::SDropDownState s_ScopeDropDownState;
+			static CScrollRegion s_ScopeDropDownScrollRegion;
+			s_ScopeDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_ScopeDropDownScrollRegion;
+			const int ScopeNew = Ui()->DoDropDown(&Button, ScopeOld, apScopeNames, 2, s_ScopeDropDownState);
+			if(ScopeNew != ScopeOld)
+				g_Config.m_TcAspectRatioFull = ScopeNew;
+
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &MainView, 20.0f);
+
+			// 自定义分子/分母（输入后点确认才生效）
+			MainView.HSplitTop(20.0f, &Button, &MainView);
+			Button.VSplitLeft(160.0f, &AspectLabel, &Button);
+			Ui()->DoLabel(&AspectLabel, TCLocalize("Custom ratio (width:height)"), 14.0f, TEXTALIGN_ML);
+			{
+				CUIRect NumBox, DenBox;
+				Button.VSplitMid(&NumBox, &DenBox);
+				if(g_Config.m_TcAspectRatioNum != (int)s_LastNum || g_Config.m_TcAspectRatioDen != (int)s_LastDen)
+				{
+					if(g_Config.m_TcAspectRatioNum > 0)
+						str_format(s_aInputNum, sizeof(s_aInputNum), "%d", g_Config.m_TcAspectRatioNum);
+					if(g_Config.m_TcAspectRatioDen > 0)
+						str_format(s_aInputDen, sizeof(s_aInputDen), "%d", g_Config.m_TcAspectRatioDen);
+					s_LastNum = g_Config.m_TcAspectRatioNum;
+					s_LastDen = g_Config.m_TcAspectRatioDen;
+				}
+				static CLineInput s_NumInput(s_aInputNum, sizeof(s_aInputNum));
+				static CLineInput s_DenInput(s_aInputDen, sizeof(s_aInputDen));
+				Ui()->DoEditBox(&s_NumInput, &NumBox, 14.0f);
+				Ui()->DoEditBox(&s_DenInput, &DenBox, 14.0f);
+			}
+			MainView.HSplitTop(20.0f, &Button, &MainView);
+			static CButtonContainer s_AspectApplyButton;
+			if(DoButton_Menu(&s_AspectApplyButton, TCLocalize("Apply custom ratio"), 0, &Button))
+			{
+				int InputNum = 0, InputDen = 0;
+				if(s_aInputNum[0] != '\0')
+					InputNum = str_toint(s_aInputNum);
+				if(s_aInputDen[0] != '\0')
+					InputDen = str_toint(s_aInputDen);
+				if(InputNum > 0 && InputDen > 0)
+				{
+					g_Config.m_TcAspectRatioNum = InputNum;
+					g_Config.m_TcAspectRatioDen = InputDen;
+					g_Config.m_TcAspectRatio = std::clamp((int)std::lround((double)InputNum * 100.0 / (double)InputDen), 100, 1000);
+					s_LastNum = InputNum;
+					s_LastDen = InputDen;
+				}
+			}
+		}
 	}
 }

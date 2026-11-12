@@ -1867,13 +1867,7 @@ void CTClient::ScaleIngameCursorDelta(float &X, float &Y) const
 		return;
 	if(GameClient()->m_Menus.IsActive())
 		return;
-	const int Num = g_Config.m_TcAspectRatioNum;
-	const int Den = g_Config.m_TcAspectRatioDen;
-	float ForcedAspect;
-	if(Num > 0 && Den > 0)
-		ForcedAspect = (float)Num / (float)Den;
-	else
-		ForcedAspect = g_Config.m_TcAspectRatio / 100.0f;
+	float ForcedAspect = g_Config.m_TcAspectRatio / 100.0f;
 	const int ScreenW = Graphics()->ScreenWidth();
 	const int ScreenH = Graphics()->ScreenHeight();
 	if(ScreenW <= 0 || ScreenH <= 0)

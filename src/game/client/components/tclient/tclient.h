@@ -178,6 +178,19 @@ public:
 	Regex m_RegexChatIgnore;
 	// 强制视口策略的待应用标志； true 时 OnUpdate 应用一次并清零。
 	bool m_ForcedAspectQueued = false;
+	// TClient: 自定义宽高比确认对话框状态
+	bool m_AspectConfirmSeeded = false;
+	bool m_AspectConfirmActive = false;
+	int64_t m_AspectConfirmDeadline = 0;
+	int m_AspectConfirmPrevRatio = 0;
+	int m_AspectConfirmLastRatio = 0;
+
+	bool IsBlockedByFng() const;
+	bool IsAspectBlocked() const;
+	void ScaleIngameCursorDelta(float &X, float &Y) const;
+	void UpdateAspectConfirm();
+	void RenderAspectConfirmOverlay();
+	void ResetToPreviousAspect();
 };
 
 #endif

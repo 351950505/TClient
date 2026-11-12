@@ -4190,6 +4190,41 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 				if(ScopeNew != ScopeOld)
 					g_Config.m_TcAspectRatioFull = ScopeNew;
 				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &LeftView, LineSize);
+				// 自定义分子/分母
+				LeftView.HSplitTop(LineSize, &Label, &LeftView);
+				Ui()->DoLabel(&Label, TCLocalize("Custom ratio (width:height)"), FontSize, TEXTALIGN_ML);
+				{
+					CUIRect NumBox, DenBox;
+					LeftView.HSplitTop(LineSize + MarginExtraSmall, &NumBox, &LeftView);
+					static char s_aInputNum[16] = "";
+					static char s_aInputDen[16] = "";
+					static float s_LastNum = 0, s_LastDen = 0;
+					if(g_Config.m_TcAspectRatioNum != (int)s_LastNum || g_Config.m_TcAspectRatioDen != (int)s_LastDen)
+					{
+						if(g_Config.m_TcAspectRatioNum > 0)
+							str_format(s_aInputNum, sizeof(s_aInputNum), "%d", g_Config.m_TcAspectRatioNum);
+						if(g_Config.m_TcAspectRatioDen > 0)
+							str_format(s_aInputDen, sizeof(s_aInputDen), "%d", g_Config.m_TcAspectRatioDen);
+						s_LastNum = g_Config.m_TcAspectRatioNum;
+						s_LastDen = g_Config.m_TcAspectRatioDen;
+					}
+					NumBox.VSplitMid(&NumBox, &DenBox);
+					static CLineInput s_NumInput(s_aInputNum, sizeof(s_aInputNum));
+					static CLineInput s_DenInput(s_aInputDen, sizeof(s_aInputDen));
+					Ui()->DoEditBox(&s_NumInput, &NumBox, EditBoxFontSize);
+					Ui()->DoEditBox(&s_DenInput, &DenBox, EditBoxFontSize);
+					int InputNum = 0, InputDen = 0;
+					if(s_aInputNum[0] != '\0')
+						InputNum = str_toint(s_aInputNum);
+					if(s_aInputDen[0] != '\0')
+						InputDen = str_toint(s_aInputDen);
+					if(InputNum > 0 && InputDen > 0 && (InputNum != g_Config.m_TcAspectRatioNum || InputDen != g_Config.m_TcAspectRatioDen))
+					{
+						g_Config.m_TcAspectRatioNum = InputNum;
+						g_Config.m_TcAspectRatioDen = InputDen;
+						g_Config.m_TcAspectRatio = std::clamp((int)std::lround((double)InputNum * 100.0 / (double)InputDen), 100, 1000);
+					}
+				}
 			}
 		}
 

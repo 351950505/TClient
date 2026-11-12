@@ -1955,6 +1955,18 @@ In game
 Full
 == 完整
 
+Custom ratio (width:height)
+== 自定义比例（宽:高）
+
+Keep this aspect ratio? Reverting in %d...
+== 保持此宽高比？%d 秒后自动回退…
+
+Apply
+== 应用
+
+Revert
+== 回退
+
 Off
 == 关闭
 

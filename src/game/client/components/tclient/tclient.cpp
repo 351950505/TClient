@@ -783,6 +783,9 @@ void CTClient::OnRender()
 
 	DoFinishCheck();
 
+	UpdateAspectConfirm();
+	RenderAspectConfirmOverlay();
+
 	// 更新器状态机推进 + 启动后延迟一次自动检查。检查只查版本，
 	// 不下载、不安装、不退出——用户点了按钮才会继续。
 	PollUpdateTasks();
@@ -1824,11 +1827,159 @@ void CTClient::ApplyForcedAspect()
 	else if(State == CClient::EClientState::STATE_ONLINE && GameClient()->m_GameInfo.m_AllowZoom && !GameClient()->m_Menus.IsActive())
 		Force = false;
 	// TClient: 自定义宽高比（移植自 BestClient-Light）；>=100 时覆盖旧 5:4 强制
-	// tc_aspect_ratio_full 0=仅游戏内（菜单恢复正常比例），1=完整（菜单也应用）
 	int CustomAspect = g_Config.m_TcAspectRatio;
+	// 自定义分子/分母覆盖预设值
+	if(g_Config.m_TcAspectRatioNum > 0 && g_Config.m_TcAspectRatioDen > 0)
+	{
+		CustomAspect = std::clamp((int)std::lround((double)g_Config.m_TcAspectRatioNum * 100.0 / (double)g_Config.m_TcAspectRatioDen), 100, 1000);
+	}
+	// FNG 地图禁用宽高比（实体在非 16:9 下错位）
+	if(IsBlockedByFng() || IsAspectBlocked())
+		CustomAspect = 0;
+	// tc_aspect_ratio_full 0=仅游戏内（菜单恢复正常比例），1=完整（菜单也应用）
 	if(!g_Config.m_TcAspectRatioFull && GameClient()->m_Menus.IsActive())
 		CustomAspect = 0;
 	Graphics()->SetForcedAspect(Force, CustomAspect, g_Config.m_TcAspectRatioStretch);
+}
+
+bool CTClient::IsBlockedByFng() const
+{
+	const int State = Client()->State();
+	if(State != IClient::STATE_ONLINE && State != IClient::STATE_DEMOPLAYBACK)
+		return false;
+	if(GameClient()->m_GameInfo.m_PredictFNG || GameClient()->m_GameInfo.m_EntitiesFNG)
+		return true;
+	auto ContainsFng = [](const char *pText) -> bool {
+		return pText != nullptr && pText[0] != '\0' && str_find_nocase(pText, "fng") != nullptr;
+	};
+	const CServerInfo &Info = Client()->ServerInfo();
+	if(ContainsFng(Info.m_aName) || ContainsFng(Info.m_aGameType) || ContainsFng(Info.m_aCommunityId))
+		return true;
+	return ContainsFng(GameClient()->m_GameInfo.m_aGameType);
+}
+
+bool CTClient::IsAspectBlocked() const
+{
+	return Client()->State() == IClient::STATE_ONLINE && !GameClient()->m_Camera.ZoomAllowed();
+}
+
+void CTClient::ScaleIngameCursorDelta(float &X, float &Y) const
+{
+	if(!g_Config.m_TcAspectRatioCursorNative)
+		return;
+	if(g_Config.m_TcAspectRatio < 100)
+		return;
+	const int State = Client()->State();
+	const bool IsActiveGameplay = State == IClient::STATE_ONLINE || State == IClient::STATE_DEMOPLAYBACK;
+	if(!IsActiveGameplay || IsAspectBlocked())
+		return;
+	if(GameClient()->m_Menus.IsActive())
+		return;
+	const int Num = g_Config.m_TcAspectRatioNum;
+	const int Den = g_Config.m_TcAspectRatioDen;
+	float ForcedAspect;
+	if(Num > 0 && Den > 0)
+		ForcedAspect = (float)Num / (float)Den;
+	else
+		ForcedAspect = g_Config.m_TcAspectRatio / 100.0f;
+	const int ScreenW = Graphics()->ScreenWidth();
+	const int ScreenH = Graphics()->ScreenHeight();
+	if(ScreenW <= 0 || ScreenH <= 0)
+		return;
+	float ForcedW, ForcedH, NativeW, NativeH;
+	Graphics()->CalcScreenParams(ForcedAspect, 1.0f, &ForcedW, &ForcedH);
+	Graphics()->CalcScreenParams((float)ScreenW / (float)ScreenH, 1.0f, &NativeW, &NativeH);
+	if(NativeW <= 0.001f || NativeH <= 0.001f)
+		return;
+	X *= ForcedW / NativeW;
+	Y *= ForcedH / NativeH;
+}
+
+void CTClient::ResetToPreviousAspect()
+{
+	g_Config.m_TcAspectRatio = m_AspectConfirmPrevRatio;
+	m_AspectConfirmLastRatio = m_AspectConfirmPrevRatio;
+	m_AspectConfirmActive = false;
+	QueueForcedAspectUpdate();
+}
+
+void CTClient::UpdateAspectConfirm()
+{
+	constexpr int CONFIRM_SECONDS = 10;
+	const int CurRatio = g_Config.m_TcAspectRatio;
+	if(!m_AspectConfirmSeeded)
+	{
+		m_AspectConfirmSeeded = true;
+		m_AspectConfirmActive = false;
+		m_AspectConfirmLastRatio = CurRatio;
+		m_AspectConfirmPrevRatio = CurRatio;
+	}
+	else if(m_AspectConfirmLastRatio != CurRatio)
+	{
+		const bool WasActive = m_AspectConfirmActive;
+		const bool ConfirmNeeded = CurRatio >= 100;
+		if(ConfirmNeeded && CurRatio != m_AspectConfirmPrevRatio)
+		{
+			if(!WasActive)
+				m_AspectConfirmPrevRatio = m_AspectConfirmLastRatio;
+			m_AspectConfirmActive = true;
+			m_AspectConfirmDeadline = time_get() + time_freq() * CONFIRM_SECONDS;
+		}
+		else
+		{
+			m_AspectConfirmActive = false;
+			m_AspectConfirmPrevRatio = CurRatio;
+		}
+		m_AspectConfirmLastRatio = CurRatio;
+	}
+	if(m_AspectConfirmActive && IsAspectBlocked())
+		m_AspectConfirmActive = false;
+	if(m_AspectConfirmActive && time_get() >= m_AspectConfirmDeadline)
+		ResetToPreviousAspect();
+}
+
+void CTClient::RenderAspectConfirmOverlay()
+{
+	if(!m_AspectConfirmActive || g_Config.m_TcAspectRatio < 100)
+		return;
+	const CUIRect *pReal = Ui()->Screen();
+	const float WinW = (float)Graphics()->ScreenWidth();
+	const float WinH = (float)Graphics()->ScreenHeight();
+	const vec2 RawMouse = Ui()->UpdatedMousePos();
+	const vec2 RealMouse = vec2(RawMouse.x * pReal->w / WinW, RawMouse.y * pReal->h / WinH);
+	const int SecondsLeft = std::max(0, (int)((m_AspectConfirmDeadline - time_get() + time_freq() - 1) / time_freq()));
+	char aConfirmText[128];
+	str_format(aConfirmText, sizeof(aConfirmText), TCLocalize("Keep this aspect ratio? Reverting in %d..."), SecondsLeft);
+	const float PanelW = std::min(420.0f, pReal->w - 12.0f);
+	CUIRect Panel;
+	Panel.x = pReal->x + (pReal->w - PanelW) * 0.5f;
+	Panel.y = pReal->y + 6.0f;
+	Panel.w = PanelW;
+	Panel.h = 30.0f;
+	Graphics()->DrawRect(Panel.x, Panel.y, Panel.w, Panel.h, ColorRGBA(0.0f, 0.0f, 0.0f, 0.82f), IGraphics::CORNER_ALL, 5.0f);
+	Panel.Margin(2.0f, &Panel);
+	CUIRect ApplyBtn, RevertBtn;
+	Panel.VSplitRight(80.0f, &Panel, &RevertBtn);
+	RevertBtn.VMargin(2.0f, &RevertBtn);
+	Panel.VSplitRight(4.0f, &Panel, nullptr);
+	Panel.VSplitRight(88.0f, &Panel, &ApplyBtn);
+	ApplyBtn.VMargin(2.0f, &ApplyBtn);
+	Panel.VSplitRight(4.0f, &Panel, nullptr);
+	Ui()->DoLabel(&Panel, aConfirmText, 10.0f, TEXTALIGN_ML);
+	auto RenderOverlayBtn = [&](const CUIRect &Rect, const char *pText, ColorRGBA Normal, ColorRGBA Hovered) -> bool {
+		const bool Hover = RealMouse.x >= Rect.x && RealMouse.x < Rect.x + Rect.w &&
+				   RealMouse.y >= Rect.y && RealMouse.y < Rect.y + Rect.h;
+		Graphics()->DrawRect(Rect.x, Rect.y, Rect.w, Rect.h, Hover ? Hovered : Normal, IGraphics::CORNER_ALL, 3.0f);
+		Ui()->DoLabel(&Rect, pText, 10.5f, TEXTALIGN_MC);
+		return Hover && Ui()->MouseButtonClicked(0);
+	};
+	if(RenderOverlayBtn(ApplyBtn, TCLocalize("Apply"), ColorRGBA(0.18f, 0.36f, 0.18f, 1.0f), ColorRGBA(0.28f, 0.55f, 0.28f, 1.0f)))
+	{
+		m_AspectConfirmActive = false;
+		m_AspectConfirmPrevRatio = g_Config.m_TcAspectRatio;
+	}
+	if(RenderOverlayBtn(RevertBtn, TCLocalize("Revert"), ColorRGBA(0.45f, 0.18f, 0.18f, 1.0f), ColorRGBA(0.7f, 0.28f, 0.28f, 1.0f)))
+		ResetToPreviousAspect();
 }
 
 void CTClient::OnUpdate()

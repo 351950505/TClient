@@ -42,6 +42,8 @@ MACRO_CONFIG_INT(TcAllowAnyRes, tc_allow_any_res, 1, 0, 1, CFGFLAG_CLIENT | CFGF
 MACRO_CONFIG_INT(TcAspectRatio, tc_aspect_ratio, 0, 0, 1000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Custom aspect ratio value x100 (0=off, 125=5:4, 133=4:3, 150=3:2, 178=16:9)")
 MACRO_CONFIG_INT(TcAspectRatioStretch, tc_aspect_ratio_stretch, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Custom aspect ratio display: 0=black bars (viewport cropped), 1=stretch (no black bars, game world stretched to fill)")
 MACRO_CONFIG_INT(TcAspectRatioFull, tc_aspect_ratio_full, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Custom aspect ratio scope: 0=game only (menus use normal aspect), 1=full (including menus)")
+MACRO_CONFIG_INT(TcAspectRatioNum, tc_aspect_ratio_num, 0, 0, 100000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Custom aspect ratio numerator (width), 0=unset")
+MACRO_CONFIG_INT(TcAspectRatioDen, tc_aspect_ratio_den, 0, 0, 100000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Custom aspect ratio denominator (height), 0=unset")
 MACRO_CONFIG_INT(TcAspectRatioCursorNative, tc_aspect_ratio_cursor_native, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Keep ingame cursor movement as if the aspect ratio was not stretched")
 
 MACRO_CONFIG_INT(TcShowChatClient, tc_show_chat_client, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show chat messages from the client such as echo")

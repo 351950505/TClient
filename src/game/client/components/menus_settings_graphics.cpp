@@ -436,7 +436,10 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 		s_AspectDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_AspectDropDownScrollRegion;
 		const int AspectSelectedNew = Ui()->DoDropDown(&Button, AspectSelectedOld, s_aAspectNames.data(), s_aAspectNames.size(), s_AspectDropDownState);
 		if(AspectSelectedNew >= 0 && AspectSelectedNew < (int)s_aAspectValues.size())
+		{
 			g_Config.m_TcAspectRatio = s_aAspectValues[AspectSelectedNew];
+			GameClient()->m_TClient.QueueForcedAspectUpdate();
+		}
 
 		if(g_Config.m_TcAspectRatio >= 100)
 		{
@@ -450,7 +453,10 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 			s_StretchDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_StretchDropDownScrollRegion;
 			const int StretchNew = Ui()->DoDropDown(&Button, StretchOld, apStretchNames, 2, s_StretchDropDownState);
 			if(StretchNew != StretchOld)
+			{
 				g_Config.m_TcAspectRatioStretch = StretchNew;
+				GameClient()->m_TClient.QueueForcedAspectUpdate();
+			}
 
 			static const char *apScopeNames[] = {TCLocalize("In game"), TCLocalize("Full")};
 			MainView.HSplitTop(20.0f, &Button, &MainView);
@@ -462,17 +468,24 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 			s_ScopeDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_ScopeDropDownScrollRegion;
 			const int ScopeNew = Ui()->DoDropDown(&Button, ScopeOld, apScopeNames, 2, s_ScopeDropDownState);
 			if(ScopeNew != ScopeOld)
+			{
 				g_Config.m_TcAspectRatioFull = ScopeNew;
+				GameClient()->m_TClient.QueueForcedAspectUpdate();
+			}
 
 			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &MainView, 20.0f);
 
-			// 自定义分子/分母（输入后点确认才生效）
+			// 自定义分子/分母（单行：输入框 : 输入框 [应用]）
 			MainView.HSplitTop(20.0f, &Button, &MainView);
 			Button.VSplitLeft(160.0f, &AspectLabel, &Button);
-			Ui()->DoLabel(&AspectLabel, TCLocalize("Custom ratio (width:height)"), 14.0f, TEXTALIGN_ML);
+			Ui()->DoLabel(&AspectLabel, TCLocalize("Custom ratio"), 14.0f, TEXTALIGN_ML);
 			{
-				CUIRect NumBox, DenBox;
-				Button.VSplitMid(&NumBox, &DenBox);
+				CUIRect NumBox, ColonRect, DenBox, ApplyBox;
+				Button.VSplitLeft(60.0f, &NumBox, &Button);
+				Button.VSplitLeft(10.0f, &ColonRect, &Button);
+				Button.VSplitLeft(60.0f, &DenBox, &Button);
+				Button.VSplitLeft(8.0f, nullptr, &Button);
+				Button.VSplitLeft(80.0f, &ApplyBox, &Button);
 				if(g_Config.m_TcAspectRatioNum != (int)s_LastNum || g_Config.m_TcAspectRatioDen != (int)s_LastDen)
 				{
 					if(g_Config.m_TcAspectRatioNum > 0)
@@ -485,24 +498,25 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 				static CLineInput s_NumInput(s_aInputNum, sizeof(s_aInputNum));
 				static CLineInput s_DenInput(s_aInputDen, sizeof(s_aInputDen));
 				Ui()->DoEditBox(&s_NumInput, &NumBox, 14.0f);
+				Ui()->DoLabel(&ColonRect, ":", 14.0f, TEXTALIGN_MC);
 				Ui()->DoEditBox(&s_DenInput, &DenBox, 14.0f);
-			}
-			MainView.HSplitTop(20.0f, &Button, &MainView);
-			static CButtonContainer s_AspectApplyButton;
-			if(DoButton_Menu(&s_AspectApplyButton, TCLocalize("Apply custom ratio"), 0, &Button))
-			{
-				int InputNum = 0, InputDen = 0;
-				if(s_aInputNum[0] != '\0')
-					InputNum = str_toint(s_aInputNum);
-				if(s_aInputDen[0] != '\0')
-					InputDen = str_toint(s_aInputDen);
-				if(InputNum > 0 && InputDen > 0)
+				static CButtonContainer s_AspectApplyButton;
+				if(DoButton_Menu(&s_AspectApplyButton, TCLocalize("Apply"), 0, &ApplyBox))
 				{
-					g_Config.m_TcAspectRatioNum = InputNum;
-					g_Config.m_TcAspectRatioDen = InputDen;
-					g_Config.m_TcAspectRatio = std::clamp((int)std::lround((double)InputNum * 100.0 / (double)InputDen), 100, 1000);
-					s_LastNum = InputNum;
-					s_LastDen = InputDen;
+					int InputNum = 0, InputDen = 0;
+					if(s_aInputNum[0] != '\0')
+						InputNum = str_toint(s_aInputNum);
+					if(s_aInputDen[0] != '\0')
+						InputDen = str_toint(s_aInputDen);
+					if(InputNum > 0 && InputDen > 0)
+					{
+						g_Config.m_TcAspectRatioNum = InputNum;
+						g_Config.m_TcAspectRatioDen = InputDen;
+						g_Config.m_TcAspectRatio = std::clamp((int)std::lround((double)InputNum * 100.0 / (double)InputDen), 100, 1000);
+						s_LastNum = InputNum;
+						s_LastDen = InputDen;
+						GameClient()->m_TClient.QueueForcedAspectUpdate();
+					}
 				}
 			}
 		}

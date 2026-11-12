@@ -1955,8 +1955,8 @@ In game
 Full
 == 完整
 
-Custom ratio (width:height)
-== 自定义比例（宽:高）
+Custom ratio
+== 自定义比例
 
 Apply custom ratio
 == 应用自定义比例

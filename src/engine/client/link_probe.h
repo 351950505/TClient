@@ -619,6 +619,7 @@ public:
 	int TotalLossTicks() const { return m_TotalLostTicks; }
 	int SkippedIntervals() const { return m_SkippedIntervals; }
 	int ExpectedStep() const { return m_ExpectedStep; }
+	int JitterSampleStep() const { return DetectionReady() ? m_ExpectedStep : 0; }
 };
 
 #endif

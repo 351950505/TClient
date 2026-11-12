@@ -11,13 +11,13 @@
 // [DUP-UPSTREAM] 上行复制上限：0=关，1=固定单发，2=最多双发，3=最多三发。
 // 上限 2/3 使用单发独立探针的未确认率选择份数；它包含双向链路影响，不是纯上行丢包率。
 MACRO_CONFIG_INT(ClDupUpstream, cl_dup_upstream, 3, 0, 3, CFGFLAG_CLIENT | CFGFLAG_SAVE, "自适应上行复制上限（0=关闭，1=单发，2=最多双发，3=最多三发；依据独立探针未确认率）")
-// [DUP-UPSTREAM 稳定化] 下限份数：探针没样本时按这个份数发。默认1=链路正常就单发（双发只在真丢包时才上，避免多出来的包引发双锤等问题）
+// [DUP-UPSTREAM 稳定化] 下限份数：探针没样本时按这个份数发，默认 1；往返未确认率异常才升档，不代表确认上行丢包。
 MACRO_CONFIG_INT(ClDupUpstreamMin, cl_dup_upstream_min, 1, 0, 3, CFGFLAG_CLIENT | CFGFLAG_SAVE, "上行复制下限份数（默认1=正常时单发，只有探针测到未确认才升；设2=始终至少双发）")
 // 探针未确认率升到 low 就上双发，升到 high 就上三发（单位：百分比）
 MACRO_CONFIG_INT(ClDupUpstreamLowPct, cl_dup_upstream_low_pct, 1, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "未确认率达到该百分比就升到双发（默认1）")
 MACRO_CONFIG_INT(ClDupUpstreamHighPct, cl_dup_upstream_high_pct, 5, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "未确认率达到该百分比就升到三发（默认5）")
 // 降档滞回：指标必须连续干净够久才降档，防止份数在 1/2/3 之间来回跳
-MACRO_CONFIG_INT(ClDupUpstreamProbe, cl_dup_upstream_probe, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "独立探针开关（1=即使不复制也测上行未确认率，方便先测后开；0=只在启用复制时才测）")
+MACRO_CONFIG_INT(ClDupUpstreamProbe, cl_dup_upstream_probe, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "独立往返探针开关（1=即使单发也测往返未确认率；0=停用探针，不改变复制上限/下限）")
 MACRO_CONFIG_INT(ClDupUpstreamHoldSec, cl_dup_upstream_hold_sec, 30, 0, 300, CFGFLAG_CLIENT | CFGFLAG_SAVE, "降档前需要连续无丢包保持的秒数（默认30，防抖动）")
 // [DUP-UPSTREAM 双模式] A/B 两套发包方式，随时切换防玩家出问题：0=背靠背（原版），1=错峰铺开（副本按 spread_ms 间隔错开发，抗突发丢包）
 MACRO_CONFIG_INT(ClDupSendMode, cl_dup_send_mode, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "上行副本发送方式：0=背靠背（原版），1=错峰铺开（抗突发丢包，副本在约15毫秒内铺开）")
@@ -404,7 +404,7 @@ MACRO_CONFIG_INT(TcIslandShowLyrics, tc_island_show_lyrics, 1, 0, 1, CFGFLAG_CLI
 MACRO_CONFIG_INT(TcIslandShowProgress, tc_island_show_progress, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show game clock (round timer)")
 MACRO_CONFIG_INT(TcIslandShowSongProgress, tc_island_show_song_progress, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island song progress rail at the bottom")
 MACRO_CONFIG_INT(TcIslandLocalClock, tc_island_local_clock, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show local computer time (HH:MM)")
-MACRO_CONFIG_INT(TcIslandLinkStatus, tc_island_link_status, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show live network status (loss dot + latency) before the game clock")
+MACRO_CONFIG_INT(TcIslandLinkStatus, tc_island_link_status, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show round-trip probe unconfirmed rate, downlink snapshot gaps and RTT before the game clock")
 MACRO_CONFIG_STR(TcIslandFont, tc_island_font, 128, "", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island font face (empty = follow the global custom font)")
 MACRO_CONFIG_INT(TcIslandSize, tc_island_size, 100, 60, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island size (%)")
 MACRO_CONFIG_INT(TcIslandWidth, tc_island_width, 650, 320, 1600, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island capsule width in pixels (at 100% size)")

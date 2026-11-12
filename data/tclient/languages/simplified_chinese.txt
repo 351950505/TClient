@@ -1573,11 +1573,47 @@ Reset slot
 No preview
 == 无法预览
 
-Upstream loss %.1f%%
-== 上行丢包率 %.1f%%
+Probe: --
+== 探针 --
 
-Upstream loss: sampling...
-== 上行丢包率: 采样中
+Probe %.1f%%
+== 探针 %.1f%%
+
+Snapshot gap: --
+== 快照缺口 --
+
+Snapshot gap %.1f%%
+== 快照缺口 %.1f%%
+
+RTT: --
+== RTT --
+
+RTT %.0f ms
+== RTT %.0f ms
+
+Probe status: sampling...
+== 探针状态：采样中
+
+Probe status: Good
+== 探针状态：良好
+
+Probe status: Elevated unconfirmed rate
+== 探针状态：未确认率偏高
+
+Probe status: High unconfirmed rate
+== 探针状态：未确认率高
+
+Probe round-trip unconfirmed %.1f%%
+== 探针往返未确认率 %.1f%%
+
+Probe round-trip unconfirmed: --
+== 探针往返未确认率：--
+
+Downlink snapshot gap %.1f%%
+== 下行快照缺口 %.1f%%
+
+Downlink snapshot gap: --
+== 下行快照缺口：--
 
 Latency %.0f ms  Jitter %.0f ms
 == 延迟 %.0f ms  抖动 %.0f ms
@@ -1585,26 +1621,14 @@ Latency %.0f ms  Jitter %.0f ms
 Latency/Jitter: sampling...
 == 延迟/抖动: 采样中
 
-Link status: sampling...
-== 链路状态: 采样中
-
-Link status: Good
-== 链路状态: 良好
-
-Link status: Jittery
-== 链路状态: 抖动
-
-Link status: Packet loss
-== 链路状态: 丢包
-
 Show network status before the game clock
 == 在游戏时间前显示网络状态
 
-Duplicate-send rescue estimate: %lld
-== 双发补救总数（估算）：%lld
+Theoretical duplicate-send rescue: ~%lld (unconfirmed)
+== 双发补救理论估算：约 %lld（未确认）
 
-Duplicate-send rescue estimate: none yet
-== 双发补救总数（估算）：暂无
+Theoretical duplicate-send rescue: -- (unconfirmed)
+== 双发补救理论估算：--（未确认）
 
 Gradient
 == 渐变

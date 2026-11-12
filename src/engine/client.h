@@ -397,15 +397,15 @@ public:
 	virtual std::optional<int> ShowMessageBox(const IGraphics::CMessageBox &MessageBox) = 0;
 	virtual void GetGpuInfoString(char (&aGpuInfo)[512]) = 0;
 
-	// 只读的上行探针数据（设置页展示用），实现类不需要额外同步状态
+	// Read-only round-trip PINGEX observations; they cannot isolate upstream loss.
 	virtual const CLinkProbeTracker *LinkProbe() const = 0;
 
-	// 只读的下行快照丢包率（最近 10 秒，百分比）。没有样本时返回 -1。
-	// 供灵动岛/设置页做"此刻链路是否在丢包"的指示，不参与任何发包决策。
+	// Recent downlink snapshot tick-gap percentage, not a network packet-loss rate.
+	// Returns -1 when observations are stale or insufficient. Display only.
 	virtual float DownlinkLossPercent() const = 0;
 
-	// 本次连接以来，上行复制估算救回来的包总数（累计值，断线清零）。
-	// 由每秒统计窗口的 (p - p^N) * 发包数 累加而来，仅作展示。
+	// Theoretical independent-loss rescue model, not confirmed delivery. Reset on
+	// disconnect; derived from (p - p^N) using the round-trip unconfirmed rate.
 	virtual int64_t UpstreamRescuedPackets() const = 0;
 
 	// TClient

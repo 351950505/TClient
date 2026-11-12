@@ -3401,61 +3401,50 @@ public:
 		const float GameTextOffset = (ShowGameTime && aGameTime[5] == '\0') ? (GameW - GameTextW) * 0.5f : 0.0f;
 
 		// ---- link status cell (left of the game clock) -----------------------
-		// One LED plus one number. The dot carries the verdict (green / amber /
-		// red), the number stays secondary: latency while healthy, loss percentage
-		// as soon as packets are actually being dropped. The cell reserves width
-		// for the widest possible readout, so the capsule never breathes as the
-		// value changes.
+		// Keep the probe's round-trip unconfirmed rate and the downlink snapshot
+		// gap separate. The LED reflects the worst available observation only.
 		const bool ShowLink = g_Config.m_TcIslandLinkStatus != 0 && m_pClient->State() == IClient::STATE_ONLINE;
-		float LinkLoss = -1.0f;
-		float LinkLatencyMs = 0.0f;
-		if(ShowLink)
-		{
-			const CLinkProbeTracker *pProbe = m_pClient->LinkProbe();
-			if(pProbe && pProbe->HasRecentEstimate())
-				LinkLoss = pProbe->RecentUnconfirmedPercent();
-			const float DownLoss = m_pClient->DownlinkLossPercent();
-			if(DownLoss >= 0.0f)
-				LinkLoss = LinkLoss < 0.0f ? DownLoss : std::max(LinkLoss, DownLoss);
-			else if(LinkLoss < (float)g_Config.m_ClDupUpstreamLowPct)
-				LinkLoss = -1.0f; // 下行没有新鲜观测时，上行正常不能代表整条链路良好。
-			if(pProbe && pProbe->HasLatency())
-				LinkLatencyMs = pProbe->AverageLatencyMs();
-		}
-		const bool LinkKnown = LinkLoss >= 0.0f;
-		const int LinkLevel = !LinkKnown ? 0 : (LinkLoss >= (float)g_Config.m_ClDupUpstreamHighPct ? 2 : (LinkLoss >= (float)g_Config.m_ClDupUpstreamLowPct ? 1 : 0));
-		char aLinkText[16];
-		if(!LinkKnown)
-			str_copy(aLinkText, "--");
-		else if(LinkLevel > 0)
-			str_format(aLinkText, sizeof(aLinkText), "%.1f%%", LinkLoss);
-		else if(LinkLatencyMs > 0.0f)
-			str_format(aLinkText, sizeof(aLinkText), "%d ms", (int)(LinkLatencyMs + 0.5f));
+		const CLinkProbeTracker *pProbe = ShowLink ? m_pClient->LinkProbe() : nullptr;
+		const bool HasProbeEstimate = pProbe != nullptr && pProbe->HasRecentEstimate();
+		const float ProbeUnconfirmedPercent = HasProbeEstimate ? pProbe->RecentUnconfirmedPercent() : -1.0f;
+		const float SnapshotGapPercent = ShowLink ? m_pClient->DownlinkLossPercent() : -1.0f;
+		const bool HasSnapshotGap = SnapshotGapPercent >= 0.0f;
+		const float LinkSeverityPercent = std::max(ProbeUnconfirmedPercent, SnapshotGapPercent);
+		const bool HasProbeWarning = HasProbeEstimate && ProbeUnconfirmedPercent > 0.0f &&
+			ProbeUnconfirmedPercent >= (float)g_Config.m_ClDupUpstreamLowPct;
+		const bool HasSnapshotWarning = HasSnapshotGap && SnapshotGapPercent > 0.0f &&
+			SnapshotGapPercent >= (float)g_Config.m_ClDupUpstreamLowPct;
+		const bool HasLinkWarning = HasProbeWarning || HasSnapshotWarning;
+		const bool LinkKnown = (HasProbeEstimate && HasSnapshotGap) || HasLinkWarning;
+		const int LinkLevel = !HasLinkWarning ? 0 : (LinkSeverityPercent >= (float)g_Config.m_ClDupUpstreamHighPct ? 2 : 1);
+		const bool HasLatency = pProbe != nullptr && pProbe->HasLatency();
+		const float LatencyMs = HasLatency ? pProbe->AverageLatencyMs() : -1.0f;
+		char aProbeText[48], aSnapshotText[48], aLatencyText[16];
+		if(HasProbeWarning)
+			str_format(aProbeText, sizeof(aProbeText), TCLocalize("Probe %.1f%%"), ProbeUnconfirmedPercent);
+		if(HasSnapshotWarning)
+			str_format(aSnapshotText, sizeof(aSnapshotText), TCLocalize("Snapshot gap %.1f%%"), SnapshotGapPercent);
+		if(HasLatency)
+			str_format(aLatencyText, sizeof(aLatencyText), "%d ms", (int)(LatencyMs + 0.5f));
 		else
-			str_copy(aLinkText, "--");
-		// 双发累计救回的包数（估算值）：同一格里第二行小字，和上面的丢包率/延迟同源，
-		// 这样看链路状态时不用再去翻日志。0 时整行留白，保持高度和宽度恒定。
-		const int64_t LinkRescued = ShowLink ? m_pClient->UpstreamRescuedPackets() : 0;
-		char aRescuedText[16];
-		if(LinkRescued <= 0)
-			aRescuedText[0] = '\0';
-		else if(LinkRescued < 1000)
-			str_format(aRescuedText, sizeof(aRescuedText), "\xE2\x86\x91~%lld", (long long)LinkRescued);
-		else if(LinkRescued < 999950)
-			str_format(aRescuedText, sizeof(aRescuedText), "\xE2\x86\x91~%.1fk", (double)LinkRescued / 1000.0);
-		else if(LinkRescued < 999950000)
-			str_format(aRescuedText, sizeof(aRescuedText), "\xE2\x86\x91~%.1fM", (double)LinkRescued / 1000000.0);
-		else
-			str_format(aRescuedText, sizeof(aRescuedText), "\xE2\x86\x91~%.1e", (double)LinkRescued);
-		const bool HasRescued = aRescuedText[0] != '\0';
-		const float LinkSize = 13.0f * Scale;
-		const float LinkSubSize = 10.0f * Scale;
+			str_copy(aLatencyText, "--");
+		char aProbeMaxText[48], aSnapshotMaxText[48];
+		str_format(aProbeMaxText, sizeof(aProbeMaxText), TCLocalize("Probe %.1f%%"), 100.0f);
+		str_format(aSnapshotMaxText, sizeof(aSnapshotMaxText), TCLocalize("Snapshot gap %.1f%%"), 100.0f);
+		// Healthy links keep the original one-line latency readout. Only warning
+		// observations get labelled percentage rows, fitted to the fixed capsule.
+		const float LinkFontScale = std::clamp(g_Config.m_TcFontSize / 100.0f, 0.5f, 2.0f);
+		const float LinkGlyphSize = std::min(12.0f * Scale * LinkFontScale, 16.0f * Scale);
+		const float LinkSize = LinkGlyphSize / LinkFontScale;
+		const float LinkLatencySize = 13.0f * Scale;
+		const float LinkRowStep = LinkGlyphSize + 4.0f * Scale;
+		const int LinkWarningRows = (int)HasProbeWarning + (int)HasSnapshotWarning;
+		const float LinkRowsH = LinkGlyphSize + std::max(0, LinkWarningRows - 1) * LinkRowStep;
 		const float LinkDot = 6.0f * Scale;
 		const float LinkGap = 7.0f * Scale;
 		const float LinkPad = 17.0f * Scale;
-		const float LinkTextW = ShowLink ? std::max(std::max(MeasureCached(m_pTextRender, LinkSize, "9999 ms"), MeasureCached(m_pTextRender, LinkSize, "100.0%")),
-			std::max(std::max(MeasureCached(m_pTextRender, LinkSubSize, "\xE2\x86\x91~999.9k"), MeasureCached(m_pTextRender, LinkSubSize, "\xE2\x86\x91~999.9M")),
-				MeasureCached(m_pTextRender, LinkSubSize, "\xE2\x86\x91~9.9e+18"))) : 0.0f;
+		const float LinkTextW = ShowLink ? std::max(std::max(MeasureCached(m_pTextRender, LinkSize, aProbeMaxText), MeasureCached(m_pTextRender, LinkSize, aSnapshotMaxText)),
+			MeasureCached(m_pTextRender, LinkLatencySize, "9999 ms")) : 0.0f;
 		const float LinkCellW = ShowLink ? (LinkPad + LinkDot + LinkGap + LinkTextW + LinkPad) : 0.0f;
 		auto LinkColor = [&](float Alpha) -> ColorRGBA {
 			if(!LinkKnown)
@@ -3466,10 +3455,7 @@ public:
 				return ColorRGBA(0.99f, 0.75f, 0.30f, Alpha);
 			return ColorRGBA(0.42f, 0.88f, 0.55f, Alpha);
 		};
-		// One cell, drawn identically in the idle and playing layouts so the two
-		// states cannot drift apart. Sampling = hollow ring (nothing to report yet,
-		// not a green light); measured = solid LED with a faint halo so the colour
-		// reads at a glance against a busy map.
+		// Share the same fixed-width cell between idle and playing layouts.
 		auto DrawLinkCell = [&](float CellX, float Alpha) {
 			const float CY = PillY + Height * 0.5f;
 			const float R = std::round(LinkDot * 0.5f);
@@ -3484,19 +3470,25 @@ public:
 				DrawShape(CellX + LinkPad, CY - R, R * 2.0f, R * 2.0f, R, IGraphics::CORNER_ALL,
 					LinkColor(0.95f * Alpha));
 			}
-			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, (LinkKnown ? 0.72f : 0.42f) * Alpha);
 			const float TextX = CellX + LinkPad + LinkDot + LinkGap;
-			if(HasRescued)
+			if(HasLinkWarning)
 			{
-				// 两行模式：主读数略上移，救援累计做第二行小字，整格仍在胶囊中线上。
-				const float TwoLineH = LinkSize + LinkSubSize * 0.92f;
-				const float TopY = PillY + (Height - TwoLineH) * 0.5f;
-				m_pTextRender->Text(TextX, TopY, LinkSize, aLinkText);
-				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.42f * Alpha);
-				m_pTextRender->Text(TextX, TopY + LinkSize * 1.02f, LinkSubSize, aRescuedText);
+				float RowY = PillY + (Height - LinkRowsH) * 0.5f;
+				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.78f * Alpha);
+				if(HasProbeWarning)
+				{
+					m_pTextRender->Text(TextX, RowY, LinkSize, aProbeText);
+					RowY += LinkRowStep;
+				}
+				if(HasSnapshotWarning)
+					m_pTextRender->Text(TextX, RowY, LinkSize, aSnapshotText);
 			}
 			else
-				m_pTextRender->Text(TextX, PillY + (Height - LinkSize) * 0.5f, LinkSize, aLinkText);
+			{
+				const float LatencyGlyphSize = LinkLatencySize * LinkFontScale;
+				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, (HasLatency ? 0.72f : 0.42f) * Alpha);
+				m_pTextRender->Text(TextX, PillY + (Height - LatencyGlyphSize) * 0.5f, LinkLatencySize, aLatencyText);
+			}
 			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 		};
 

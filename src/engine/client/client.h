@@ -4,6 +4,7 @@
 #define ENGINE_CLIENT_CLIENT_H
 
 #include "graph.h"
+#include "jitter_buffer.h"
 #include "link_probe.h"
 #include "smooth_time.h"
 
@@ -136,7 +137,7 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	CLinkProbeTracker m_LinkProbeTracker;
 	int64_t m_NextUpstreamProbeTime = 0;
 	bool m_UpstreamProbeEnabled = false;
-	// 本次连接累计救回的包数（保留积分小数，仅展示时取整，断线清零）
+	// Theoretical rescue estimate; not confirmed delivery. Reset on disconnect.
 	double m_UpstreamRescuedPackets = 0.0;
 	int64_t m_UpstreamRateTime = 0;
 	int64_t m_UpstreamRatePackets = 0;
@@ -218,11 +219,7 @@ class CClient : public IClient, public CDemoPlayer::IListener
 	CSnapshotStorage::CHolder *m_aapSnapshots[NUM_DUMMIES][NUM_SNAPSHOT_TYPES];
 
 	int m_aReceivedSnapshots[NUM_DUMMIES] = {0, 0};
-	// TClient: 自适应快照插值缓冲（抖动统计与当前生效缓冲）
-	int64_t m_aJitterLastArrival[NUM_DUMMIES] = {0};
-	int m_aJitterIntervals[64][NUM_DUMMIES] = {{0}};
-	int m_aJitterIntervalCount[NUM_DUMMIES] = {0};
-	int m_aJitterBufferMs[NUM_DUMMIES] = {0};
+	CAdaptiveJitterBuffer m_aAdaptiveJitterBuffers[NUM_DUMMIES];
 	char m_aaSnapshotIncomingData[NUM_DUMMIES][CSnapshot::MAX_SIZE];
 	int m_aSnapshotIncomingDataSize[NUM_DUMMIES] = {0, 0};
 
@@ -318,9 +315,9 @@ public:
 
 	// 只读访问：UI 只做展示，不允许改探针状态
 	const CLinkProbeTracker *LinkProbe() const override { return &m_LinkProbeTracker; }
-	// 最近 10 秒下行快照丢包率（%），无足够样本返回 -1
+	// Recent downlink snapshot gap percentage; -1 means unknown.
 	float DownlinkLossPercent() const override;
-	// 本次连接累计被复制救回的包数（估算），断线清零
+	// Theoretical cumulative rescue model, not confirmed delivery; reset on disconnect.
 	int64_t UpstreamRescuedPackets() const override { return (int64_t)m_UpstreamRescuedPackets; }
 
 	CClient();

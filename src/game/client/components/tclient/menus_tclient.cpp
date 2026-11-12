@@ -1073,36 +1073,38 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		else
 			Column.HSplitTop(LineSize * 2, nullptr, &Column);
 	}
-	// [DUP-UPSTREAM 状态区] 只读展示探针的实时结果（最近 4 秒短窗口 + 最近若干次回包 RTT）。
-	// 状态判定阈值：上行丢包率 <1% 良好，1%~5% 抖动，>=5% 丢包。
-	// 这里只读，不影响发包份数（Copies() 仍用 10 秒长窗口，见 link_probe.h）。
-	// 始终占四行，避免数据到达时整段 UI 高度跳动。
+	// [DUP-UPSTREAM 状态区] 探针未确认率是往返探针观测，不代表纯上行实测丢包率；
+	// 下行快照缺口来自独立观测。这里只读，不影响发包份数（Copies() 仍用 10 秒长窗口）。
+	// 始终占五行，避免数据到达时整段 UI 高度跳动。
 	{
-		const CLinkProbeTracker *pProbe = Client() != nullptr ? Client()->LinkProbe() : nullptr;
+		const auto *pClient = Client();
+		const CLinkProbeTracker *pProbe = pClient != nullptr ? pClient->LinkProbe() : nullptr;
 		const bool HasRecent = pProbe != nullptr && pProbe->HasRecentEstimate();
 		const bool HasLatency = pProbe != nullptr && pProbe->HasLatency();
-		const float LossPct = HasRecent ? pProbe->RecentUnconfirmedPercent() : 0.0f;
+		const float ProbeUnconfirmedPct = HasRecent ? pProbe->RecentUnconfirmedPercent() : -1.0f;
+		const float SnapshotGapPct = pClient != nullptr ? pClient->DownlinkLossPercent() : -1.0f;
+		const bool HasSnapshotGap = SnapshotGapPct >= 0.0f;
 
 		const char *pStateText;
 		ColorRGBA StateColor;
 		if(!HasRecent)
 		{
-			pStateText = TCLocalize("Link status: sampling...");
+			pStateText = TCLocalize("Probe status: sampling...");
 			StateColor = ColorRGBA(0.7f, 0.7f, 0.7f, 1.0f);
 		}
-		else if(LossPct < 1.0f)
+		else if(ProbeUnconfirmedPct < 1.0f)
 		{
-			pStateText = TCLocalize("Link status: Good");
+			pStateText = TCLocalize("Probe status: Good");
 			StateColor = ColorRGBA(0.5f, 1.0f, 0.5f, 1.0f);
 		}
-		else if(LossPct < 5.0f)
+		else if(ProbeUnconfirmedPct < 5.0f)
 		{
-			pStateText = TCLocalize("Link status: Jittery");
+			pStateText = TCLocalize("Probe status: Elevated unconfirmed rate");
 			StateColor = ColorRGBA(1.0f, 0.85f, 0.4f, 1.0f);
 		}
 		else
 		{
-			pStateText = TCLocalize("Link status: Packet loss");
+			pStateText = TCLocalize("Probe status: High unconfirmed rate");
 			StateColor = ColorRGBA(1.0f, 0.45f, 0.45f, 1.0f);
 		}
 
@@ -1116,9 +1118,16 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 
 		Column.HSplitTop(LineSize, &StatusRow, &Column);
 		if(HasRecent)
-			str_format(aBuf, sizeof(aBuf), TCLocalize("Upstream loss %.1f%%"), LossPct);
+			str_format(aBuf, sizeof(aBuf), TCLocalize("Probe round-trip unconfirmed %.1f%%"), ProbeUnconfirmedPct);
 		else
-			str_copy(aBuf, TCLocalize("Upstream loss: sampling..."));
+			str_copy(aBuf, TCLocalize("Probe round-trip unconfirmed: --"));
+		Ui()->DoLabel(&StatusRow, aBuf, FontSize, TEXTALIGN_ML);
+
+		Column.HSplitTop(LineSize, &StatusRow, &Column);
+		if(HasSnapshotGap)
+			str_format(aBuf, sizeof(aBuf), TCLocalize("Downlink snapshot gap %.1f%%"), SnapshotGapPct);
+		else
+			str_copy(aBuf, TCLocalize("Downlink snapshot gap: --"));
 		Ui()->DoLabel(&StatusRow, aBuf, FontSize, TEXTALIGN_ML);
 
 		Column.HSplitTop(LineSize, &StatusRow, &Column);
@@ -1128,13 +1137,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 			str_copy(aBuf, TCLocalize("Latency/Jitter: sampling..."));
 		Ui()->DoLabel(&StatusRow, aBuf, FontSize, TEXTALIGN_ML);
 
-		// 本次连接以来双发估算救回的包总数（断线清零），与灵动岛同源。
+		// This is a theoretical estimate, not a count of confirmed packet rescues.
 		Column.HSplitTop(LineSize, &StatusRow, &Column);
-		const int64_t Rescued = Client() != nullptr ? Client()->UpstreamRescuedPackets() : 0;
+		const int64_t Rescued = pClient != nullptr ? pClient->UpstreamRescuedPackets() : 0;
 		if(Rescued > 0)
-			str_format(aBuf, sizeof(aBuf), TCLocalize("Duplicate-send rescue estimate: %lld"), (long long)Rescued);
+			str_format(aBuf, sizeof(aBuf), TCLocalize("Theoretical duplicate-send rescue: ~%lld (unconfirmed)"), (long long)Rescued);
 		else
-			str_copy(aBuf, TCLocalize("Duplicate-send rescue estimate: none yet"));
+			str_copy(aBuf, TCLocalize("Theoretical duplicate-send rescue: -- (unconfirmed)"));
 		Ui()->DoLabel(&StatusRow, aBuf, FontSize, TEXTALIGN_ML);
 	}
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcRemoveAnti, TCLocalize("Remove prediction & antiping in freeze"), &g_Config.m_TcRemoveAnti, &Column, LineSize);

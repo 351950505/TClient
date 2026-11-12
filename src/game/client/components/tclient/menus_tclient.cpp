@@ -840,47 +840,6 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	}
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMovingTilesEntities, TCLocalize("Show moving tiles in entities"), &g_Config.m_TcMovingTilesEntities, &Column, LineSize);
 
-	// TClient: 自定义宽高比（移植自 BestClient-Light）
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
-	{
-		static const std::vector<int> s_aAspectValues = {0, 100, 111, 125, 133, 150, 160, 178, 200, 250};
-		static std::vector<const char *> s_aAspectNames;
-		s_aAspectNames = {TCLocalize("Off"), TCLocalize("1:1"), TCLocalize("10:9"), TCLocalize("5:4"), TCLocalize("4:3"), TCLocalize("3:2"), TCLocalize("16:10"), TCLocalize("16:9"), TCLocalize("2:1"), TCLocalize("5:2")};
-		int AspectSelectedOld = -1;
-		for(size_t i = 0; i < s_aAspectValues.size(); ++i)
-		{
-			if(s_aAspectValues[i] == g_Config.m_TcAspectRatio)
-				AspectSelectedOld = i;
-		}
-		CUIRect AspectDropDownRect;
-		Column.HSplitTop(LineSize, &AspectDropDownRect, &Column);
-		AspectDropDownRect.VSplitLeft(120.0f, &Label, &AspectDropDownRect);
-		Ui()->DoLabel(&Label, TCLocalize("Aspect ratio"), FontSize, TEXTALIGN_ML);
-		static CUi::SDropDownState s_AspectDropDownState;
-		static CScrollRegion s_AspectDropDownScrollRegion;
-		s_AspectDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_AspectDropDownScrollRegion;
-		const int AspectSelectedNew = Ui()->DoDropDown(&AspectDropDownRect, AspectSelectedOld, s_aAspectNames.data(), s_aAspectNames.size(), s_AspectDropDownState);
-		if(AspectSelectedNew >= 0 && AspectSelectedNew < (int)s_aAspectValues.size())
-			g_Config.m_TcAspectRatio = s_aAspectValues[AspectSelectedNew];
-
-		if(g_Config.m_TcAspectRatio >= 100)
-		{
-			static const char *apStretchNames[] = {"Black bars", "Stretch"};
-			CUIRect StretchRect;
-			Column.HSplitTop(LineSize, &StretchRect, &Column);
-			StretchRect.VSplitLeft(120.0f, &Label, &StretchRect);
-			Ui()->DoLabel(&Label, TCLocalize("Display mode"), FontSize, TEXTALIGN_ML);
-			const int StretchOld = g_Config.m_TcAspectRatioStretch;
-			static CUi::SDropDownState s_StretchDropDownState;
-			static CScrollRegion s_StretchDropDownScrollRegion;
-			s_StretchDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_StretchDropDownScrollRegion;
-			const int StretchNew = Ui()->DoDropDown(&StretchRect, StretchOld, apStretchNames, 2, s_StretchDropDownState);
-			if(StretchNew != StretchOld)
-				g_Config.m_TcAspectRatioStretch = StretchNew;
-			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &Column, LineSize);
-		}
-	}
-
 	Column.HSplitTop(MarginExtraSmall, nullptr, &Column);
 	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
 
@@ -4176,6 +4135,50 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowTuneZoneColors, TCLocalize("Show tune zone colors"), &g_Config.m_TcShowTuneZoneColors, &LeftView, LineSize);
 		LeftView.HSplitTop(LineSize, &Label, &LeftView);
 		Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
+
+		// TClient: 自定义宽高比（移植自 BestClient-Light）
+		LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+		LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+		Ui()->DoLabel(&Label, TCLocalize("Aspect ratio"), HeadlineFontSize, TEXTALIGN_ML);
+		LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+		{
+			static const std::vector<int> s_aAspectValues = {0, 100, 111, 125, 133, 150, 160, 178, 200, 250};
+			static std::vector<const char *> s_aAspectNames;
+			s_aAspectNames = {TCLocalize("Off"), TCLocalize("1:1"), TCLocalize("10:9"), TCLocalize("5:4"), TCLocalize("4:3"), TCLocalize("3:2"), TCLocalize("16:10"), TCLocalize("16:9"), TCLocalize("2:1"), TCLocalize("5:2")};
+			int AspectSelectedOld = -1;
+			for(size_t i = 0; i < s_aAspectValues.size(); ++i)
+			{
+				if(s_aAspectValues[i] == g_Config.m_TcAspectRatio)
+					AspectSelectedOld = i;
+			}
+			CUIRect AspectDropDownRect;
+			LeftView.HSplitTop(LineSize, &AspectDropDownRect, &LeftView);
+			AspectDropDownRect.VSplitLeft(120.0f, &Label, &AspectDropDownRect);
+			Ui()->DoLabel(&Label, TCLocalize("Aspect ratio"), FontSize, TEXTALIGN_ML);
+			static CUi::SDropDownState s_AspectDropDownState;
+			static CScrollRegion s_AspectDropDownScrollRegion;
+			s_AspectDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_AspectDropDownScrollRegion;
+			const int AspectSelectedNew = Ui()->DoDropDown(&AspectDropDownRect, AspectSelectedOld, s_aAspectNames.data(), s_aAspectNames.size(), s_AspectDropDownState);
+			if(AspectSelectedNew >= 0 && AspectSelectedNew < (int)s_aAspectValues.size())
+				g_Config.m_TcAspectRatio = s_aAspectValues[AspectSelectedNew];
+
+			if(g_Config.m_TcAspectRatio >= 100)
+			{
+				static const char *apStretchNames[] = {"Black bars", "Stretch"};
+				CUIRect StretchRect;
+				LeftView.HSplitTop(LineSize, &StretchRect, &LeftView);
+				StretchRect.VSplitLeft(120.0f, &Label, &StretchRect);
+				Ui()->DoLabel(&Label, TCLocalize("Display mode"), FontSize, TEXTALIGN_ML);
+				const int StretchOld = g_Config.m_TcAspectRatioStretch;
+				static CUi::SDropDownState s_StretchDropDownState;
+				static CScrollRegion s_StretchDropDownScrollRegion;
+				s_StretchDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_StretchDropDownScrollRegion;
+				const int StretchNew = Ui()->DoDropDown(&StretchRect, StretchOld, apStretchNames, 2, s_StretchDropDownState);
+				if(StretchNew != StretchOld)
+					g_Config.m_TcAspectRatioStretch = StretchNew;
+				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &LeftView, LineSize);
+			}
+		}
 
 	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
 	Ui()->DoLabel(&Label, TCLocalize("Message muting"), HeadlineFontSize, TEXTALIGN_ML);

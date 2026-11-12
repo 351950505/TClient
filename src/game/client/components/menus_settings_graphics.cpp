@@ -476,5 +476,4 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &MainView, 20.0f);
 		}
 	}
-	}
 }

@@ -645,6 +645,12 @@ void CTClient::OnConsoleInit()
 			((CTClient *)pUserData)->QueueForcedAspectUpdate();
 		},
 		this);
+	Console()->Chain(
+		"tc_aspect_ratio_full", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
+			pfnCallback(pResult, pCallbackUserData);
+			((CTClient *)pUserData)->QueueForcedAspectUpdate();
+		},
+		this);
 
 	Console()->Chain(
 		"tc_regex_chat_ignore", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
@@ -1818,9 +1824,9 @@ void CTClient::ApplyForcedAspect()
 	else if(State == CClient::EClientState::STATE_ONLINE && GameClient()->m_GameInfo.m_AllowZoom && !GameClient()->m_Menus.IsActive())
 		Force = false;
 	// TClient: 自定义宽高比（移植自 BestClient-Light）；>=100 时覆盖旧 5:4 强制
-	// 菜单激活时不应用自定义比例（BCL 同款做法），防止 UI 面板被裁剪到视口外
+	// tc_aspect_ratio_full 0=仅游戏内（菜单恢复正常比例），1=完整（菜单也应用）
 	int CustomAspect = g_Config.m_TcAspectRatio;
-	if(GameClient()->m_Menus.IsActive())
+	if(!g_Config.m_TcAspectRatioFull && GameClient()->m_Menus.IsActive())
 		CustomAspect = 0;
 	Graphics()->SetForcedAspect(Force, CustomAspect, g_Config.m_TcAspectRatioStretch);
 }

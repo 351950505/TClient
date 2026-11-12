@@ -1946,6 +1946,15 @@ Stretch
 Cursor as without stretch
 == 光标不受拉伸影响
 
+Apply to
+== 应用范围
+
+In game
+== 游戏内
+
+Full
+== 完整
+
 Off
 == 关闭
 

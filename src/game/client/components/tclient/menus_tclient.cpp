@@ -4176,6 +4176,19 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 				const int StretchNew = Ui()->DoDropDown(&StretchRect, StretchOld, apStretchNames, 2, s_StretchDropDownState);
 				if(StretchNew != StretchOld)
 					g_Config.m_TcAspectRatioStretch = StretchNew;
+				// 应用范围：游戏内 / 完整（含菜单）
+				static const char *apScopeNames[] = {"In game", "Full"};
+				CUIRect ScopeRect;
+				LeftView.HSplitTop(LineSize, &ScopeRect, &LeftView);
+				ScopeRect.VSplitLeft(120.0f, &Label, &ScopeRect);
+				Ui()->DoLabel(&Label, TCLocalize("Apply to"), FontSize, TEXTALIGN_ML);
+				const int ScopeOld = g_Config.m_TcAspectRatioFull;
+				static CUi::SDropDownState s_ScopeDropDownState;
+				static CScrollRegion s_ScopeDropDownScrollRegion;
+				s_ScopeDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_ScopeDropDownScrollRegion;
+				const int ScopeNew = Ui()->DoDropDown(&ScopeRect, ScopeOld, apScopeNames, 2, s_ScopeDropDownState);
+				if(ScopeNew != ScopeOld)
+					g_Config.m_TcAspectRatioFull = ScopeNew;
 				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &LeftView, LineSize);
 			}
 		}

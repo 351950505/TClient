@@ -6873,6 +6873,23 @@ public:
 	{
 		if(ExecBuffer.m_ClearColorInRenderThread)
 		{
+			// TClient: 黑边模式先全帧缓冲清黑，再用动态视口区域填地图背景色
+			if(pCommand->m_BlackBars && m_HasDynamicViewport)
+			{
+				VkCommandBuffer *pCommandBuffer;
+				if(!GetGraphicCommandBuffer(pCommandBuffer, ExecBuffer.m_ThreadIndex))
+					return false;
+				auto &CommandBuffer = *pCommandBuffer;
+				// Pass 1: full swapchain black
+				std::array<VkClearAttachment, 1> aBlackAttachments = {VkClearAttachment{VK_IMAGE_ASPECT_COLOR_BIT, 0, VkClearValue{VkClearColorValue{{0.0f, 0.0f, 0.0f, 0.0f}}}}};
+				std::array<VkClearRect, 1> aFullRects = {VkClearRect{{{0, 0}, m_VKSwapImgAndViewportExtent.m_SwapImageViewport}, 0, 1}};
+				vkCmdClearAttachments(CommandBuffer, aBlackAttachments.size(), aBlackAttachments.data(), aFullRects.size(), aFullRects.data());
+				// Pass 2: viewport area with requested color
+				std::array<VkClearAttachment, 1> aColorAttachments = {VkClearAttachment{VK_IMAGE_ASPECT_COLOR_BIT, 0, VkClearValue{VkClearColorValue{{pCommand->m_Color.r, pCommand->m_Color.g, pCommand->m_Color.b, pCommand->m_Color.a}}}}};
+				std::array<VkClearRect, 1> aViewportRects = {VkClearRect{{{m_DynamicViewportOffset.x, m_DynamicViewportOffset.y}, m_DynamicViewportSize}, 0, 1}};
+				vkCmdClearAttachments(CommandBuffer, aColorAttachments.size(), aColorAttachments.data(), aViewportRects.size(), aViewportRects.data());
+				return true;
+			}
 			std::array<VkClearAttachment, 1> aAttachments = {VkClearAttachment{VK_IMAGE_ASPECT_COLOR_BIT, 0, VkClearValue{VkClearColorValue{{pCommand->m_Color.r, pCommand->m_Color.g, pCommand->m_Color.b, pCommand->m_Color.a}}}}};
 			std::array<VkClearRect, 1> aClearRects = {VkClearRect{{{0, 0}, m_VKSwapImgAndViewportExtent.m_SwapImageViewport}, 0, 1}};
 

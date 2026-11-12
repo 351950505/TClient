@@ -236,6 +236,9 @@ void CUi::Update()
 		}
 	}
 
+	// 比例切换可能缩小视口；无需再次移动鼠标也能保持指针在可见区域内。
+	m_UpdatedMousePos.x = std::clamp(m_UpdatedMousePos.x, 0.0f, WindowSize.x - 1.0f);
+	m_UpdatedMousePos.y = std::clamp(m_UpdatedMousePos.y, 0.0f, WindowSize.y - 1.0f);
 	m_MousePos = m_UpdatedMousePos * vec2(pScreen->w, pScreen->h) / WindowSize;
 	m_MouseDelta = m_UpdatedMouseDelta;
 	m_UpdatedMouseDelta = vec2(0.0f, 0.0f);

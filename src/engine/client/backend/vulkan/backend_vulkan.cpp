@@ -3331,29 +3331,21 @@ protected:
 			VkRect2D Scissor;
 			// convert from OGL to vulkan clip
 
-			// the scissor always assumes the presented viewport, because the front-end keeps the calculation
-			// for the forced viewport in sync
-			auto ScissorViewport = m_VKSwapImgAndViewportExtent.GetPresentedImageViewport();
+			// The front-end clip coordinates are already relative to the active viewport.
+			// Dynamic viewports therefore only need their offset added, not another scaling step.
+			auto ScissorViewport = m_HasDynamicViewport ? m_DynamicViewportSize : m_VKSwapImgAndViewportExtent.GetPresentedImageViewport();
+			const VkOffset2D ScissorOffset = m_HasDynamicViewport ? m_DynamicViewportOffset : VkOffset2D{0, 0};
 			if(State.m_ClipEnable)
 			{
 				int32_t ScissorY = (int32_t)ScissorViewport.height - ((int32_t)State.m_ClipY + (int32_t)State.m_ClipH);
 				uint32_t ScissorH = (int32_t)State.m_ClipH;
-				Scissor.offset = {(int32_t)State.m_ClipX, ScissorY};
+				Scissor.offset = {(int32_t)State.m_ClipX + ScissorOffset.x, ScissorY + ScissorOffset.y};
 				Scissor.extent = {(uint32_t)State.m_ClipW, ScissorH};
 			}
 			else
 			{
-				Scissor.offset = {0, 0};
-				Scissor.extent = {ScissorViewport.width, ScissorViewport.height};
-			}
-
-			// if there is a dynamic viewport make sure the scissor data is scaled down to that
-			if(m_HasDynamicViewport)
-			{
-				Scissor.offset.x = (int32_t)(((float)Scissor.offset.x / (float)ScissorViewport.width) * (float)m_DynamicViewportSize.width) + m_DynamicViewportOffset.x;
-				Scissor.offset.y = (int32_t)(((float)Scissor.offset.y / (float)ScissorViewport.height) * (float)m_DynamicViewportSize.height) + m_DynamicViewportOffset.y;
-				Scissor.extent.width = (uint32_t)(((float)Scissor.extent.width / (float)ScissorViewport.width) * (float)m_DynamicViewportSize.width);
-				Scissor.extent.height = (uint32_t)(((float)Scissor.extent.height / (float)ScissorViewport.height) * (float)m_DynamicViewportSize.height);
+				Scissor.offset = ScissorOffset;
+				Scissor.extent = ScissorViewport;
 			}
 
 			Viewport.x = std::clamp(Viewport.x, 0.0f, std::numeric_limits<decltype(Viewport.x)>::max());

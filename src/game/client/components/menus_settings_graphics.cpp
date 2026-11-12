@@ -458,21 +458,6 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 				GameClient()->m_TClient.QueueForcedAspectUpdate();
 			}
 
-			static const char *apScopeNames[] = {TCLocalize("In game"), TCLocalize("Full")};
-			MainView.HSplitTop(20.0f, &Button, &MainView);
-			Button.VSplitLeft(160.0f, &AspectLabel, &Button);
-			Ui()->DoLabel(&AspectLabel, TCLocalize("Apply to"), 14.0f, TEXTALIGN_ML);
-			const int ScopeOld = g_Config.m_TcAspectRatioFull;
-			static CUi::SDropDownState s_ScopeDropDownState;
-			static CScrollRegion s_ScopeDropDownScrollRegion;
-			s_ScopeDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_ScopeDropDownScrollRegion;
-			const int ScopeNew = Ui()->DoDropDown(&Button, ScopeOld, apScopeNames, 2, s_ScopeDropDownState);
-			if(ScopeNew != ScopeOld)
-			{
-				g_Config.m_TcAspectRatioFull = ScopeNew;
-				GameClient()->m_TClient.QueueForcedAspectUpdate();
-			}
-
 			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &MainView, 20.0f);
 		}
 	}

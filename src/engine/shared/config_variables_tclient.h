@@ -41,7 +41,6 @@ MACRO_CONFIG_INT(TcAllowAnyRes, tc_allow_any_res, 1, 0, 1, CFGFLAG_CLIENT | CFGF
 // TClient: 自定义宽高比（移植自 BestClient-Light）
 MACRO_CONFIG_INT(TcAspectRatio, tc_aspect_ratio, 0, 0, 1000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Custom aspect ratio value x100 (0=off, 125=5:4, 133=4:3, 150=3:2, 178=16:9)")
 MACRO_CONFIG_INT(TcAspectRatioStretch, tc_aspect_ratio_stretch, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Custom aspect ratio display: 0=black bars (viewport cropped), 1=stretch (no black bars, game world stretched to fill)")
-MACRO_CONFIG_INT(TcAspectRatioFull, tc_aspect_ratio_full, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Custom aspect ratio scope: 0=game only (menus use normal aspect), 1=full (including menus)")
 MACRO_CONFIG_INT(TcAspectRatioCursorNative, tc_aspect_ratio_cursor_native, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Keep ingame cursor movement as if the aspect ratio was not stretched")
 
 MACRO_CONFIG_INT(TcShowChatClient, tc_show_chat_client, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show chat messages from the client such as echo")
@@ -459,7 +458,7 @@ MACRO_CONFIG_INT(TcSpectatorFriendsFirst, tc_spectator_friends_first, 1, 0, 1, C
 // 全局字体字号：对所有游戏内文本（菜单/聊天/记分板/名牌等）按百分比缩放。
 MACRO_CONFIG_INT(TcFontSize, tc_font_size, 100, 50, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Global text size for all game text in percent (menus, chat, scoreboard, nameplates)")
 MACRO_CONFIG_INT(TcUiScale, tc_ui_scale, 100, 50, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "User interface scale in percent (menus, popups, browser)")
-MACRO_CONFIG_INT(TcPingwheelVolume, tc_pingwheel_volume, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal sound volume (%)")
+MACRO_CONFIG_INT(TcPingwheelVolume, tc_pingwheel_volume, 30, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal sound volume (%)")
 MACRO_CONFIG_INT(TcPingwheelSoundRange, tc_pingwheel_sound_range, 600, 0, 10000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel sound audible range in world units (0 = global, no falloff)")
 MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "DEPRECATED: emoticon fallback channel removed, signals always use the relay channel")
 MACRO_CONFIG_INT(TcRelay, tc_relay, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal relay: send/receive pings via the TClient signal server (works while spectating, invisible to chat)")

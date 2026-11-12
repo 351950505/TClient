@@ -783,9 +783,6 @@ void CTClient::OnRender()
 
 	DoFinishCheck();
 
-	UpdateAspectConfirm();
-	RenderAspectConfirmOverlay();
-
 	// 更新器状态机推进 + 启动后延迟一次自动检查。检查只查版本，
 	// 不下载、不安装、不退出——用户点了按钮才会继续。
 	PollUpdateTasks();

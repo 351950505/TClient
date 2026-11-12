@@ -6859,7 +6859,8 @@ public:
 			m_aClearColor[1] = pCommand->m_Color.g;
 			m_aClearColor[2] = pCommand->m_Color.b;
 			m_aClearColor[3] = pCommand->m_Color.a;
-			if(ColorChanged)
+			// TClient: 黑边模式必须每帧都清（第一段全黑+第二段地图色），不能因为颜色没变就跳过
+			if(ColorChanged || pCommand->m_BlackBars)
 				ExecBuffer.m_ClearColorInRenderThread = true;
 		}
 		else

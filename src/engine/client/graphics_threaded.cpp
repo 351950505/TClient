@@ -2282,6 +2282,7 @@ void CGraphics_Threaded::AdjustViewport(bool SendViewportChangeToBackend)
 	m_pBackend->GetDisplayCutoutInsets(InsetLeft, InsetRight);
 	m_ViewportX = InsetLeft;
 	m_ScreenWidth = m_DrawableWidth - InsetLeft - InsetRight;
+	m_ScreenHeight = m_DrawableHeight; // TClient: 每次从完整高度重算，防止上次裁剪残留
 
 	// adjust the viewport to only allow certain aspect ratios
 	// keep this in sync with backend_vulkan GetSwapImageSize's check

@@ -1,585 +1,524 @@
 #include "serverbrowser_http.h"
 
-#include <base/dbg.h>
+#include <base/fs.h>
+#include <base/hash.h>
 #include <base/io.h>
-#include <base/lock.h>
 #include <base/log.h>
 #include <base/net.h>
-#include <base/secure.h>
 #include <base/str.h>
 #include <base/time.h>
 
-#include <engine/console.h>
 #include <engine/engine.h>
-#include <engine/external/json-parser/json.h>
 #include <engine/http.h>
 #include <engine/serverbrowser.h>
 #include <engine/shared/jobs.h>
+#include <engine/shared/json.h>
 #include <engine/shared/linereader.h>
 #include <engine/shared/serverinfo.h>
 #include <engine/storage.h>
 
-#include <chrono>
+#include <algorithm>
+#include <cstdio>
+#include <deque>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
-using namespace std::chrono_literals;
-
-static int SanitizeAge(std::optional<int64_t> Age)
+namespace
 {
-	// A year is of course pi*10**7 seconds.
-	if(!(Age && 0 <= *Age && *Age < 31415927))
+	constexpr size_t MAX_URLS = 16;
+	constexpr size_t MAX_RESPONSE_SIZE = 8 * 1024 * 1024;
+	constexpr int MAX_CACHE_AGE = 24 * 60 * 60;
+	constexpr int FRESH_SERVERLIST_AGE = 5 * 60;
+	constexpr size_t MAX_CONCURRENT_REQUESTS = 2;
+	constexpr const char *CACHE_PATH = "cache/tclient-serverlist.json";
+
+	bool ParseServerList(json_value *pJson, std::vector<CServerInfo> *pvServers)
 	{
-		return 31415927;
-	}
-	return *Age;
-}
+		if(pJson == nullptr)
+			return true;
 
-// Classify HTTP responses into buckets, treat 15 seconds as fresh, 1 minute as
-// less fresh, etc. This ensures that differences in the order of seconds do
-// not affect master choice.
-static int ClassifyAge(int AgeSeconds)
-{
-	return 0 //
-	       + (AgeSeconds >= 15) // 15 seconds
-	       + (AgeSeconds >= 60) // 1 minute
-	       + (AgeSeconds >= 300) // 5 minutes
-	       + (AgeSeconds / 3600); // 1 hour
-}
+		const json_value &Servers = (*pJson)["servers"];
+		if(Servers.type != json_array)
+			return true;
 
-class CChooseMaster
-{
-public:
-	typedef bool (*VALIDATOR)(json_value *pJson);
-
-	enum
-	{
-		MAX_URLS = 16,
-	};
-	CChooseMaster(IEngine *pEngine, IHttp *pHttp, VALIDATOR pfnValidator, const char **ppUrls, int NumUrls, int PreviousBestIndex);
-	virtual ~CChooseMaster();
-
-	bool GetBestUrl(const char **pBestUrl) const;
-	void Shutdown();
-	void Reset();
-	bool IsRefreshing() const { return m_pJob && !m_pJob->Done(); }
-	void Refresh();
-
-private:
-	int GetBestIndex() const;
-
-	class CData
-	{
-	public:
-		std::atomic_int m_BestIndex{-1};
-		// Constant after construction.
-		VALIDATOR m_pfnValidator;
-		int m_NumUrls;
-		char m_aaUrls[MAX_URLS][256];
-	};
-	class CJob : public IJob
-	{
-		CChooseMaster *m_pParent;
-		CLock m_Lock;
-		std::shared_ptr<CData> m_pData;
-		std::shared_ptr<IHttpRequest> m_pHead;
-		std::shared_ptr<IHttpRequest> m_pGet;
-		void Run() override REQUIRES(!m_Lock);
-
-	public:
-		CJob(CChooseMaster *pParent, std::shared_ptr<CData> pData) :
-			m_pParent(pParent),
-			m_pData(std::move(pData))
+		std::vector<CServerInfo> vServers;
+		for(unsigned int i = 0; i < Servers.u.array.length; i++)
 		{
-			Abortable(true);
+			const json_value &Server = Servers[i];
+			const json_value &Addresses = Server["addresses"];
+			const json_value &Info = Server["info"];
+			const json_value &Location = Server["location"];
+			int ParsedLocation = CServerInfo::LOC_UNKNOWN;
+			CServerInfo2 ParsedInfo;
+			if(Addresses.type != json_array || (Location.type != json_string && Location.type != json_none))
+				return true;
+			if(Location.type == json_string && CServerInfo::ParseLocation(&ParsedLocation, Location))
+				return true;
+			if(CServerInfo2::FromJson(&ParsedInfo, &Info))
+			{
+				// Server info is user input. Skip only the malformed server instead of
+				// discarding an otherwise valid master response.
+				continue;
+			}
+
+			CServerInfo Parsed = ParsedInfo;
+			Parsed.m_Location = ParsedLocation;
+			Parsed.m_NumAddresses = 0;
+			bool HasSix = false;
+			for(unsigned int AddressIndex = 0; AddressIndex < Addresses.u.array.length; AddressIndex++)
+			{
+				if(Addresses[AddressIndex].type != json_string)
+					return true;
+				if(str_startswith(Addresses[AddressIndex], "tw-0.6+udp://"))
+					HasSix = true;
+			}
+			for(unsigned int AddressIndex = 0; AddressIndex < Addresses.u.array.length; AddressIndex++)
+			{
+				const char *pAddress = Addresses[AddressIndex].u.string.ptr;
+				if(HasSix && str_startswith(pAddress, "tw-0.7+udp://"))
+					continue;
+				NETADDR ParsedAddress;
+				if(net_addr_from_url(&ParsedAddress, pAddress, nullptr, 0) || ParsedAddress.port == 0)
+					continue;
+				if(Parsed.m_NumAddresses < (int)std::size(Parsed.m_aAddresses))
+					Parsed.m_aAddresses[Parsed.m_NumAddresses++] = ParsedAddress;
+			}
+			if(Parsed.m_NumAddresses > 0)
+				vServers.push_back(Parsed);
 		}
-		bool Abort() override REQUIRES(!m_Lock);
-	};
 
-	IEngine *m_pEngine;
-	IHttp *m_pHttp;
-	int m_PreviousBestIndex;
-	std::shared_ptr<CData> m_pData;
-	std::shared_ptr<CJob> m_pJob;
-};
-
-CChooseMaster::CChooseMaster(IEngine *pEngine, IHttp *pHttp, VALIDATOR pfnValidator, const char **ppUrls, int NumUrls, int PreviousBestIndex) :
-	m_pEngine(pEngine),
-	m_pHttp(pHttp),
-	m_PreviousBestIndex(PreviousBestIndex)
-{
-	dbg_assert(NumUrls >= 0, "no master URLs");
-	dbg_assert(NumUrls <= MAX_URLS, "too many master URLs");
-	dbg_assert(PreviousBestIndex >= -1, "previous best index negative and not -1");
-	dbg_assert(PreviousBestIndex < NumUrls, "previous best index too high");
-	m_pData = std::make_shared<CData>();
-	m_pData->m_pfnValidator = pfnValidator;
-	m_pData->m_NumUrls = NumUrls;
-	for(int i = 0; i < m_pData->m_NumUrls; i++)
-	{
-		str_copy(m_pData->m_aaUrls[i], ppUrls[i]);
-	}
-}
-
-CChooseMaster::~CChooseMaster()
-{
-	dbg_assert(m_pJob == nullptr, "Choose master job was not cleared");
-}
-
-int CChooseMaster::GetBestIndex() const
-{
-	int BestIndex = m_pData->m_BestIndex.load();
-	if(BestIndex >= 0)
-	{
-		return BestIndex;
-	}
-	else
-	{
-		return m_PreviousBestIndex;
-	}
-}
-
-bool CChooseMaster::GetBestUrl(const char **ppBestUrl) const
-{
-	int Index = GetBestIndex();
-	if(Index < 0)
-	{
-		*ppBestUrl = nullptr;
-		return true;
-	}
-	*ppBestUrl = m_pData->m_aaUrls[Index];
-	return false;
-}
-
-void CChooseMaster::Shutdown()
-{
-	if(m_pJob)
-	{
-		m_pJob->Abort();
-		m_pJob = nullptr;
-	}
-}
-
-void CChooseMaster::Reset()
-{
-	m_PreviousBestIndex = -1;
-	m_pData->m_BestIndex.store(-1);
-}
-
-void CChooseMaster::Refresh()
-{
-	if(m_pJob == nullptr || m_pJob->State() == IJob::STATE_DONE)
-	{
-		m_pJob = std::make_shared<CJob>(this, m_pData);
-		m_pEngine->AddJob(m_pJob);
-	}
-}
-
-bool CChooseMaster::CJob::Abort()
-{
-	if(!IJob::Abort())
-	{
+		*pvServers = std::move(vServers);
 		return false;
 	}
 
-	const CLockScope LockScope(m_Lock);
-	if(m_pHead != nullptr)
+	struct CServerListSaveState
 	{
-		m_pHead->Abort();
-	}
-
-	if(m_pGet != nullptr)
-	{
-		m_pGet->Abort();
-	}
-
-	return true;
-}
-
-void CChooseMaster::CJob::Run()
-{
-	// Check masters in a random order.
-	int aRandomized[MAX_URLS] = {0};
-	for(int i = 0; i < m_pData->m_NumUrls; i++)
-	{
-		aRandomized[i] = i;
-	}
-	// https://en.wikipedia.org/w/index.php?title=Fisher%E2%80%93Yates_shuffle&oldid=1002922479#The_modern_algorithm
-	// The equivalent version.
-	for(int i = 0; i <= m_pData->m_NumUrls - 2; i++)
-	{
-		int j = i + secure_rand_below(m_pData->m_NumUrls - i);
-		std::swap(aRandomized[i], aRandomized[j]);
-	}
-	// Do a HEAD request to ensure that a connection is established and
-	// then do a GET request to check how fast we can get the server list.
-	//
-	// 10 seconds connection timeout, lower than 8KB/s for 10 seconds to
-	// fail.
-	CTimeout Timeout{10000, 0, 8000, 10};
-	int aTimeMs[MAX_URLS];
-	int aAgeS[MAX_URLS];
-	for(int i = 0; i < m_pData->m_NumUrls; i++)
-	{
-		aTimeMs[i] = -1;
-		aAgeS[i] = SanitizeAge({});
-		const char *pUrl = m_pData->m_aaUrls[aRandomized[i]];
-		std::shared_ptr<IHttpRequest> pHead = HttpHead(pUrl);
-		pHead->Timeout(Timeout);
-		pHead->LogProgress(HTTPLOG::FAILURE);
-		{
-			const CLockScope LockScope(m_Lock);
-			m_pHead = pHead;
-		}
-
-		m_pParent->m_pHttp->Run(pHead);
-		pHead->Wait();
-		if(pHead->State() == EHttpState::ABORTED || State() == IJob::STATE_ABORTED)
-		{
-			log_debug("serverbrowser_http", "master chooser aborted");
-			return;
-		}
-		if(pHead->State() != EHttpState::DONE)
-		{
-			continue;
-		}
-
-		auto StartTime = time_get_nanoseconds();
-		std::shared_ptr<IHttpRequest> pGet = HttpGet(pUrl);
-		pGet->Timeout(Timeout);
-		pGet->LogProgress(HTTPLOG::FAILURE);
-		{
-			const CLockScope LockScope(m_Lock);
-			m_pGet = pGet;
-		}
-
-		m_pParent->m_pHttp->Run(pGet);
-		pGet->Wait();
-
-		auto Time = std::chrono::duration_cast<std::chrono::milliseconds>(time_get_nanoseconds() - StartTime);
-		if(pGet->State() == EHttpState::ABORTED || State() == IJob::STATE_ABORTED)
-		{
-			log_debug("serverbrowser_http", "master chooser aborted");
-			return;
-		}
-		if(pGet->State() != EHttpState::DONE)
-		{
-			continue;
-		}
-		json_value *pJson = pGet->ResultJson();
-		if(!pJson)
-		{
-			continue;
-		}
-
-		bool ParseFailure = m_pData->m_pfnValidator(pJson);
-		json_value_free(pJson);
-		if(ParseFailure)
-		{
-			continue;
-		}
-		int AgeS = SanitizeAge(pGet->ResultAgeSeconds());
-		log_info("serverbrowser_http", "found master, url='%s' time=%dms age=%ds", pUrl, (int)Time.count(), AgeS);
-
-		aTimeMs[i] = Time.count();
-		aAgeS[i] = AgeS;
-	}
-
-	// Determine index of the minimum time.
-	int BestIndex = -1;
-	int BestTime = 0;
-	int BestAge = 0;
-	for(int i = 0; i < m_pData->m_NumUrls; i++)
-	{
-		if(aTimeMs[i] < 0)
-		{
-			continue;
-		}
-		if(BestIndex == -1 || std::tuple(ClassifyAge(aAgeS[i]), aTimeMs[i]) < std::tuple(ClassifyAge(BestAge), BestTime))
-		{
-			BestTime = aTimeMs[i];
-			BestAge = aAgeS[i];
-			BestIndex = aRandomized[i];
-		}
-	}
-	if(BestIndex == -1)
-	{
-		log_error("serverbrowser_http", "WARNING: no usable masters found");
-		return;
-	}
-
-	log_info("serverbrowser_http", "determined best master, url='%s' time=%dms age=%ds", m_pData->m_aaUrls[BestIndex], BestTime, BestAge);
-	m_pData->m_BestIndex.store(BestIndex);
-}
-
-class CServerBrowserHttp : public IServerBrowserHttp
-{
-public:
-	CServerBrowserHttp(IEngine *pEngine, IHttp *pHttp, const char **ppUrls, int NumUrls, int PreviousBestIndex);
-	~CServerBrowserHttp() override;
-	void Shutdown() override;
-	void Update() override;
-	bool IsRefreshing() const override { return m_State != STATE_DONE && m_State != STATE_NO_MASTER; }
-	bool IsError() const override { return m_State == STATE_NO_MASTER; }
-	void Refresh() override;
-	bool GetBestUrl(const char **pBestUrl) const override { return m_pChooseMaster->GetBestUrl(pBestUrl); }
-
-	int NumServers() const override
-	{
-		return m_vServers.size();
-	}
-	const CServerInfo &Server(int Index) const override
-	{
-		return m_vServers[Index];
-	}
-
-private:
-	enum
-	{
-		STATE_DONE,
-		STATE_WANTREFRESH,
-		STATE_REFRESHING,
-		STATE_NO_MASTER,
+		std::mutex m_Lock;
+		std::string m_Path;
+		std::string m_Pending;
+		bool m_WorkerActive = false;
 	};
 
-	static bool Validate(json_value *pJson);
-	static bool Parse(json_value *pJson, std::vector<CServerInfo> *pvServers);
-
-	IHttp *m_pHttp;
-
-	int m_State = STATE_WANTREFRESH;
-	std::shared_ptr<IHttpRequest> m_pGetServers;
-	std::unique_ptr<CChooseMaster> m_pChooseMaster;
-
-	std::vector<CServerInfo> m_vServers;
-};
-
-CServerBrowserHttp::CServerBrowserHttp(IEngine *pEngine, IHttp *pHttp, const char **ppUrls, int NumUrls, int PreviousBestIndex) :
-	m_pHttp(pHttp),
-	m_pChooseMaster(new CChooseMaster(pEngine, pHttp, Validate, ppUrls, NumUrls, PreviousBestIndex))
-{
-	Refresh();
-}
-
-CServerBrowserHttp::~CServerBrowserHttp()
-{
-	dbg_assert(m_pGetServers == nullptr, "Server browser load job was not cleared");
-}
-
-void CServerBrowserHttp::Shutdown()
-{
-	if(m_pGetServers != nullptr)
+	bool WriteServerListCache(const std::string &Path, const std::string &Body)
 	{
-		m_pGetServers->Abort();
-		m_pGetServers = nullptr;
-	}
-	m_pChooseMaster->Shutdown();
-}
-
-void CServerBrowserHttp::Update()
-{
-	if(m_State == STATE_WANTREFRESH)
-	{
-		const char *pBestUrl;
-		if(m_pChooseMaster->GetBestUrl(&pBestUrl))
+		char aTmp[IO_MAX_PATH_LENGTH];
+		IStorage::FormatTmpPath(aTmp, sizeof(aTmp), Path.c_str());
+		IOHANDLE File = io_open(aTmp, IOFLAG_WRITE);
+		if(!File)
+			return false;
+		const bool Written = io_write(File, Body.data(), Body.size()) == Body.size();
+		const int Closed = io_close(File);
+		if(!Written || Closed != 0 || fs_rename(aTmp, Path.c_str()) != 0)
 		{
-			if(!m_pChooseMaster->IsRefreshing())
-			{
-				log_error("serverbrowser_http", "no working serverlist URL found");
-				m_State = STATE_NO_MASTER;
-			}
-			return;
+			(void)fs_remove(aTmp);
+			return false;
 		}
-		m_pGetServers = HttpGet(pBestUrl);
-		// 10 seconds connection timeout, lower than 8KB/s for 10 seconds to fail.
-		m_pGetServers->Timeout(CTimeout{10000, 0, 8000, 10});
-		m_pHttp->Run(m_pGetServers);
-		m_State = STATE_REFRESHING;
-	}
-	else if(m_State == STATE_REFRESHING)
-	{
-		if(!m_pGetServers->Done())
-		{
-			return;
-		}
-		m_State = STATE_DONE;
-		std::shared_ptr<IHttpRequest> pGetServers = nullptr;
-		std::swap(m_pGetServers, pGetServers);
-
-		bool Success = true;
-		json_value *pJson = pGetServers->State() == EHttpState::DONE ? pGetServers->ResultJson() : nullptr;
-		Success = Success && pJson;
-		Success = Success && !Parse(pJson, &m_vServers);
-		json_value_free(pJson);
-		if(!Success)
-		{
-			log_error("serverbrowser_http", "failed getting serverlist, trying to find best URL");
-			m_pChooseMaster->Reset();
-			m_pChooseMaster->Refresh();
-		}
-		else
-		{
-			// Try to find new master if the current one returns
-			// results that are 5 minutes old.
-			int Age = SanitizeAge(pGetServers->ResultAgeSeconds());
-			if(Age > 300)
-			{
-				log_info("serverbrowser_http", "got stale serverlist, age=%ds, trying to find best URL", Age);
-				m_pChooseMaster->Refresh();
-			}
-		}
-	}
-}
-void CServerBrowserHttp::Refresh()
-{
-	if(m_State == STATE_WANTREFRESH || m_State == STATE_REFRESHING || m_State == STATE_NO_MASTER)
-	{
-		if(m_State == STATE_NO_MASTER)
-			m_State = STATE_WANTREFRESH;
-		m_pChooseMaster->Refresh();
-	}
-	if(m_State == STATE_DONE)
-		m_State = STATE_WANTREFRESH;
-	Update();
-}
-static bool ServerbrowserParseUrl(NETADDR *pOut, const char *pUrl)
-{
-	int Failure = net_addr_from_url(pOut, pUrl, nullptr, 0);
-	if(Failure || pOut->port == 0)
-		return true;
-	return false;
-}
-bool CServerBrowserHttp::Validate(json_value *pJson)
-{
-	std::vector<CServerInfo> vServers;
-	return Parse(pJson, &vServers);
-}
-bool CServerBrowserHttp::Parse(json_value *pJson, std::vector<CServerInfo> *pvServers)
-{
-	std::vector<CServerInfo> vServers;
-
-	const json_value &Json = *pJson;
-	const json_value &Servers = Json["servers"];
-	if(Servers.type != json_array)
-	{
 		return true;
 	}
-	for(unsigned int i = 0; i < Servers.u.array.length; i++)
-	{
-		const json_value &Server = Servers[i];
-		const json_value &Addresses = Server["addresses"];
-		const json_value &Info = Server["info"];
-		const json_value &Location = Server["location"];
-		int ParsedLocation = CServerInfo::LOC_UNKNOWN;
-		CServerInfo2 ParsedInfo;
-		if(Addresses.type != json_array || (Location.type != json_string && Location.type != json_none))
-		{
-			return true;
-		}
-		if(Location.type == json_string)
-		{
-			if(CServerInfo::ParseLocation(&ParsedLocation, Location))
-			{
-				return true;
-			}
-		}
-		if(CServerInfo2::FromJson(&ParsedInfo, &Info))
-		{
-			// Only skip the current server on parsing
-			// failure; the server info is "user input" by
-			// the game server and can be set to arbitrary
-			// values.
-			continue;
-		}
-		CServerInfo SetInfo = ParsedInfo;
-		SetInfo.m_Location = ParsedLocation;
-		SetInfo.m_NumAddresses = 0;
-		bool GotVersion6 = false;
-		for(unsigned int a = 0; a < Addresses.u.array.length; a++)
-		{
-			const json_value &Address = Addresses[a];
-			if(Address.type != json_string)
-			{
-				return true;
-			}
-			if(str_startswith(Addresses[a], "tw-0.6+udp://"))
-			{
-				GotVersion6 = true;
-				break;
-			}
-		}
-		for(unsigned int a = 0; a < Addresses.u.array.length; a++)
-		{
-			const json_value &Address = Addresses[a];
-			if(Address.type != json_string)
-			{
-				return true;
-			}
-			if(GotVersion6 && str_startswith(Addresses[a], "tw-0.7+udp://"))
-			{
-				continue;
-			}
-			NETADDR ParsedAddr;
-			if(ServerbrowserParseUrl(&ParsedAddr, Addresses[a]))
-			{
-				// Skip unknown addresses.
-				continue;
-			}
-			if(SetInfo.m_NumAddresses < (int)std::size(SetInfo.m_aAddresses))
-			{
-				SetInfo.m_aAddresses[SetInfo.m_NumAddresses] = ParsedAddr;
-				SetInfo.m_NumAddresses += 1;
-			}
-		}
-		if(SetInfo.m_NumAddresses > 0)
-		{
-			vServers.push_back(SetInfo);
-		}
-	}
-	*pvServers = vServers;
-	return false;
-}
 
-static const char *DEFAULT_SERVERLIST_URLS[] = {
-	"https://master1.ddnet.org/ddnet/15/servers.json",
-	"https://master2.ddnet.org/ddnet/15/servers.json",
-	"https://master3.ddnet.org/ddnet/15/servers.json",
-	"https://master4.ddnet.org/ddnet/15/servers.json",
-};
+	class CServerListSaveJob : public IJob
+	{
+		std::shared_ptr<CServerListSaveState> m_pState;
+
+		void Run() override
+		{
+			while(true)
+			{
+				std::string Path;
+				std::string Body;
+				{
+					std::lock_guard Lock(m_pState->m_Lock);
+					if(m_pState->m_Pending.empty())
+					{
+						m_pState->m_WorkerActive = false;
+						return;
+					}
+					Path = m_pState->m_Path;
+					Body = std::move(m_pState->m_Pending);
+					m_pState->m_Pending.clear();
+				}
+				if(!WriteServerListCache(Path, Body))
+					log_error("serverbrowser_http", "failed to persist serverlist cache");
+			}
+		}
+
+	public:
+		explicit CServerListSaveJob(std::shared_ptr<CServerListSaveState> pState) :
+			m_pState(std::move(pState))
+		{
+		}
+	};
+
+	class CServerBrowserHttp : public IServerBrowserHttp
+	{
+		struct CAttempt
+		{
+			int m_SourceIndex;
+			std::shared_ptr<IHttpRequest> m_pRequest;
+		};
+
+		struct CResponse
+		{
+			int m_SourceIndex;
+			int m_Age;
+			std::string m_Body;
+			std::vector<CServerInfo> m_vServers;
+		};
+
+		IEngine *m_pEngine;
+		IStorage *m_pStorage;
+		IHttp *m_pHttp;
+		std::vector<std::string> m_vUrls;
+		std::function<std::shared_ptr<IHttpRequest>(const char *)> m_RequestFactory;
+		std::function<int64_t()> m_Clock;
+		std::deque<int> m_Queue;
+		std::vector<CAttempt> m_vActive;
+		std::vector<CServerInfo> m_vServers;
+		std::string m_BestUrl;
+		std::string m_SourceHash;
+		std::shared_ptr<CServerListSaveState> m_pSaveState;
+		uint64_t m_Revision = 0;
+		int64_t m_ReceivedAt = 0;
+		int64_t m_RetryAt = 0;
+		int m_SourceAge = 0;
+		int m_Failures = 0;
+		bool m_Running = false;
+		bool m_HadSuccess = false;
+		bool m_Error = false;
+		bool m_Shutdown = false;
+
+		int64_t CurrentAge() const
+		{
+			return (int64_t)m_SourceAge + std::max<int64_t>(0, m_Clock() - m_ReceivedAt);
+		}
+
+		void Cancel()
+		{
+			for(auto &Attempt : m_vActive)
+				if(Attempt.m_pRequest)
+					Attempt.m_pRequest->Abort();
+			m_vActive.clear();
+			m_Queue.clear();
+			m_Running = false;
+		}
+
+		void Fill()
+		{
+			while(m_vActive.size() < MAX_CONCURRENT_REQUESTS && !m_Queue.empty())
+			{
+				const int SourceIndex = m_Queue.front();
+				m_Queue.pop_front();
+				std::shared_ptr<IHttpRequest> pRequest = m_RequestFactory(m_vUrls[SourceIndex].c_str());
+				if(!pRequest)
+					continue;
+				pRequest->Timeout(CTimeout{6000, 30000, 1024, 10});
+				pRequest->MaxResponseSize(MAX_RESPONSE_SIZE);
+				pRequest->LogProgress(HTTPLOG::FAILURE);
+				log_info("serverbrowser_http", "fetching serverlist, url='%s'", m_vUrls[SourceIndex].c_str());
+				m_pHttp->Run(pRequest);
+				m_vActive.push_back({SourceIndex, std::move(pRequest)});
+			}
+		}
+
+		void Publish(std::vector<CServerInfo> vServers, int Age, int SourceIndex, const std::string &Body)
+		{
+			m_vServers = std::move(vServers);
+			m_SourceAge = Age;
+			m_ReceivedAt = m_Clock();
+			m_BestUrl = m_vUrls[SourceIndex];
+			m_Error = false;
+			++m_Revision;
+			Save(Body, Age);
+			log_info("serverbrowser_http", "published serverlist, url='%s' age=%ds", m_BestUrl.c_str(), Age);
+		}
+
+		std::optional<CResponse> ProcessResponse(int SourceIndex, const std::shared_ptr<IHttpRequest> &pRequest)
+		{
+			if(pRequest->State() != EHttpState::DONE)
+				return std::nullopt;
+
+			json_value *pJson = pRequest->ResultJson();
+			std::vector<CServerInfo> vServers;
+			const bool Valid = pJson != nullptr && !ParseServerList(pJson, &vServers) && !vServers.empty();
+			json_value_free(pJson);
+			if(!Valid)
+				return std::nullopt;
+
+			const std::optional<int64_t> ResponseAge = pRequest->ResultAgeSeconds();
+			int Age = FRESH_SERVERLIST_AGE + 1;
+			if(ResponseAge.has_value())
+			{
+				if(*ResponseAge < 0 || *ResponseAge > MAX_CACHE_AGE)
+					return std::nullopt;
+				Age = (int)*ResponseAge;
+			}
+
+			unsigned char *pBody = nullptr;
+			size_t BodySize = 0;
+			pRequest->Result(&pBody, &BodySize);
+			if(pBody == nullptr || BodySize == 0 || BodySize > MAX_RESPONSE_SIZE)
+				return std::nullopt;
+
+			m_HadSuccess = true;
+			m_Failures = 0;
+			m_Error = false;
+			return CResponse{
+				SourceIndex,
+				Age,
+				std::string(reinterpret_cast<const char *>(pBody), BodySize),
+				std::move(vServers)};
+		}
+
+		void Save(const std::string &Body, int Age)
+		{
+			if(m_pStorage == nullptr || Body.empty() || Body.size() > MAX_RESPONSE_SIZE)
+				return;
+			m_pStorage->CreateFolder("cache", IStorage::TYPE_SAVE);
+			char aPath[IO_MAX_PATH_LENGTH];
+			m_pStorage->GetCompletePath(IStorage::TYPE_SAVE, CACHE_PATH, aPath, sizeof(aPath));
+			char aHeader[160];
+			str_format(aHeader, sizeof(aHeader), "TCSL1 %lld %d %s\n", (long long)time_timestamp(), Age, m_SourceHash.c_str());
+			bool StartWorker = false;
+			{
+				std::lock_guard Lock(m_pSaveState->m_Lock);
+				m_pSaveState->m_Path = aPath;
+				m_pSaveState->m_Pending = std::string(aHeader) + Body;
+				if(!m_pSaveState->m_WorkerActive)
+				{
+					m_pSaveState->m_WorkerActive = true;
+					StartWorker = true;
+				}
+			}
+			if(StartWorker)
+				m_pEngine->AddJob(std::make_shared<CServerListSaveJob>(m_pSaveState));
+		}
+
+		void Load()
+		{
+			if(m_pStorage == nullptr)
+				return;
+			IOHANDLE File = m_pStorage->OpenFile(CACHE_PATH, IOFLAG_READ, IStorage::TYPE_SAVE);
+			if(!File)
+				return;
+			const int64_t Length = io_length(File);
+			if(Length <= 0 || Length > (int64_t)MAX_RESPONSE_SIZE + 160)
+			{
+				io_close(File);
+				return;
+			}
+			std::string Data((size_t)Length, '\0');
+			const bool Read = io_read(File, Data.data(), Data.size()) == Data.size();
+			io_close(File);
+			const size_t HeaderEnd = Data.find('\n');
+			if(!Read || HeaderEnd == std::string::npos)
+				return;
+
+			long long Received;
+			int Age;
+			char aHash[SHA256_MAXSTRSIZE];
+			const std::string Header = Data.substr(0, HeaderEnd);
+			if(sscanf(Header.c_str(), "TCSL1 %lld %d %64s", &Received, &Age, aHash) != 3 || m_SourceHash != aHash || Age < 0 || Age > MAX_CACHE_AGE)
+				return;
+			const int64_t Now = time_timestamp();
+			if(Received < 0 || Received > Now)
+				return;
+			const int64_t Elapsed = Now - Received;
+			if(Elapsed + Age > MAX_CACHE_AGE)
+				return;
+
+			json_value *pJson = JsonParse(Data.data() + HeaderEnd + 1, Data.size() - HeaderEnd - 1);
+			std::vector<CServerInfo> vServers;
+			const bool Valid = pJson != nullptr && !ParseServerList(pJson, &vServers) && !vServers.empty();
+			json_value_free(pJson);
+			if(!Valid)
+				return;
+
+			m_vServers = std::move(vServers);
+			m_SourceAge = (int)(Age + Elapsed);
+			m_ReceivedAt = m_Clock();
+			++m_Revision;
+			log_info("serverbrowser_http", "loaded cached serverlist; refreshing in background");
+		}
+
+	public:
+		CServerBrowserHttp(IEngine *pEngine, IStorage *pStorage, IHttp *pHttp, std::vector<std::string> vUrls, const char *pPreviousBestUrl,
+			std::function<std::shared_ptr<IHttpRequest>(const char *)> RequestFactory, std::function<int64_t()> Clock) :
+			m_pEngine(pEngine),
+			m_pStorage(pStorage),
+			m_pHttp(pHttp),
+			m_vUrls(std::move(vUrls)),
+			m_RequestFactory(std::move(RequestFactory)),
+			m_Clock(std::move(Clock)),
+			m_pSaveState(std::make_shared<CServerListSaveState>())
+		{
+			if(m_vUrls.size() > MAX_URLS)
+				m_vUrls.resize(MAX_URLS);
+			std::string SourceKey;
+			for(const std::string &Url : m_vUrls)
+				SourceKey += Url + "\n";
+			char aHash[SHA256_MAXSTRSIZE];
+			sha256_str(sha256(SourceKey.data(), SourceKey.size()), aHash, sizeof(aHash));
+			m_SourceHash = aHash;
+
+			const auto Previous = std::find(m_vUrls.begin(), m_vUrls.end(), pPreviousBestUrl == nullptr ? "" : pPreviousBestUrl);
+			if(Previous != m_vUrls.end())
+				std::rotate(m_vUrls.begin(), Previous, Previous + 1);
+			Load();
+			Refresh();
+		}
+
+		~CServerBrowserHttp() override
+		{
+			Shutdown();
+		}
+
+		void Shutdown() override
+		{
+			if(m_Shutdown)
+				return;
+			m_Shutdown = true;
+			Cancel();
+		}
+
+		void Update() override
+		{
+			if(m_Shutdown)
+				return;
+			if(!m_Running)
+			{
+				if(m_RetryAt != 0 && m_Clock() >= m_RetryAt)
+					Refresh();
+				return;
+			}
+
+			std::vector<CResponse> vResponses;
+			for(size_t Index = 0; Index < m_vActive.size();)
+			{
+				const CAttempt Attempt = m_vActive[Index];
+				if(!Attempt.m_pRequest->Done())
+				{
+					Index++;
+					continue;
+				}
+				m_vActive.erase(m_vActive.begin() + Index);
+				std::optional<CResponse> Response = ProcessResponse(Attempt.m_SourceIndex, Attempt.m_pRequest);
+				if(Response.has_value())
+					vResponses.push_back(std::move(*Response));
+			}
+
+			if(!vResponses.empty())
+			{
+				auto Best = std::min_element(vResponses.begin(), vResponses.end(), [](const CResponse &Left, const CResponse &Right) {
+					return Left.m_Age < Right.m_Age;
+				});
+				if(m_vServers.empty() || Best->m_Age <= CurrentAge())
+				{
+					const int Age = Best->m_Age;
+					Publish(std::move(Best->m_vServers), Age, Best->m_SourceIndex, Best->m_Body);
+					if(Age <= FRESH_SERVERLIST_AGE)
+					{
+						m_RetryAt = 0;
+						Cancel();
+						return;
+					}
+				}
+				else
+				{
+					log_info("serverbrowser_http", "retained fresher cached serverlist, response age=%ds", Best->m_Age);
+				}
+			}
+
+			Fill();
+			if(m_vActive.empty() && m_Queue.empty())
+			{
+				m_Running = false;
+				if(!m_HadSuccess)
+				{
+					m_Error = true;
+					m_Failures = std::min(m_Failures + 1, 5);
+				}
+				const int RetryDelay = m_HadSuccess ? 60 : std::min(60, 5 << (m_Failures - 1));
+				m_RetryAt = m_Clock() + RetryDelay;
+				log_info("serverbrowser_http", "serverlist refresh %s; retry in %ds", m_HadSuccess ? "stale" : "failed", RetryDelay);
+			}
+		}
+
+		uint64_t Revision() const override { return m_Revision; }
+		bool IsRefreshing() const override { return m_Running; }
+		bool IsError() const override { return m_Error; }
+
+		void Refresh() override
+		{
+			if(m_Shutdown || m_Running)
+				return;
+			m_Running = true;
+			m_HadSuccess = false;
+			m_Error = false;
+			m_RetryAt = 0;
+			m_Queue.clear();
+			for(size_t Index = 0; Index < m_vUrls.size(); Index++)
+				m_Queue.push_back((int)Index);
+			Fill();
+			if(m_vActive.empty() && m_Queue.empty())
+			{
+				m_Running = false;
+				m_Error = true;
+			}
+		}
+
+		bool GetBestUrl(const char **ppBestUrl) const override
+		{
+			*ppBestUrl = m_BestUrl.empty() ? nullptr : m_BestUrl.c_str();
+			return m_BestUrl.empty();
+		}
+
+		int NumServers() const override { return (int)m_vServers.size(); }
+		const CServerInfo &Server(int Index) const override { return m_vServers[Index]; }
+	};
+
+	const char *DEFAULT_SERVERLIST_URLS[] = {
+		"https://master1.ddnet.org/ddnet/15/servers.json",
+		"https://master2.ddnet.org/ddnet/15/servers.json",
+		"https://master3.ddnet.org/ddnet/15/servers.json",
+		"https://master4.ddnet.org/ddnet/15/servers.json",
+	};
+} // namespace
+
+IServerBrowserHttp *CreateServerBrowserHttpWithSources(IEngine *pEngine, IStorage *pStorage, IHttp *pHttp,
+	std::vector<std::string> vUrls, const char *pPreviousBestUrl,
+	std::function<std::shared_ptr<IHttpRequest>(const char *)> RequestFactory,
+	std::function<int64_t()> Clock)
+{
+	return new CServerBrowserHttp(pEngine, pStorage, pHttp, std::move(vUrls), pPreviousBestUrl, std::move(RequestFactory), std::move(Clock));
+}
 
 IServerBrowserHttp *CreateServerBrowserHttp(IEngine *pEngine, IStorage *pStorage, IHttp *pHttp, const char *pPreviousBestUrl)
 {
-	char aaUrls[CChooseMaster::MAX_URLS][256];
-	const char *apUrls[CChooseMaster::MAX_URLS] = {nullptr};
-	const char **ppUrls = apUrls;
-	int NumUrls = 0;
+	std::vector<std::string> vUrls;
 	CLineReader LineReader;
 	if(LineReader.OpenFile(pStorage->OpenFile("ddnet-serverlist-urls.cfg", IOFLAG_READ, IStorage::TYPE_ALL)))
 	{
 		while(const char *pLine = LineReader.Get())
 		{
-			if(NumUrls == CChooseMaster::MAX_URLS)
-			{
+			if(vUrls.size() == MAX_URLS)
 				break;
-			}
-			str_copy(aaUrls[NumUrls], pLine);
-			apUrls[NumUrls] = aaUrls[NumUrls];
-			NumUrls += 1;
+			if(*pLine != '\0' && std::find(vUrls.begin(), vUrls.end(), pLine) == vUrls.end())
+				vUrls.emplace_back(pLine);
 		}
 	}
-	if(NumUrls == 0)
-	{
-		ppUrls = DEFAULT_SERVERLIST_URLS;
-		NumUrls = std::size(DEFAULT_SERVERLIST_URLS);
-	}
-	int PreviousBestIndex = -1;
-	for(int i = 0; i < NumUrls; i++)
-	{
-		if(str_comp(ppUrls[i], pPreviousBestUrl) == 0)
-		{
-			PreviousBestIndex = i;
-			break;
-		}
-	}
-	return new CServerBrowserHttp(pEngine, pHttp, ppUrls, NumUrls, PreviousBestIndex);
+	if(vUrls.empty())
+		for(const char *pUrl : DEFAULT_SERVERLIST_URLS)
+			vUrls.emplace_back(pUrl);
+
+	auto RequestFactory = [](const char *pUrl) {
+		std::unique_ptr<IHttpRequest> pRequest = HttpGet(pUrl);
+		return std::shared_ptr<IHttpRequest>(std::move(pRequest));
+	};
+	auto Clock = [] { return time_get() / time_freq(); };
+	return CreateServerBrowserHttpWithSources(pEngine, pStorage, pHttp, std::move(vUrls), pPreviousBestUrl, RequestFactory, Clock);
 }

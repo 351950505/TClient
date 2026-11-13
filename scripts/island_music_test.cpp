@@ -164,8 +164,10 @@ public:
 
 using IEngine = CJobPool;
 
-static int64_t time_get() { return 1000; }
+static int64_t s_TestTime = 1000;
+static int64_t time_get() { return s_TestTime; }
 static int64_t time_freq() { return 1000; }
+static void AdvanceTime(int Seconds) { s_TestTime += time_freq() * Seconds; }
 static int str_comp(const char *pLeft, const char *pRight) { return strcmp(pLeft, pRight); }
 static void str_format(char *pBuffer, size_t Size, const char *pFormat, ...)
 {
@@ -280,13 +282,55 @@ public:
 	int m_TcFontSize = 100;
 	char m_TcIslandFont[128] = "";
 	char m_TcCustomFont[255] = "Default";
+	char m_TcIslandLrclibBase[128] = "https://lrclib.net";
 };
 static CTestFontConfig g_Config;
 static int str_length(const char *pText) { return (int)strlen(pText); }
+static void str_copy(char *pBuffer, const char *pText, int BufferSize)
+{
+	snprintf(pBuffer, BufferSize, "%s", pText);
+}
 template<size_t Size>
 static void str_copy(char (&aBuffer)[Size], const char *pText)
 {
-	snprintf(aBuffer, Size, "%s", pText);
+	str_copy(aBuffer, pText, Size);
+}
+
+static int str_base64_decode(void *pDestination, int DestinationSize, const char *pData)
+{
+	static constexpr char DIGITS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	const int DataLength = str_length(pData);
+	if(DataLength % 4 != 0 || DataLength / 4 * 3 > DestinationSize)
+		return -1;
+	unsigned char *pOutput = static_cast<unsigned char *>(pDestination);
+	int OutputLength = 0;
+	for(int i = 0; i < DataLength; i += 4)
+	{
+		char aCopy[4] = {pData[i], pData[i + 1], pData[i + 2], pData[i + 3]};
+		int OutputBytes = 3;
+		if(i == DataLength - 4 && aCopy[3] == '=')
+		{
+			aCopy[3] = 'A';
+			OutputBytes = 2;
+			if(aCopy[2] == '=')
+			{
+				aCopy[2] = 'A';
+				OutputBytes = 1;
+			}
+		}
+		int aValues[4];
+		for(int j = 0; j < 4; ++j)
+		{
+			const char *pDigit = strchr(DIGITS, aCopy[j]);
+			if(pDigit == nullptr)
+				return -1;
+			aValues[j] = (int)(pDigit - DIGITS);
+		}
+		const int Value = (aValues[0] << 18) | (aValues[1] << 12) | (aValues[2] << 6) | aValues[3];
+		for(int j = 0; j < OutputBytes; ++j)
+			pOutput[OutputLength++] = (unsigned char)((Value >> (16 - j * 8)) & 0xff);
+	}
+	return OutputLength;
 }
 
 // Generated from the production file on every run, without rewriting its logic.
@@ -304,17 +348,17 @@ static constexpr const char *NET_FOUND_DETAIL = R"({"result":{"songs":[{"id":7,"
 static constexpr const char *NET_FOUND_COVER = R"({"result":{"songs":[{"id":7,"name":"TrackA","duration":120000,"artists":[{"name":"Artist"}],"album":{"picUrl":"https://cover.invalid/a.png"}}]}})";
 static constexpr const char *NET_LINES = R"({"lrc":{"lyric":"[00:01.00]Net lyric\n[00:03.00]next"}})";
 static constexpr const char *DETAIL_FOUND = R"({"songs":[{"album":{"picUrl":"https://cover.invalid/detail.png"}}]})";
-static constexpr const char *QQ_FOUND = R"({"code":0,"data":{"song":{"list":[{"songmid":"midA"}]}}})";
+static constexpr const char *QQ_FOUND = R"({"code":0,"data":{"song":{"list":[{"songmid":"midA","songname":"TrackA","albumname":"Album","interval":120,"singer":[{"name":"Artist"}]}]}}})";
 static constexpr const char *QQ_LINES = R"({"code":0,"lyric":"[00:01.00]QQ lyric\n[00:03.00]next"})";
 static constexpr const char *LRC_LINES = R"([{"syncedLyrics":"[00:01.00]lrclib lyric\n[00:03.00]next"}])";
 
-static CMusic::STrack Track(const char *pTitle = "TrackA")
+static CMusic::STrack Track(const char *pTitle = "TrackA", const char *pServiceId = "netease-title")
 {
 	CMusic::STrack Result;
 	Result.m_Valid = true;
 	Result.m_Title = pTitle;
 	Result.m_Artist = "Artist";
-	Result.m_ServiceId = "netease-title";
+	Result.m_ServiceId = pServiceId;
 	Result.m_DurationMs = 120000;
 	return Result;
 }
@@ -421,6 +465,9 @@ static std::string ResponseFor(EStage Stage)
 static void Prepare(CFixture &Fixture, EStage Stage, bool ParallelLyrics = false)
 {
 	Tick(Fixture);
+	// These legacy provider-chain cases cover NetEase -> QQ -> lrclib. v79 added
+	// Kugou between QQ and lrclib, which is tested separately by production code.
+	Fixture.Music().m_NeteaseData.at(Fixture.Music().m_ActiveKey).m_TriedKugou = true;
 	if(Stage == EStage::NET_SEARCH) return;
 	Last(NET_SEARCH)->Complete(Stage == EStage::DETAIL ? NET_FOUND_DETAIL : Stage == EStage::COVER ? NET_FOUND_COVER : NET_FOUND);
 	Tick(Fixture);
@@ -463,6 +510,22 @@ static void CheckReady(CFixture &Fixture, const char *pText)
 	auto &Music = Fixture.Music();
 	Check(Music.m_LyricsState == EState::READY, "lyrics never reached READY");
 	Check(!Music.m_vLines.empty() && Music.m_vLines[0].m_Text == pText, "wrong lyrics published");
+}
+
+static void TestQQMusicStartsOwnProvider()
+{
+	CFixture Fixture;
+	Fixture.m_Track = Track("TrackA", "Tencent.QQMusic");
+	Render(Fixture);
+	Check(Count(NET_SEARCH) == 0, "QQMusic incorrectly waited for a NetEase resolve");
+	Check(Count(QQ_SEARCH) == 1, "QQMusic did not start QQ search directly");
+
+	Last(QQ_SEARCH)->Complete(QQ_FOUND);
+	Tick(Fixture);
+	Check(Count(QQ_LYRIC) == 1, "QQ search did not start QQ lyric request");
+	Last(QQ_LYRIC)->Complete(QQ_LINES);
+	CheckReady(Fixture, "QQ lyric");
+	Check(Count(NET_SEARCH) == 0 && Count(QQ_SEARCH) == 1 && Count(QQ_LYRIC) == 1, "QQMusic provider chain repeated or used the wrong source");
 }
 
 static void TestDeferredPublication(EStage Stage, bool AbortBeforePublish)
@@ -612,15 +675,27 @@ static void TestLrclibFailure(const SFailure &Failure)
 {
 	CFixture Fixture;
 	Prepare(Fixture, EStage::LRCLIB);
-	auto pRequest = RequestFor(Fixture, EStage::LRCLIB);
-	pRequest->Complete(Failure.m_pBody, Failure.m_State, Failure.m_Status);
-	Tick(Fixture, 100);
 	const bool Offline = Failure.m_State != EHttpState::DONE || Failure.m_Status == 0;
+	const int Attempts = Offline ? 3 : 1;
+	for(int Attempt = 0; Attempt < Attempts; ++Attempt)
+	{
+		auto pRequest = RequestFor(Fixture, EStage::LRCLIB);
+		pRequest->Complete(Failure.m_pBody, Failure.m_State, Failure.m_Status);
+		Tick(Fixture);
+		if(Offline && Attempt + 1 < Attempts)
+		{
+			Check(Count(LRCLIB) == (size_t)Attempt + 1, "lrclib retried before its backoff elapsed");
+			AdvanceTime(3);
+			Tick(Fixture);
+			Check(Count(LRCLIB) == (size_t)Attempt + 2, "lrclib did not retry after its backoff elapsed");
+		}
+		if(Offline || Failure.m_Status >= 400)
+			Check(pRequest->m_JsonReads == 0, "failed transport/status was parsed");
+	}
+	Tick(Fixture, 10);
 	Check(Fixture.Music().m_LyricsState == (Offline ? EState::OFFLINE : EState::NOTFOUND), "lrclib failure did not settle to OFFLINE/NOTFOUND");
 	Check(Fixture.Music().m_vLines.empty(), "instrumental/invalid response created lyrics");
-	Check(Count(LRCLIB) == 1, "terminal lrclib failure retried each frame");
-	if(Offline || Failure.m_Status >= 400)
-		Check(pRequest->m_JsonReads == 0, "failed transport/status was parsed");
+	Check(Count(LRCLIB) == (size_t)Attempts, "lrclib failure used the wrong retry count");
 }
 
 static void TestInterleaving(EStage Auxiliary, bool UseLrclib, bool ParseAuxiliaryFirst)
@@ -694,6 +769,7 @@ public:
 
 int main()
 {
+	setvbuf(stdout, nullptr, _IONBF, 0);
 	CTests Tests;
 	Tests.Group("production text width cache invalidation", [&] {
 		Tests.Case("font changes invalidate and stable fonts reuse widths", [&] {
@@ -723,6 +799,9 @@ int main()
 			Check(Text.m_Calls == 6, "stable width was measured again");
 			g_Config = CTestFontConfig{};
 		});
+	});
+	Tests.Group("QQMusic session starts its native lyric provider", [&] {
+		Tests.Case("Tencent.QQMusic bypasses NetEase resolve", TestQQMusicStartsOwnProvider);
 	});
 	Tests.Group("worker-only parsing, single enqueue, STATE_DONE publication", [&] {
 		for(const auto Stage : STAGES)

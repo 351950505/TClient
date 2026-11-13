@@ -333,9 +333,9 @@ private:
 	char m_aNetVersion[128];
 
 	bool m_RefreshingHttp = false;
+	uint64_t m_HttpRevision = 0;
 	IServerBrowserHttp *m_pHttp = nullptr;
 	IServerBrowserPingCache *m_pPingCache = nullptr;
-	const char *m_pHttpPrevBestUrl = nullptr;
 
 	// Entries are owned by m_ServerlistStorage; m_vpServerlist holds non-owning
 	// pointers into it. std::deque keeps element pointers stable across growth,

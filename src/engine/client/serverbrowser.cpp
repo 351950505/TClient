@@ -1277,23 +1277,25 @@ void CServerBrowser::Update()
 	int64_t Now = time_get();
 
 	const char *pHttpBestUrl;
-	if(!m_pHttp->GetBestUrl(&pHttpBestUrl) && pHttpBestUrl != m_pHttpPrevBestUrl)
+	if(!m_pHttp->GetBestUrl(&pHttpBestUrl) && str_comp(pHttpBestUrl, g_Config.m_BrCachedBestServerinfoUrl) != 0)
 	{
 		str_copy(g_Config.m_BrCachedBestServerinfoUrl, pHttpBestUrl);
-		m_pHttpPrevBestUrl = pHttpBestUrl;
 	}
 
 	m_pHttp->Update();
 
-	if(m_ServerlistType != TYPE_LAN && m_RefreshingHttp && !m_pHttp->IsRefreshing())
+	if(m_ServerlistType != TYPE_LAN && m_HttpRevision != m_pHttp->Revision())
 	{
-		m_RefreshingHttp = false;
+		m_HttpRevision = m_pHttp->Revision();
+		m_RefreshingHttp = m_pHttp->IsRefreshing();
 		CleanUp();
 		UpdateFromHttp();
 		// TODO: move this somewhere else
 		Sort();
 		return;
 	}
+	if(m_RefreshingHttp && !m_pHttp->IsRefreshing())
+		m_RefreshingHttp = false;
 
 	{
 		CServerEntry *pEntry = m_pFirstReqServer;

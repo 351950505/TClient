@@ -1031,6 +1031,23 @@ public:
 		}
 	}
 
+	// Transparent mode keeps only a short shadow below the content. It is drawn
+	// with an ordinary quad so changing lyric width never creates shape textures.
+	void DrawTransparentShadow(float X, float Y, float W, float H)
+	{
+		if(W <= 8.0f || H <= 2.0f)
+			return;
+		const float Inset = std::min(W * 0.20f, std::max(4.0f, H * 0.35f));
+		const float ShadowW = W - Inset * 2.0f;
+		const float ShadowH = std::clamp(H * 0.08f, 2.0f, 4.0f);
+		if(ShadowW <= 0.0f)
+			return;
+		m_pGraphics->DrawRect4(X + Inset, Y + H, ShadowW, ShadowH,
+			ColorRGBA(0.0f, 0.0f, 0.0f, 0.14f), ColorRGBA(0.0f, 0.0f, 0.0f, 0.14f),
+			ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f), ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f),
+			IGraphics::CORNER_NONE, 0.0f);
+	}
+
 	bool IsPlayingCached() const
 	{
 		std::lock_guard<std::mutex> Lock(m_Mutex);
@@ -2038,7 +2055,7 @@ public:
 
 			// 播放器是 QQ/酷我/酷狗时，先向它自己的平台要歌词，不拿网易云的搜索凑数。
 			const int SourceService = TcDetectSourceService(Track.m_ServiceId);
-			if(SourceService > 1 && Meta.m_Resolved && !Meta.m_TriedLyric)
+			if(SourceService > 1 && !Meta.m_TriedLyric)
 			{
 				Meta.m_TriedLyric = true;
 				Meta.m_LyricState = ELyricsState::NOTFOUND;
@@ -3592,20 +3609,13 @@ public:
 		// The silhouette is baked into an RGBA texture with supersampled coverage
 		// instead of using DrawRect's triangle fan, which has no antialiasing and
 		// left the arcs visibly stair-stepped.
-		// 透明模式：只画内容，不画黑色胶囊底（适合叠在游戏画面上或自己加遮罩）。
-		// 没有黑底后白字压在亮画面上会糊，所以透明模式给文字加一圈黑描边。
-		// 但描边本身是硬边（引擎按字形轮廓外扩 1px 生成），直接在花哨的游戏
-		// 画面上仍然"抠图感"很重。这里在内容区先铺一层无边界的高斯暗化层：
-		// 它在四周渐隐到全透明，等于给文字一个柔和衬底，且不会出现可见轮廓。
+		// 透明模式不画底色和整圈阴影，只在胶囊下方留一条 2--4 px 的短渐隐。
+		// 文字描边仍独立可调，阴影本身只用普通四角渐变矩形，不生成圆角纹理。
 		const bool TransparentMode = g_Config.m_TcIslandTransparent != 0;
 		if(TransparentMode)
 		{
 			m_pTextRender->TextOutlineColor(0.0f, 0.0f, 0.0f, std::clamp((float)g_Config.m_TcIslandTransparentTextShadow / 100.0f, 0.0f, 1.0f));
-			// 渐隐衬底：比胶囊略大，模糊量给足，让边界落在画面之外看不出形状
-			const float ScrimBlur = std::max(6.0f, Height * 0.55f);
-			DrawShadow(X - Height * 0.25f, PillY + Height * 0.12f, Width + Height * 0.5f, Height * 0.9f,
-				(PillRounding > 0.0f ? Height * 0.45f : 0.0f), IGraphics::CORNER_ALL, ScrimBlur,
-				ColorRGBA(0.0f, 0.0f, 0.0f, 0.42f));
+			DrawTransparentShadow(X, PillY, Width, Height);
 		}
 		else
 		{

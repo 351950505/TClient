@@ -2,6 +2,28 @@
 
 #include <gtest/gtest.h>
 
+TEST(TClientRelay, UdpAlwaysPreferredWhenBothReady)
+{
+	EXPECT_EQ(RelayRouting::PreferredTransport(true, true, true), RelayRouting::ETransport::UDP);
+	EXPECT_EQ(RelayRouting::PreferredTransport(true, false, false), RelayRouting::ETransport::UDP);
+	EXPECT_EQ(RelayRouting::PreferredTransport(true, false, true), RelayRouting::ETransport::UDP);
+}
+
+TEST(TClientRelay, CloudflareOnlyUsedWhenEnabledAndReady)
+{
+	EXPECT_EQ(RelayRouting::PreferredTransport(false, true, true), RelayRouting::ETransport::CLOUDFLARE);
+	EXPECT_EQ(RelayRouting::PreferredTransport(false, false, true), RelayRouting::ETransport::NONE);
+	EXPECT_EQ(RelayRouting::PreferredTransport(false, true, false), RelayRouting::ETransport::NONE);
+}
+
+TEST(TClientRelay, CfOnlyTestNeverFallsBackToUdp)
+{
+	EXPECT_EQ(RelayRouting::PreferredTransport(true, true, true, true), RelayRouting::ETransport::CLOUDFLARE);
+	EXPECT_EQ(RelayRouting::PreferredTransport(true, true, false, true), RelayRouting::ETransport::NONE);
+	EXPECT_EQ(RelayRouting::PreferredTransport(true, false, true, true), RelayRouting::ETransport::NONE);
+	EXPECT_EQ(RelayRouting::PreferredTransport(true, false, false, true), RelayRouting::ETransport::NONE);
+}
+
 TEST(TClientRelay, DemoPlaybackNeverRegisters)
 {
 	// 原始崩溃路径：demo 的服务器地址类型为 0，不能传给 net_addr_str。

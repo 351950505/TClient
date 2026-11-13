@@ -12,6 +12,12 @@
 
 ##### translated strings #####
 
+Cloudflare signal backup (experimental, UDP preferred)
+== Cloudflare 信令备用（试验，优先阿里云 UDP）
+
+Cloudflare signals (experimental, no UDP fallback)
+== Cloudflare 信令（试验，无阿里云回退）
+
 Settings gear color
 == 设置状态齿轮颜色
 

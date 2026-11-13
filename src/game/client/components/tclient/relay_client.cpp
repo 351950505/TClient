@@ -4,14 +4,33 @@
    任一方 NAT 是对称型导致打不通时，自动回退信令中转。 */
 #include "relay_client.h"
 
+#include "relay_ws_transport.h"
+
+#include <base/log.h>
+#include <base/net.h>
+#include <base/secure.h>
+#include <base/str.h>
+#include <base/time.h>
+
 #include <engine/shared/config.h>
 
 #include <game/client/gameclient.h>
 
-#include <base/log.h>
-#include <base/net.h>
-#include <base/str.h>
-#include <base/time.h>
+#include <cstdlib>
+
+CRelayClient::CRelayClient() = default;
+CRelayClient::~CRelayClient() = default;
+
+void CRelayClient::OnShutdown()
+{
+	OnReset();
+	if(m_SocketValid)
+	{
+		net_udp_close(m_Socket);
+		m_Socket = nullptr;
+		m_SocketValid = false;
+	}
+}
 
 void CRelayClient::ConRelayStatus(IConsole::IResult *pResult, void *pUserData)
 {
@@ -26,18 +45,27 @@ void CRelayClient::FormatStatus(char *pBuf, int Size) const
 	char aGame[64];
 	if(!GameServerAddr(aGame, sizeof(aGame)))
 		str_copy(aGame, "(未连接游戏服)");
+	if(g_Config.m_TcRelayCfOnly)
+	{
+		str_format(pBuf, Size, "信令: Cloudflare | 服 %s | %s | %s", aGame,
+			!CfEnabled() ? "关闭（仅本地）" : m_CfOnline ? "在线" :
+								       "连接中（仅本地）",
+			m_CfError.empty() ? "CF-only，无 UDP 回退" : m_CfError.c_str());
+		return;
+	}
 	const float Age = Client()->LocalTime() - m_LastServerReply;
-	const float SinceReg = Client()->LocalTime() - m_LastRegTime;
+	const auto Transport = PreferredTransport();
+	const char *pTransport = Transport == RelayRouting::ETransport::UDP        ? "阿里云 UDP" :
+				 Transport == RelayRouting::ETransport::CLOUDFLARE ? "Cloudflare" :
+										     "仅本地";
 	str_format(pBuf, Size,
-		"信令: %s | 服 %s | 回执 %.1fs 前 | REG %.1fs 前 | %s | 中转 %s | P2P %s | 待发 %d",
-		Online() ? "已连接" : "未连接",
-		aGame,
+		"信令: %s | 服 %s | UDP %s (回执 %.1fs 前) | CF %s | 待发 %d | %s",
+		pTransport, aGame, UdpOnline() ? "在线" : "未连接",
 		Age < 1e8f ? Age : -1.0f,
-		SinceReg < 1e8f ? SinceReg : -1.0f,
-		m_aFailure,
-		m_RelayAddrValid ? g_Config.m_TcRelayAddr : "(地址无效)",
-		g_Config.m_TcRelayP2p ? "开" : "关",
-		(int)m_vSendQueue.size());
+		!CfEnabled() ? "关闭" : m_CfOnline ? "在线" :
+						     "未连接",
+		(int)m_vSendQueue.size(),
+		CfEnabled() && !m_CfError.empty() ? m_CfError.c_str() : m_aFailure);
 }
 
 void CRelayClient::OnConsoleInit()
@@ -49,6 +77,21 @@ void CRelayClient::OnInit()
 {
 	if(!g_Config.m_TcRelay)
 		return;
+	if(!m_aUid[0])
+	{
+		unsigned aSeed[2];
+		secure_random_fill(aSeed, sizeof(aSeed));
+		str_format(m_aUid, sizeof(m_aUid), "%08x%08x", aSeed[0], aSeed[1]);
+	}
+	if(g_Config.m_TcRelayCfOnly)
+	{
+		if(m_SocketValid)
+			net_udp_close(m_Socket);
+		m_Socket = nullptr;
+		m_SocketValid = false;
+		m_RelayAddrValid = false;
+		return;
+	}
 	if(net_addr_from_str(&m_RelayAddr, g_Config.m_TcRelayAddr) != 0)
 	{
 		log_error("relay", "invalid tc_relay_addr '%s', relay disabled", g_Config.m_TcRelayAddr);
@@ -66,11 +109,7 @@ void CRelayClient::OnInit()
 	m_SocketValid = m_Socket != nullptr; // net_udp_create 失败时返回 nullptr
 	if(!m_SocketValid)
 		log_error("relay", "failed to create udp socket, relay disabled");
-	// 会话 uid：纯随机十六进制（不含名字——名字可能带空格，会被信令的
-	// 空格分词截断导致 uid 错乱）。名字只作为日志字段放最后。
-	const unsigned Seed1 = (unsigned)time_get();
-	const unsigned Seed2 = (unsigned)(uintptr_t)this;
-	str_format(m_aUid, sizeof(m_aUid), "%08x%08x", Seed1, Seed2);
+	// Keep the same random uid across UDP socket retries and CF reconnects.
 }
 
 void CRelayClient::LogOnce(const char *pReason, const char *pDetail)
@@ -100,6 +139,13 @@ void CRelayClient::LogOnce(const char *pReason, const char *pDetail)
 
 void CRelayClient::OnReset()
 {
+	if(m_pCfTransport)
+		m_pCfTransport->Stop();
+	m_CfOnline = false;
+	m_CfRoom.clear();
+	m_CfUrl.clear();
+	m_CfError.clear();
+	m_LastTransport = RelayRouting::ETransport::NONE;
 	m_vSendQueue.clear();
 	m_vPeers.clear();
 	m_LastServerReply = -1e9f;
@@ -112,21 +158,105 @@ void CRelayClient::OnReset()
 	m_LastRecvPayloadTime = -1e9f;
 }
 
+bool CRelayClient::UdpOnline() const
+{
+	return !g_Config.m_TcRelayCfOnly && m_SocketValid && Client()->LocalTime() - m_LastServerReply < 30.0f;
+}
+
+bool CRelayClient::CfEnabled() const
+{
+#if defined(CONF_FAMILY_WINDOWS)
+	return g_Config.m_TcRelay && g_Config.m_TcRelayCf;
+#else
+	return false;
+#endif
+}
+
+RelayRouting::ETransport CRelayClient::PreferredTransport() const
+{
+	return RelayRouting::PreferredTransport(UdpOnline(), CfEnabled(), m_CfOnline, g_Config.m_TcRelayCfOnly != 0);
+}
+
 bool CRelayClient::Online() const
 {
-	return m_SocketValid && Client()->LocalTime() - m_LastServerReply < 30.0f;
+	return g_Config.m_TcRelay && PreferredTransport() != RelayRouting::ETransport::NONE;
 }
 
 bool CRelayClient::Available() const
 {
-	if(!m_SocketValid)
+	if(!g_Config.m_TcRelay)
 		return false;
 	if(Online())
 		return true;
-	for(const SPeer &Peer : m_vPeers)
-		if(PeerDirect(Peer))
-			return true;
+	if(g_Config.m_TcRelayCfOnly != 0)
+		return false;
+	if(m_SocketValid)
+		for(const SPeer &Peer : m_vPeers)
+			if(PeerDirect(Peer))
+				return true;
 	return false;
+}
+
+void CRelayClient::DeliverPayload(const char *pPayload, const char *pSource)
+{
+	if(str_length(pPayload) > 160 || !str_startswith(pPayload, "\xE2\x9F\xA8"))
+		return;
+	const float Now = Client()->LocalTime();
+	// CF is deduplicated by sender/session/sequence in the transport. Do not
+	// suppress distinct legitimate signals just because their payloads match.
+	if(str_comp(pSource, "CF") != 0 && str_comp(m_aLastRecvPayload, pPayload) == 0 && Now - m_LastRecvPayloadTime < 1.0f)
+		return;
+	str_copy(m_aLastRecvPayload, pPayload);
+	m_LastRecvPayloadTime = Now;
+	LogOnce("recv payload", pSource);
+	GameClient()->m_PingWheel.OnRelayPayload(pPayload);
+}
+
+void CRelayClient::PumpCloudflare()
+{
+	if(!CfEnabled() || !m_aGameAddr[0])
+	{
+		if(m_pCfTransport && !m_CfRoom.empty())
+			m_pCfTransport->Stop();
+		m_CfOnline = false;
+		m_CfRoom.clear();
+		m_CfUrl.clear();
+		m_CfError.clear();
+		return;
+	}
+	const char *pKey = std::getenv("CF_WS_PROTOTYPE_KEY");
+	if(!pKey || !pKey[0])
+	{
+		if(m_pCfTransport && !m_CfRoom.empty())
+			m_pCfTransport->Stop();
+		m_CfRoom.clear();
+		m_CfUrl.clear();
+		m_CfOnline = false;
+		m_CfError = "缺少 CF 试验访问密钥，请使用测试启动器";
+		LogOnce("CF backup unavailable", m_CfError.c_str());
+		return;
+	}
+	if(!m_pCfTransport)
+		m_pCfTransport = std::make_unique<RelayWs::CTransport>();
+	if(m_CfRoom != m_aGameAddr || m_CfUrl != g_Config.m_TcRelayCfUrl)
+	{
+		m_CfOnline = false;
+		m_CfRoom = m_aGameAddr;
+		m_CfUrl = g_Config.m_TcRelayCfUrl;
+		m_pCfTransport->Start(m_CfUrl, m_CfRoom, m_aUid, pKey);
+	}
+	for(const auto &Event : m_pCfTransport->Drain())
+	{
+		if(Event.m_Type == RelayWs::CEvent::EType::SIGNAL)
+			DeliverPayload(Event.m_Payload.c_str(), "CF");
+	}
+	const auto Status = m_pCfTransport->Status();
+	if(m_CfOnline != Status.m_Online)
+		LogOnce("CF backup state", Status.m_Online ? "connected" : "disconnected");
+	m_CfOnline = Status.m_Online;
+	m_CfError = Status.m_Error;
+	if(!m_CfError.empty())
+		LogOnce("CF backup error", m_CfError.c_str());
 }
 
 bool CRelayClient::PeerDirect(const SPeer &Peer) const
@@ -147,6 +277,8 @@ bool CRelayClient::GameServerAddr(char *pBuf, int Size) const
 
 bool CRelayClient::SendReg()
 {
+	if(g_Config.m_TcRelayCfOnly)
+		return false;
 	char aGameAddr[64];
 	if(!GameServerAddr(aGameAddr, sizeof(aGameAddr)))
 	{
@@ -211,27 +343,31 @@ void CRelayClient::HandlePeer(const char *pUid, const char *pAddrStr)
 
 void CRelayClient::Broadcast(const char *pPayload)
 {
-	if(!m_SocketValid || str_length(pPayload) > 160)
+	if(!g_Config.m_TcRelay || str_length(pPayload) > 160)
+		return;
+	if(PreferredTransport() == RelayRouting::ETransport::CLOUDFLARE)
+	{
+		if(m_pCfTransport->Send(pPayload))
+			LogOnce("CF signal queued", nullptr);
+		return;
+	}
+	if(g_Config.m_TcRelayCfOnly || !m_SocketValid)
 		return;
 	// P2P 直发默认关闭（2026-10-31 用户反馈）：走 P2P 的接收方只有已打通的
 	// 客户端玩家，其他人看不到 ping。tc_relay_p2p=1 可临时开回测试。
-	const int SentDirect = RelayRouting::Broadcast(g_Config.m_TcRelayP2p != 0, Online(), m_vPeers,
-		[this](const SPeer &Peer) { return PeerDirect(Peer); },
-		[this, pPayload](const SPeer &Peer) {
+	const int SentDirect = RelayRouting::Broadcast(g_Config.m_TcRelayP2p != 0, Online(), m_vPeers, [this](const SPeer &Peer) { return PeerDirect(Peer); }, [this, pPayload](const SPeer &Peer) {
 			char aBuf[192];
 			str_format(aBuf, sizeof(aBuf), "D %s", pPayload);
-			net_udp_send(m_Socket, &Peer.m_Addr, aBuf, str_length(aBuf) + 1);
-		},
-		[this, pPayload] {
+			net_udp_send(m_Socket, &Peer.m_Addr, aBuf, str_length(aBuf) + 1); }, [this, pPayload] {
 			if(m_vSendQueue.size() < 8) // 限深：ping 频率远低于此
 			{
 				SQueued Item;
 				Item.m_Payload = pPayload;
 				Item.m_UseRelay = true;
+				Item.m_QueuedAt = Client()->LocalTime();
 				m_vSendQueue.push_back(Item);
 				LogOnce("broadcast queued (relay)", nullptr);
-			}
-		});
+			} });
 	if(SentDirect > 0)
 	{
 		char aPeers[16];
@@ -324,23 +460,17 @@ void CRelayClient::PumpRecv()
 			continue;
 		if(!str_startswith(pPayload, "\xE2\x9F\xA8"))
 			continue; // 非 ping 载荷（可能是扫描/误投），丢弃
-		// 去重：同一载荷可能同时经 P2P 与中转到达
-		const float Now = Client()->LocalTime();
-		if(str_comp(m_aLastRecvPayload, pPayload) == 0 && Now - m_LastRecvPayloadTime < 1.0f)
-			continue;
-		str_copy(m_aLastRecvPayload, pPayload);
-		m_LastRecvPayloadTime = Now;
-		// 纯 transport：载荷原样转投，"这是什么/要不要收"由订阅方决定
-		LogOnce("recv payload", Direct ? "p2p" : "relay");
-		GameClient()->m_PingWheel.OnRelayPayload(pPayload);
+		DeliverPayload(pPayload, Direct ? "p2p" : "UDP");
 	}
 }
 
 void CRelayClient::PumpSend()
 {
+	if(g_Config.m_TcRelayCfOnly)
+		return;
 	const float Now = Client()->LocalTime();
 	// 心跳：在线时每 10s 重注册；无回执时 2s 快速重试。
-	const float RegInterval = Online() ? 10.0f : 2.0f;
+	const float RegInterval = UdpOnline() ? 10.0f : 2.0f;
 	if(Now - m_LastRegTime > RegInterval && !SendReg())
 		return;
 	// 打洞探针：P2P 关闭时不发（保存 NAT 映射无意义）
@@ -372,7 +502,14 @@ void CRelayClient::PumpSend()
 	m_LastSendTime = Now;
 	SQueued Item = m_vSendQueue.front();
 	m_vSendQueue.erase(m_vSendQueue.begin());
-	if(!Item.m_UseRelay)
+	if(!Item.m_UseRelay || Now - Item.m_QueuedAt > 2.0f)
+		return;
+	if(PreferredTransport() == RelayRouting::ETransport::CLOUDFLARE)
+	{
+		m_pCfTransport->Send(Item.m_Payload.c_str());
+		return;
+	}
+	if(!UdpOnline())
 		return;
 	char aGameAddr[64];
 	if(!GameServerAddr(aGameAddr, sizeof(aGameAddr)))
@@ -387,53 +524,65 @@ void CRelayClient::OnRender()
 {
 	if(!g_Config.m_TcRelay)
 	{
-		if(m_SocketValid)
-		{
-			net_udp_close(m_Socket);
-			m_Socket = nullptr;
-			m_SocketValid = false;
-			OnReset();
-		}
+		if(m_SocketValid || !m_CfRoom.empty())
+			OnShutdown();
 		return;
 	}
 	const float Now = Client()->LocalTime();
 	if(m_LastRenderTime > -1e8f && Now - m_LastRenderTime > 15.0f)
 	{
-		char aGap[32];
-		str_format(aGap, sizeof(aGap), "%.0fs", Now - m_LastRenderTime);
-		LogOnce("render resumed, retry registration", aGap);
+		LogOnce("render resumed, retry registration", nullptr);
 		m_LastRegTime = -1e9f;
 	}
 	m_LastRenderTime = Now;
-	if(!m_SocketValid)
-	{
-		if(Now - m_LastSocketAttempt < 5.0f)
-			return;
-		m_LastSocketAttempt = Now;
-		OnInit();
-		str_copy(m_aFailure, m_SocketValid ? "套接字已就绪" : "套接字或地址不可用");
-		if(!m_SocketValid)
-			return;
-	}
 	char aGameAddr[64];
 	if(!GameServerAddr(aGameAddr, sizeof(aGameAddr)))
 	{
 		if(m_aGameAddr[0])
-		{
-			char aState[16];
-			str_format(aState, sizeof(aState), "%d", Client()->State());
-			LogOnce("registration paused (not connected)", aState);
 			OnReset();
-		}
 		str_copy(m_aFailure, "未连接游戏服");
 		return;
 	}
+	if(!m_aUid[0])
+		OnInit();
 	if(str_comp(m_aGameAddr, aGameAddr) != 0)
 	{
 		OnReset();
 		str_copy(m_aGameAddr, aGameAddr);
 		LogOnce("registration resumed", aGameAddr);
 	}
-	PumpRecv();
-	PumpSend();
+	const bool CfOnly = g_Config.m_TcRelayCfOnly != 0;
+	if(CfOnly && m_SocketValid)
+	{
+		net_udp_close(m_Socket);
+		m_Socket = nullptr;
+		m_SocketValid = false;
+		m_RelayAddrValid = false;
+		m_LastServerReply = -1e9f;
+		m_vPeers.clear();
+		m_vSendQueue.clear();
+	}
+	if(!CfOnly)
+	{
+		if(!m_SocketValid && Now - m_LastSocketAttempt >= 5.0f)
+		{
+			m_LastSocketAttempt = Now;
+			OnInit();
+		}
+		if(m_SocketValid)
+			PumpRecv();
+	}
+	PumpCloudflare();
+	if(m_SocketValid && !CfOnly)
+		PumpSend();
+	else if(CfOnly)
+		m_vSendQueue.clear();
+	const auto Transport = PreferredTransport();
+	if(Transport != m_LastTransport)
+	{
+		LogOnce("preferred transport", Transport == RelayRouting::ETransport::UDP        ? "UDP" :
+					       Transport == RelayRouting::ETransport::CLOUDFLARE ? "CF" :
+												   "local only");
+		m_LastTransport = Transport;
+	}
 }

@@ -2739,6 +2739,11 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcPingwheel, TCLocalize("Enable ping wheel (off = cannot send, does not receive others)"), &g_Config.m_TcPingwheel, &View, LineSize);
 	static CButtonContainer s_PingReaderButton, s_PingClearButton;
 	DoLine_KeyReader(View, s_PingReaderButton, s_PingClearButton, TCLocalize("Ping wheel key (hold to choose)"), "+tc_pingwheel");
+#if defined(CONF_FAMILY_WINDOWS)
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcRelayCf,
+		g_Config.m_TcRelayCfOnly ? TCLocalize("Cloudflare signals (experimental, no UDP fallback)") : TCLocalize("Cloudflare signal backup (experimental, UDP preferred)"),
+		&g_Config.m_TcRelayCf, &View, LineSize);
+#endif
 
 	View.HSplitTop(MarginSmall * 4, nullptr, &View);
 	View.HSplitTop(LineSize, &Button, &View);

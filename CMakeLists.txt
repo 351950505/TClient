@@ -825,7 +825,7 @@ endif()
 
 if(TARGET_OS STREQUAL "windows")
   set(PLATFORM_CLIENT)
-  set(PLATFORM_CLIENT_LIBS opengl32.lib winmm.lib imm32.lib windowsapp.lib)
+  set(PLATFORM_CLIENT_LIBS opengl32.lib winmm.lib imm32.lib windowsapp.lib winhttp.lib)
   set(PLATFORM_LIBS)
   list(APPEND PLATFORM_LIBS shlwapi.lib) # PathIsRelativeW
   list(APPEND PLATFORM_LIBS version.lib) # GetFileVersionInfoSizeW
@@ -2943,6 +2943,8 @@ if(CLIENT)
     components/tclient/rainbow.h
     components/tclient/relay_client.cpp
     components/tclient/relay_client.h
+    components/tclient/relay_ws_transport.cpp
+    components/tclient/relay_ws_transport.h
     components/tclient/optimizer.cpp
     components/tclient/optimizer.h
     components/tclient/scripting.cpp
@@ -3569,6 +3571,7 @@ if(TOOLS)
     map_test.cpp
     packetgen.cpp
     stun.cpp
+    tclient_cf_test_launcher.cpp
     tclient_updater.cpp
     twping.cpp
     unicode_confusables.cpp
@@ -3583,7 +3586,7 @@ if(TOOLS)
         continue()
       endif()
       # TClientUpdater is added as its own target further down, it must not link the engine.
-      if(TOOL MATCHES "^tclient_updater$")
+      if(TOOL MATCHES "^tclient_(updater|cf_test_launcher)$")
         continue()
       endif()
       set(TOOL_DEPS ${DEPS})
@@ -3656,6 +3659,15 @@ endif()
 # TClientUpdater: install helper for the TClient autoupdater. It is a plain Win32 program that
 # only needs zlib, so it is built separately from the tools above (which link the whole engine).
 if(TARGET_OS STREQUAL "windows")
+  add_executable(TClientCFTestLauncher WIN32 src/tools/tclient_cf_test_launcher.cpp)
+  target_link_libraries(TClientCFTestLauncher user32.lib gdi32.lib)
+  target_compile_features(TClientCFTestLauncher PRIVATE cxx_std_17)
+  if(MSVC)
+    target_compile_options(TClientCFTestLauncher PRIVATE /utf-8)
+  endif()
+  if(MINGW)
+    target_link_options(TClientCFTestLauncher PRIVATE -municode)
+  endif()
   add_executable(TClientUpdater
     src/tools/tclient_updater.cpp
     ${ZLIB_DEP}

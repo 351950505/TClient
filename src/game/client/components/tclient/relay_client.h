@@ -11,54 +11,81 @@
 #ifndef GAME_CLIENT_COMPONENTS_TCLIENT_RELAY_CLIENT_H
 #define GAME_CLIENT_COMPONENTS_TCLIENT_RELAY_CLIENT_H
 
-#include <string>
-#include <vector>
-
 #include <engine/client.h>
 #include <engine/console.h>
 
 #include <game/client/component.h>
 
-namespace RelayRouting
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace RelayWs
 {
-// 只向真实在线的游戏服注册；demo 回放的 ServerAddress 为空，不能格式化为地址。
-inline bool CanRegister(IClient::EClientState ClientState, unsigned int ServerAddressType)
-{
-	return ClientState == IClient::STATE_ONLINE && (ServerAddressType & NETTYPE_ALL) != 0;
+	class CTransport;
 }
 
-// Keep direct delivery and relay suppression in one decision. Fresh peers only
-// suppress the relay when direct delivery is actually enabled.
-template<typename TPeers, typename TDirect, typename TSendDirect, typename TSendRelay>
-int Broadcast(bool P2pEnabled, bool RelayOnline, const TPeers &Peers, TDirect Direct, TSendDirect SendDirect, TSendRelay SendRelay)
+namespace RelayRouting
 {
-	bool AllDirect = P2pEnabled && !Peers.empty();
-	int SentDirect = 0;
-	if(P2pEnabled)
+	enum class ETransport
 	{
-		for(const auto &Peer : Peers)
-		{
-			if(Direct(Peer))
-			{
-				SendDirect(Peer);
-				++SentDirect;
-			}
-			else
-				AllDirect = false;
-		}
+		NONE,
+		UDP,
+		CLOUDFLARE,
+	};
+
+	inline ETransport PreferredTransport(bool UdpOnline, bool CfEnabled, bool CfOnline, bool CfOnly = false)
+	{
+		if(CfOnly)
+			return CfEnabled && CfOnline ? ETransport::CLOUDFLARE : ETransport::NONE;
+		if(UdpOnline)
+			return ETransport::UDP;
+		if(CfEnabled && CfOnline)
+			return ETransport::CLOUDFLARE;
+		return ETransport::NONE;
 	}
-	if(RelayOnline && !AllDirect)
-		SendRelay();
-	return SentDirect;
-}
+
+	// 只向真实在线的游戏服注册；demo 回放的 ServerAddress 为空，不能格式化为地址。
+	inline bool CanRegister(IClient::EClientState ClientState, unsigned int ServerAddressType)
+	{
+		return ClientState == IClient::STATE_ONLINE && (ServerAddressType & NETTYPE_ALL) != 0;
+	}
+
+	// Keep direct delivery and relay suppression in one decision. Fresh peers only
+	// suppress the relay when direct delivery is actually enabled.
+	template<typename TPeers, typename TDirect, typename TSendDirect, typename TSendRelay>
+	int Broadcast(bool P2pEnabled, bool RelayOnline, const TPeers &Peers, TDirect Direct, TSendDirect SendDirect, TSendRelay SendRelay)
+	{
+		bool AllDirect = P2pEnabled && !Peers.empty();
+		int SentDirect = 0;
+		if(P2pEnabled)
+		{
+			for(const auto &Peer : Peers)
+			{
+				if(Direct(Peer))
+				{
+					SendDirect(Peer);
+					++SentDirect;
+				}
+				else
+					AllDirect = false;
+			}
+		}
+		if(RelayOnline && !AllDirect)
+			SendRelay();
+		return SentDirect;
+	}
 } // namespace RelayRouting
 
 class CRelayClient : public CComponent
 {
 public:
+	CRelayClient();
+	~CRelayClient() override;
 	int Sizeof() const override { return sizeof(*this); }
 
 	void OnInit() override;
+	void OnShutdown() override;
 	void OnReset() override;
 	void OnRender() override;
 	void OnConsoleInit() override;
@@ -78,14 +105,15 @@ private:
 	{
 		char m_aUid[48] = "";
 		NETADDR m_Addr = {};
-		float m_LastSeen = -1e9f;   // 最近一次收到 PEER 推送或探针
+		float m_LastSeen = -1e9f; // 最近一次收到 PEER 推送或探针
 		float m_LastDirect = -1e9f; // 最近一次收到该地址的直连包
-		float m_LastProbe = -1e9f;  // 最近一次向该地址打洞（主动和回复共用）
+		float m_LastProbe = -1e9f; // 最近一次向该地址打洞（主动和回复共用）
 	};
 	struct SQueued
 	{
 		std::string m_Payload;
 		bool m_UseRelay = false;
+		float m_QueuedAt = 0.0f;
 	};
 
 	NETSOCKET m_Socket = {};
@@ -110,10 +138,21 @@ private:
 	SLogMemo m_aLogMemo[8] = {};
 	int m_NumLogMemo = 0;
 	std::vector<SQueued> m_vSendQueue; // 待发载荷
-	std::vector<SPeer> m_vPeers;       // 同服成员（P2P 候选）
-	char m_aLastRecvPayload[64] = "";  // 收到的上一条载荷（P2P+中转去重）
+	std::vector<SPeer> m_vPeers; // 同服成员（P2P 候选）
+	char m_aLastRecvPayload[161] = ""; // 收到的上一条载荷（P2P+中转去重）
 	float m_LastRecvPayloadTime = -1e9f;
+	std::unique_ptr<RelayWs::CTransport> m_pCfTransport;
+	std::string m_CfRoom;
+	std::string m_CfUrl;
+	std::string m_CfError;
+	bool m_CfOnline = false;
+	RelayRouting::ETransport m_LastTransport = RelayRouting::ETransport::NONE;
 
+	bool UdpOnline() const;
+	bool CfEnabled() const;
+	RelayRouting::ETransport PreferredTransport() const;
+	void PumpCloudflare();
+	void DeliverPayload(const char *pPayload, const char *pSource);
 	bool GameServerAddr(char *pBuf, int Size) const;
 	static void ConRelayStatus(IConsole::IResult *pResult, void *pUserData);
 	void HandlePeer(const char *pUid, const char *pAddrStr);

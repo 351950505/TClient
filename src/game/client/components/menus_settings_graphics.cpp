@@ -419,10 +419,7 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 		static const std::vector<int> s_aAspectValues = {0, 100, 111, 125, 133, 150, 160, 178, 200, 250};
 		static std::vector<const char *> s_aAspectNames;
 		s_aAspectNames = {TCLocalize("Off"), TCLocalize("1:1"), TCLocalize("10:9"), TCLocalize("5:4"), TCLocalize("4:3"), TCLocalize("3:2"), TCLocalize("16:10"), TCLocalize("16:9"), TCLocalize("2:1"), TCLocalize("5:2")};
-		static char s_aInputNum[16] = "";
-		static char s_aInputDen[16] = "";
-		static float s_LastNum = 0, s_LastDen = 0;
-		int AspectSelectedOld = -1;
+			int AspectSelectedOld = -1;
 		for(size_t i = 0; i < s_aAspectValues.size(); ++i)
 		{
 			if(s_aAspectValues[i] == g_Config.m_TcAspectRatio)
@@ -451,14 +448,29 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 			static CUi::SDropDownState s_StretchDropDownState;
 			static CScrollRegion s_StretchDropDownScrollRegion;
 			s_StretchDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_StretchDropDownScrollRegion;
-			const int StretchNew = Ui()->DoDropDown(&Button, StretchOld, apStretchNames, 2, s_StretchDropDownState);
-			if(StretchNew != StretchOld)
-			{
-				g_Config.m_TcAspectRatioStretch = StretchNew;
-				GameClient()->m_TClient.QueueForcedAspectUpdate();
-			}
+				const int StretchNew = Ui()->DoDropDown(&Button, StretchOld, apStretchNames, 2, s_StretchDropDownState);
+				if(StretchNew != StretchOld)
+				{
+					g_Config.m_TcAspectRatioStretch = StretchNew;
+					GameClient()->m_TClient.QueueForcedAspectUpdate();
+				}
 
-			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &MainView, 20.0f);
+				static const char *apScopeNames[] = {TCLocalize("In game"), TCLocalize("Full")};
+				MainView.HSplitTop(20.0f, &Button, &MainView);
+				Button.VSplitLeft(160.0f, &AspectLabel, &Button);
+				Ui()->DoLabel(&AspectLabel, TCLocalize("Aspect ratio scope"), 14.0f, TEXTALIGN_ML);
+				const int ScopeOld = g_Config.m_TcAspectRatioFull;
+				static CUi::SDropDownState s_ScopeDropDownState;
+				static CScrollRegion s_ScopeDropDownScrollRegion;
+				s_ScopeDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_ScopeDropDownScrollRegion;
+				const int ScopeNew = Ui()->DoDropDown(&Button, ScopeOld, apScopeNames, 2, s_ScopeDropDownState);
+				if(ScopeNew != ScopeOld)
+				{
+					g_Config.m_TcAspectRatioFull = ScopeNew;
+					GameClient()->m_TClient.QueueForcedAspectUpdate();
+				}
+
+				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAspectRatioCursorNative, TCLocalize("Cursor as without stretch"), &g_Config.m_TcAspectRatioCursorNative, &MainView, 20.0f);
 		}
 	}
 }

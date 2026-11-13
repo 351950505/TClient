@@ -298,6 +298,7 @@ void CTClient::OnInit()
 #endif
 	TextRender()->SetCustomFace(g_Config.m_TcCustomFont);
 	m_pGraphics = Kernel()->RequestInterface<IEngineGraphics>();
+	QueueForcedAspectUpdate();
 	FetchTClientInfo();
 
 	char aError[512] = "";
@@ -641,6 +642,12 @@ void CTClient::OnConsoleInit()
 		this);
 	Console()->Chain(
 		"tc_aspect_ratio_stretch", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
+			pfnCallback(pResult, pCallbackUserData);
+			((CTClient *)pUserData)->QueueForcedAspectUpdate();
+		},
+		this);
+	Console()->Chain(
+		"tc_aspect_ratio_full", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
 			pfnCallback(pResult, pCallbackUserData);
 			((CTClient *)pUserData)->QueueForcedAspectUpdate();
 		},
@@ -1817,9 +1824,10 @@ void CTClient::ApplyForcedAspect()
 	else if(State == CClient::EClientState::STATE_ONLINE && GameClient()->m_GameInfo.m_AllowZoom && !GameClient()->m_Menus.IsActive())
 		Force = false;
 	// TClient: 自定义宽高比（移植自 BestClient-Light）；>=100 时覆盖旧 5:4 强制。
-	// 按连接状态应用：进入游戏后包括 ESC 菜单都保持所选比例，离开游戏才恢复原生比例。
+	// “游戏内”只覆盖在线游戏和回放（包含 ESC 菜单），“完整”覆盖客户端全部状态。
 	const bool IsIngame = State == CClient::EClientState::STATE_ONLINE || State == CClient::EClientState::STATE_DEMOPLAYBACK;
-	int CustomAspect = IsIngame ? g_Config.m_TcAspectRatio : 0;
+	const bool UseCustomAspect = g_Config.m_TcAspectRatioFull || IsIngame;
+	int CustomAspect = UseCustomAspect ? g_Config.m_TcAspectRatio : 0;
 	// FNG 地图禁用宽高比（实体在非 16:9 下错位）
 	if(IsBlockedByFng() || IsAspectBlocked())
 		CustomAspect = 0;

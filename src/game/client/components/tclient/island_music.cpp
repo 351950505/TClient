@@ -1031,23 +1031,6 @@ public:
 		}
 	}
 
-	// Transparent mode keeps only a short shadow below the content. It is drawn
-	// with an ordinary quad so changing lyric width never creates shape textures.
-	void DrawTransparentShadow(float X, float Y, float W, float H)
-	{
-		if(W <= 8.0f || H <= 2.0f)
-			return;
-		const float Inset = std::min(W * 0.20f, std::max(4.0f, H * 0.35f));
-		const float ShadowW = W - Inset * 2.0f;
-		const float ShadowH = std::clamp(H * 0.08f, 2.0f, 4.0f);
-		if(ShadowW <= 0.0f)
-			return;
-		m_pGraphics->DrawRect4(X + Inset, Y + H, ShadowW, ShadowH,
-			ColorRGBA(0.0f, 0.0f, 0.0f, 0.14f), ColorRGBA(0.0f, 0.0f, 0.0f, 0.14f),
-			ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f), ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f),
-			IGraphics::CORNER_NONE, 0.0f);
-	}
-
 	bool IsPlayingCached() const
 	{
 		std::lock_guard<std::mutex> Lock(m_Mutex);
@@ -3609,13 +3592,12 @@ public:
 		// The silhouette is baked into an RGBA texture with supersampled coverage
 		// instead of using DrawRect's triangle fan, which has no antialiasing and
 		// left the arcs visibly stair-stepped.
-		// 透明模式不画底色和整圈阴影，只在胶囊下方留一条 2--4 px 的短渐隐。
-		// 文字描边仍独立可调，阴影本身只用普通四角渐变矩形，不生成圆角纹理。
+		// 透明模式完全不画任何底色、阴影或装饰，只保留可调的文字黑描边，
+		// 内容直接叠在游戏画面上；不透明模式维持原胶囊面板不变。
 		const bool TransparentMode = g_Config.m_TcIslandTransparent != 0;
 		if(TransparentMode)
 		{
 			m_pTextRender->TextOutlineColor(0.0f, 0.0f, 0.0f, std::clamp((float)g_Config.m_TcIslandTransparentTextShadow / 100.0f, 0.0f, 1.0f));
-			DrawTransparentShadow(X, PillY, Width, Height);
 		}
 		else
 		{

@@ -2,6 +2,15 @@
 
 #include <gtest/gtest.h>
 
+TEST(TClientRelay, MigrationOnlyRecognizesKnownPrototypeUrls)
+{
+	EXPECT_TRUE(RelayRouting::IsPrototypeUrl("wss://wsproto20261114.me3.dpdns.org/ws"));
+	EXPECT_TRUE(RelayRouting::IsPrototypeUrl("wss://wsproto20261114.me3.dpdns.org"));
+	EXPECT_FALSE(RelayRouting::IsPrototypeUrl("wss://signal.me3.dpdns.org/ws"));
+	EXPECT_FALSE(RelayRouting::IsPrototypeUrl("wss://custom.example.org/ws"));
+	EXPECT_FALSE(RelayRouting::IsPrototypeUrl(""));
+}
+
 TEST(TClientRelay, UdpAlwaysPreferredWhenBothReady)
 {
 	EXPECT_EQ(RelayRouting::PreferredTransport(true, true, true), RelayRouting::ETransport::UDP);

@@ -465,9 +465,14 @@ MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 0, 0, 1, CFGFLAG_CLIENT |
 MACRO_CONFIG_INT(TcRelay, tc_relay, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal relay: send/receive pings via the TClient signal server (works while spectating, invisible to chat)")
 MACRO_CONFIG_INT(TcRelayP2p, tc_relay_p2p, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Relay P2P direct send (off = all pings go through the signal server so everyone with the client sees them)")
 MACRO_CONFIG_STR(TcRelayAddr, tc_relay_addr, 64, "8.163.48.23:8305", CFGFLAG_CLIENT | CFGFLAG_SAVE, "TClient signal server address (ip:port, udp)")
-MACRO_CONFIG_INT(TcRelayCf, tc_relay_cf, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable experimental Cloudflare WebSocket backup (UDP relay remains preferred)")
-MACRO_CONFIG_INT(TcRelayCfOnly, tc_relay_cf_only, 0, 0, 1, CFGFLAG_CLIENT, "Test only: force Cloudflare sending without UDP fallback; requires tc_relay_cf")
-MACRO_CONFIG_STR(TcRelayCfUrl, tc_relay_cf_url, 256, "wss://wsproto20261114.me3.dpdns.org/ws", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Experimental Cloudflare relay WebSocket URL")
+#if defined(CONF_FAMILY_WINDOWS)
+MACRO_CONFIG_INT(TcRelayCf, tc_relay_cf, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable Cloudflare WebSocket signal relay")
+MACRO_CONFIG_INT(TcRelayCfOnly, tc_relay_cf_only, 1, 0, 1, CFGFLAG_CLIENT, "Use Cloudflare only; never fall back to the UDP relay")
+#else
+MACRO_CONFIG_INT(TcRelayCf, tc_relay_cf, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable Cloudflare WebSocket signal relay (Windows only)")
+MACRO_CONFIG_INT(TcRelayCfOnly, tc_relay_cf_only, 0, 0, 1, CFGFLAG_CLIENT, "Use Cloudflare only; never fall back to the UDP relay")
+#endif
+MACRO_CONFIG_STR(TcRelayCfUrl, tc_relay_cf_url, 256, "wss://signal.me3.dpdns.org/ws", CFGFLAG_CLIENT | CFGFLAG_SAVE, "Cloudflare relay WebSocket URL")
 MACRO_CONFIG_INT(TcPingwheelEmoteMs, tc_pingwheel_emote_ms, 100, 100, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "DEPRECATED: emoticon fallback channel removed")
 // 玩家状态标记：别人打开设置菜单时，在他头顶画一个齿轮。
 // 数据来自原版协议的 PLAYERFLAG_IN_MENU（服务器广播），对所有玩家生效，不依赖信令。

@@ -2741,7 +2741,7 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 	DoLine_KeyReader(View, s_PingReaderButton, s_PingClearButton, TCLocalize("Ping wheel key (hold to choose)"), "+tc_pingwheel");
 #if defined(CONF_FAMILY_WINDOWS)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcRelayCf,
-		g_Config.m_TcRelayCfOnly ? TCLocalize("Cloudflare signals (experimental, no UDP fallback)") : TCLocalize("Cloudflare signal backup (experimental, UDP preferred)"),
+		g_Config.m_TcRelayCfOnly ? TCLocalize("Cloudflare signals (no UDP fallback)") : TCLocalize("Cloudflare signal backup (UDP preferred)"),
 		&g_Config.m_TcRelayCf, &View, LineSize);
 #endif
 

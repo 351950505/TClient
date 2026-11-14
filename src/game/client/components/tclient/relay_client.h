@@ -34,6 +34,12 @@ namespace RelayRouting
 		CLOUDFLARE,
 	};
 
+	inline bool IsPrototypeUrl(const std::string &Url)
+	{
+		return Url == "wss://wsproto20261114.me3.dpdns.org/ws" ||
+		       Url == "wss://wsproto20261114.me3.dpdns.org";
+	}
+
 	inline ETransport PreferredTransport(bool UdpOnline, bool CfEnabled, bool CfOnline, bool CfOnly = false)
 	{
 		if(CfOnly)

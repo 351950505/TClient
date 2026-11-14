@@ -1,0 +1,19 @@
+name = "tclient-signal-production"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "signal.me3.dpdns.org", custom_domain = true }]
+
+[durable_objects]
+bindings = [
+  { name = "ROOMS", class_name = "SignalRoom" },
+  { name = "ADMISSION", class_name = "Admission" },
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SignalRoom", "Admission"]
+
+[observability]
+enabled = true

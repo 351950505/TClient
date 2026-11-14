@@ -16,8 +16,6 @@
 
 #include <game/client/gameclient.h>
 
-#include <cstdlib>
-
 CRelayClient::CRelayClient() = default;
 CRelayClient::~CRelayClient() = default;
 
@@ -75,6 +73,8 @@ void CRelayClient::OnConsoleInit()
 
 void CRelayClient::OnInit()
 {
+	if(RelayRouting::IsPrototypeUrl(g_Config.m_TcRelayCfUrl))
+		str_copy(g_Config.m_TcRelayCfUrl, "wss://signal.me3.dpdns.org/ws");
 	if(!g_Config.m_TcRelay)
 		return;
 	if(!m_aUid[0])
@@ -224,18 +224,6 @@ void CRelayClient::PumpCloudflare()
 		m_CfError.clear();
 		return;
 	}
-	const char *pKey = std::getenv("CF_WS_PROTOTYPE_KEY");
-	if(!pKey || !pKey[0])
-	{
-		if(m_pCfTransport && !m_CfRoom.empty())
-			m_pCfTransport->Stop();
-		m_CfRoom.clear();
-		m_CfUrl.clear();
-		m_CfOnline = false;
-		m_CfError = "缺少 CF 试验访问密钥，请使用测试启动器";
-		LogOnce("CF backup unavailable", m_CfError.c_str());
-		return;
-	}
 	if(!m_pCfTransport)
 		m_pCfTransport = std::make_unique<RelayWs::CTransport>();
 	if(m_CfRoom != m_aGameAddr || m_CfUrl != g_Config.m_TcRelayCfUrl)
@@ -243,7 +231,7 @@ void CRelayClient::PumpCloudflare()
 		m_CfOnline = false;
 		m_CfRoom = m_aGameAddr;
 		m_CfUrl = g_Config.m_TcRelayCfUrl;
-		m_pCfTransport->Start(m_CfUrl, m_CfRoom, m_aUid, pKey);
+		m_pCfTransport->Start(m_CfUrl, m_CfRoom, m_aUid, "");
 	}
 	for(const auto &Event : m_pCfTransport->Drain())
 	{

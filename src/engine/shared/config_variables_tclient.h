@@ -48,6 +48,7 @@ MACRO_CONFIG_INT(TcShowChatClient, tc_show_chat_client, 1, 0, 1, CFGFLAG_CLIENT 
 
 MACRO_CONFIG_INT(TcShowFrozenText, tc_frozen_tees_text, 0, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show how many tees in your team are currently frozen. (0 - off, 1 - show alive, 2 - show frozen)")
 MACRO_CONFIG_INT(TcShowFrozenHud, tc_frozen_tees_hud, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show frozen tee HUD")
+MACRO_CONFIG_INT(TcFrozenTeesShowAll, tc_frozen_tees_showall, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Request native /showall 1 once per connection on DDRace when tee status icons or text are enabled. Requires server support, may increase traffic; other visibility limits still apply. Disabling does not send /showall 0.")
 MACRO_CONFIG_INT(TcShowFrozenHudSkins, tc_frozen_tees_hud_skins, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use ninja skin, or darkened skin for frozen tees on hud")
 
 MACRO_CONFIG_INT(TcFrozenHudTeeSize, tc_frozen_tees_size, 15, 8, 20, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Size of tees in frozen tee hud. (Default : 15)")
@@ -173,6 +174,11 @@ MACRO_CONFIG_INT(TcWaterHammerHighlightSelf, tc_water_hammer_highlight_self, 0, 
 // 卡锤/卡钩高亮和玩家设置状态齿轮使用独立颜色，不改变触发条件。
 MACRO_CONFIG_COL(TcWaterHammerBodyColor, tc_water_hammer_body_color, 589706, CFGFLAG_CLIENT | CFGFLAG_SAVE, "冻结锤钩高亮身体颜色")
 MACRO_CONFIG_COL(TcWaterHammerFeetColor, tc_water_hammer_feet_color, 1441679, CFGFLAG_CLIENT | CFGFLAG_SAVE, "冻结锤钩高亮脚部颜色")
+MACRO_CONFIG_INT(TcWaterHammerSeparateColors, tc_water_hammer_separate_colors, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use separate hook and hammer highlight colors")
+MACRO_CONFIG_COL(TcWaterHammerHookBodyColor, tc_water_hammer_hook_body_color, 589706, CFGFLAG_CLIENT | CFGFLAG_SAVE, "冻结钩子高亮身体颜色")
+MACRO_CONFIG_COL(TcWaterHammerHookFeetColor, tc_water_hammer_hook_feet_color, 1441679, CFGFLAG_CLIENT | CFGFLAG_SAVE, "冻结钩子高亮脚部颜色")
+MACRO_CONFIG_COL(TcWaterHammerHammerBodyColor, tc_water_hammer_hammer_body_color, 589706, CFGFLAG_CLIENT | CFGFLAG_SAVE, "冻结锤子高亮身体颜色")
+MACRO_CONFIG_COL(TcWaterHammerHammerFeetColor, tc_water_hammer_hammer_feet_color, 1441679, CFGFLAG_CLIENT | CFGFLAG_SAVE, "冻结锤子高亮脚部颜色")
 MACRO_CONFIG_COL(TcSettingsGearColor, tc_settings_gear_color, 2228140, CFGFLAG_CLIENT | CFGFLAG_SAVE, "打开设置的玩家头顶齿轮颜色")
 
 // Revert Variables

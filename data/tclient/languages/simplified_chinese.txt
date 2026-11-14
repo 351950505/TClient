@@ -30,6 +30,21 @@ Frozen highlight body color
 Frozen highlight feet color
 == 冻结高亮脚部颜色
 
+Separate hook and hammer colors
+== 分别设置颜色
+
+Frozen hook highlight body color
+== 钩子高亮身体颜色
+
+Frozen hook highlight feet color
+== 钩子高亮脚部颜色
+
+Frozen hammer highlight body color
+== 锤子高亮身体颜色
+
+Frozen hammer highlight feet color
+== 锤子高亮脚部颜色
+
 Light
 == Light
 
@@ -149,6 +164,12 @@ Tees left alive text
 
 Count frozen tees
 == 显示冻结Tee数量
+
+Request full-distance tee status (native /showall)
+== 请求全距离Tee状态（原生 /showall）
+
+With tee icons or text enabled, requests /showall 1 once per connection on DDRace. Requires native /showall server support and may increase traffic. Other visibility limits still apply; not a confirmation. Disabling does not send /showall 0.
+== 启用Tee图标或文字时，在DDRace中每个连接尝试一次 /showall 1。需服务器支持原生 /showall，可能增加流量。其他可见性限制仍适用；不代表已确认生效。关闭不会发送 /showall 0。
 
 Input
 == 输入

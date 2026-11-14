@@ -79,6 +79,7 @@ void CHud::OnWindowResize()
 
 void CHud::OnReset()
 {
+	m_FrozenHudPending = false;
 	m_TimeCpDiff = 0.0f;
 	m_DDRaceTime = 0;
 	m_FinishTimeLastReceivedTick = 0;
@@ -675,42 +676,30 @@ void CHud::RenderTextInfo()
 		Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_aCursorOffset[CurWeapon], m_Width / 2.0f, m_Height / 2.0f, 0.36f, 0.36f);
 	}
 	// render team in freeze text and last notify
-	// The frozen-tee count text and tee row are suppressed while the island UI is
-	// active so they don't clutter the strip right below the island. The "you are
-	// last" notification is NOT part of that clutter (its position is set by the
-	// user via tc_last_notify_x/y), so it must stay independent of the island.
-	const bool IslandSuppressed = g_Config.m_TcIslandEnable;
-	const bool ShowFrozenText = !IslandSuppressed && g_Config.m_TcShowFrozenText > 0;
-	const bool ShowFrozenHud = !IslandSuppressed && g_Config.m_TcShowFrozenHud > 0;
+	const bool ShowFrozenText = g_Config.m_TcShowFrozenText > 0;
+	const bool ShowFrozenHud = g_Config.m_TcShowFrozenHud > 0;
 	if((ShowFrozenText || ShowFrozenHud || g_Config.m_TcNotifyWhenLast) && GameClient()->m_GameInfo.m_EntitiesDDRace)
 	{
-		int NumInTeam = 0;
-		int NumFrozen = 0;
-		int LocalTeamID = 0;
-		if(GameClient()->m_Snap.m_LocalClientId >= 0 && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId >= 0)
-		{
-			if(GameClient()->m_Snap.m_SpecInfo.m_Active == 1 && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != -1)
-				LocalTeamID = GameClient()->m_Teams.Team(GameClient()->m_Snap.m_SpecInfo.m_SpectatorId);
-			else
-				LocalTeamID = GameClient()->m_Teams.Team(GameClient()->m_Snap.m_LocalClientId);
-		}
+		STcFrozenHudFrame<MAX_CLIENTS> Frame;
+		const int TeamClientId = TcFrozenHudTeamClientId(GameClient()->m_Snap.m_LocalClientId,
+			GameClient()->m_Snap.m_SpecInfo.m_Active, GameClient()->m_Snap.m_SpecInfo.m_SpectatorId, MAX_CLIENTS);
+		const int LocalTeamID = TeamClientId >= 0 ? GameClient()->m_Teams.Team(TeamClientId) : 0;
 		for(int i = 0; i < MAX_CLIENTS; i++)
 		{
-			if(!GameClient()->m_Snap.m_apPlayerInfos[i])
+			// Preserve the existing PlayerInfo/team list, including spectators.
+			if(!GameClient()->m_Snap.m_apPlayerInfos[i] || GameClient()->m_Teams.Team(i) != LocalTeamID)
 				continue;
 
-			if(GameClient()->m_Teams.Team(i) == LocalTeamID)
-			{
-				NumInTeam++;
-				if(GameClient()->m_aClients[i].m_FreezeEnd > 0 || GameClient()->m_aClients[i].m_DeepFrozen)
-					NumFrozen++;
-			}
+			const bool HasFreshCharacter = Client()->SnapFindItem(IClient::SNAP_CURRENT, NETOBJTYPE_CHARACTER, i) != nullptr;
+			const auto &Character = GameClient()->m_Snap.m_aCharacters[i];
+			Frame.AddPlayer(i, TcFrozenHudState(HasFreshCharacter, Character.m_HasExtendedData, Character.m_ExtendedData.m_FreezeEnd));
 		}
+		const auto &Counts = Frame.m_Counts;
 
 		// Notify when last
 		if(g_Config.m_TcNotifyWhenLast)
 		{
-			if(NumInTeam > 1 && NumInTeam - NumFrozen == 1)
+			if(Counts.NotifyWhenLast())
 			{
 				TextRender()->TextColor(color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcNotifyWhenLastColor)));
 				float FontSize = g_Config.m_TcNotifyWhenLastSize;
@@ -721,110 +710,190 @@ void CHud::RenderTextInfo()
 				TextRender()->TextColor(TextRender()->DefaultTextColor());
 			}
 		}
-		// Show freeze text
-		char aBuf[64];
-		if(g_Config.m_TcShowFrozenText == 1)
-			str_format(aBuf, sizeof(aBuf), "%d / %d", NumInTeam - NumFrozen, NumInTeam);
-		else if(g_Config.m_TcShowFrozenText == 2)
-			str_format(aBuf, sizeof(aBuf), "%d / %d", NumFrozen, NumInTeam);
-		if(ShowFrozenText)
-			TextRender()->Text(m_Width / 2.0f - TextRender()->TextWidth(10.0f, aBuf) / 2.0f, 12.0f, 10.0f, aBuf);
-
-		// str_format(aBuf, sizeof(aBuf), "%d", GameClient()->m_aClients[GameClient()->m_Snap.m_LocalClientId].m_PrevPredicted.m_FreezeEnd);
-		// str_format(aBuf, sizeof(aBuf), "%d", g_Config.m_ClWhatsMyPing);
-		// TextRender()->Text(0, m_Width / 2 - TextRender()->TextWidth(0, 10, aBuf, -1, -1.0f) / 2, 20, 10, aBuf, -1.0f);
-
-		if(ShowFrozenHud && !GameClient()->m_Scoreboard.IsActive() && !(LocalTeamID == 0 && g_Config.m_TcFrozenHudTeamOnly))
+		if(ShowFrozenText || ShowFrozenHud)
 		{
-			CTeeRenderInfo FreezeInfo;
-			const CSkin *pSkin = GameClient()->m_Skins.Find("x_ninja");
-			FreezeInfo.m_OriginalRenderSkin = pSkin->m_OriginalSkin;
-			FreezeInfo.m_ColorableRenderSkin = pSkin->m_ColorableSkin;
-			FreezeInfo.m_BloodColor = pSkin->m_BloodColor;
-			FreezeInfo.m_SkinMetrics = pSkin->m_Metrics;
-			FreezeInfo.m_ColorBody = ColorRGBA(1.0f, 1.0f, 1.0f);
-			FreezeInfo.m_ColorFeet = ColorRGBA(1.0f, 1.0f, 1.0f);
-			FreezeInfo.m_CustomColoredSkin = false;
+			m_FrozenHudPending = true;
+			m_FrozenHudTeam = LocalTeamID;
+			m_FrozenHudFrame = Frame;
+			m_FrozenHudTextColor = TextRender()->GetTextColor();
+			m_FrozenHudTextOutlineColor = TextRender()->GetTextOutlineColor();
+			m_FrozenHudTextFlags = TextRender()->GetRenderFlags();
+			if(!g_Config.m_TcIslandEnable)
+				RenderFrozenHud({});
+		}
+	}
+}
 
-			float ProgressiveOffset = 0.0f;
-			float TeeSize = g_Config.m_TcFrozenHudTeeSize;
-			int MaxTees = (int)(8.3f * (m_Width / m_Height) * 13.0f / TeeSize);
-			if(!g_Config.m_ClShowfps && !g_Config.m_ClShowpred)
-				MaxTees = (int)(9.5f * (m_Width / m_Height) * 13.0f / TeeSize);
-			int MaxRows = g_Config.m_TcFrozenMaxRows;
-			float StartPos = m_Width / 2.0f + 38.0f * (m_Width / m_Height) / 1.78f;
+float CHud::FrozenHudRowY(const CUIRect &Row, const CUIRect &Island, float ScreenHeight)
+{
+	if(Row.w <= 0.0f || Row.h <= 0.0f || Island.w <= 0.0f || Island.h <= 0.0f ||
+		Row.x >= Island.x + Island.w || Row.x + Row.w <= Island.x ||
+		Row.y >= Island.y + Island.h || Row.y + Row.h <= Island.y)
+		return Row.y;
 
-			int TotalRows = std::min(MaxRows, (NumInTeam + MaxTees - 1) / MaxTees);
-			Graphics()->TextureClear();
-			Graphics()->QuadsBegin();
-			Graphics()->SetColor(0.0f, 0.0f, 0.0f, 0.4f);
-			Graphics()->DrawRectExt(StartPos - TeeSize / 2.0f, 0.0f, TeeSize * std::min(NumInTeam, MaxTees), TeeSize + 3.0f + (TotalRows - 1) * TeeSize, 5.0f, IGraphics::CORNER_B);
-			Graphics()->QuadsEnd();
+	constexpr float Gap = 2.0f;
+	const float Below = Island.y + Island.h + Gap;
+	const float MaxY = std::max(0.0f, ScreenHeight - Row.h);
+	if(Below <= MaxY)
+		return std::max(0.0f, Below);
+	// An island near the bottom may leave room only above it.
+	const float Above = Island.y - Gap - Row.h;
+	if(Above >= 0.0f)
+		return std::min(Above, MaxY);
+	// No vertical slot fits: keep the row on-screen rather than hiding it.
+	return std::clamp(Below, 0.0f, MaxY);
+}
 
-			bool Overflow = NumInTeam > MaxTees * MaxRows;
+void CHud::RenderFrozenHud(const CUIRect &Island)
+{
+	if(!m_FrozenHudPending)
+		return;
+	m_FrozenHudPending = false;
+	const int LocalTeamID = m_FrozenHudTeam;
+	const auto &Counts = m_FrozenHudFrame.m_Counts;
+	const int NumInTeam = Counts.m_NumInTeam;
+	const bool ShowFrozenText = g_Config.m_TcShowFrozenText > 0;
+	const bool ShowFrozenHud = g_Config.m_TcShowFrozenHud > 0;
+	const CScreenRect OldScreen = Graphics()->GetScreen();
+	const ColorRGBA OldTextColor = TextRender()->GetTextColor();
+	const ColorRGBA OldTextOutlineColor = TextRender()->GetTextOutlineColor();
+	const unsigned OldTextFlags = TextRender()->GetRenderFlags();
+	Graphics()->MapScreenToSize(m_Width, m_Height);
+	TextRender()->SetRenderFlags(m_FrozenHudTextFlags);
+	TextRender()->TextColor(m_FrozenHudTextColor);
+	TextRender()->TextOutlineColor(m_FrozenHudTextOutlineColor);
 
-			int NumDisplayed = 0;
-			int NumInRow = 0;
-			int CurrentRow = 0;
+	// Show freeze text
+	char aBuf[64] = {};
+	const int NumShown = g_Config.m_TcShowFrozenText == 1 ? Counts.m_KnownUnfrozen : Counts.m_Frozen;
+	if(Counts.m_Unknown > 0)
+		str_format(aBuf, sizeof(aBuf), "%d / %d  ? %d", NumShown, NumInTeam, Counts.m_Unknown);
+	else
+		str_format(aBuf, sizeof(aBuf), "%d / %d", NumShown, NumInTeam);
+	CUIRect CountRow = {};
+	if(ShowFrozenText)
+	{
+		float TextHeight = 0.0f;
+		STextSizeProperties TextSizeProps;
+		TextSizeProps.m_pHeight = &TextHeight;
+		const float TextWidth = TextRender()->TextWidth(10.0f, aBuf, -1, -1.0f, 0, TextSizeProps);
+		CountRow = {m_Width / 2.0f - TextWidth / 2.0f, 12.0f, TextWidth, TextHeight};
+		CountRow.y = FrozenHudRowY(CountRow, Island, m_Height);
+		TextRender()->Text(CountRow.x, CountRow.y, 10.0f, aBuf);
+	}
 
-			for(int OverflowIndex = 0; OverflowIndex < 1 + Overflow; OverflowIndex++)
+	if(ShowFrozenHud && !GameClient()->m_Scoreboard.IsActive() && !(LocalTeamID == 0 && g_Config.m_TcFrozenHudTeamOnly))
+	{
+		CTeeRenderInfo FreezeInfo;
+		const CSkin *pSkin = GameClient()->m_Skins.Find("x_ninja");
+		FreezeInfo.m_OriginalRenderSkin = pSkin->m_OriginalSkin;
+		FreezeInfo.m_ColorableRenderSkin = pSkin->m_ColorableSkin;
+		FreezeInfo.m_BloodColor = pSkin->m_BloodColor;
+		FreezeInfo.m_SkinMetrics = pSkin->m_Metrics;
+		FreezeInfo.m_ColorBody = ColorRGBA(1.0f, 1.0f, 1.0f);
+		FreezeInfo.m_ColorFeet = ColorRGBA(1.0f, 1.0f, 1.0f);
+		FreezeInfo.m_CustomColoredSkin = false;
+
+		float ProgressiveOffset = 0.0f;
+		float TeeSize = g_Config.m_TcFrozenHudTeeSize;
+		int MaxTees = (int)(8.3f * (m_Width / m_Height) * 13.0f / TeeSize);
+		if(!g_Config.m_ClShowfps && !g_Config.m_ClShowpred)
+			MaxTees = (int)(9.5f * (m_Width / m_Height) * 13.0f / TeeSize);
+		MaxTees = std::max(1, MaxTees);
+		int MaxRows = g_Config.m_TcFrozenMaxRows;
+		float StartPos = m_Width / 2.0f + 38.0f * (m_Width / m_Height) / 1.78f;
+
+		int TotalRows = std::min(MaxRows, (NumInTeam + MaxTees - 1) / MaxTees);
+		const float BoxHeight = TeeSize + 3.0f + (TotalRows - 1) * TeeSize;
+		CUIRect TeeRow = {StartPos - TeeSize / 2.0f, 0.0f, TeeSize * std::min(NumInTeam, MaxTees), BoxHeight};
+		TeeRow.y = FrozenHudRowY(TeeRow, Island, m_Height);
+		// Relocating one row must not put it through the other (large fonts/tees).
+		if(Island.w > 0.0f && Island.h > 0.0f && (TeeRow.y != 0.0f || CountRow.y != 12.0f))
+			TeeRow.y = FrozenHudRowY(TeeRow, CountRow, m_Height);
+		Graphics()->TextureClear();
+		Graphics()->QuadsBegin();
+		Graphics()->SetColor(0.0f, 0.0f, 0.0f, 0.4f);
+		Graphics()->DrawRectExt(TeeRow.x, TeeRow.y, TeeRow.w, BoxHeight, 5.0f, IGraphics::CORNER_B);
+		Graphics()->QuadsEnd();
+
+		bool Overflow = NumInTeam > MaxTees * MaxRows;
+
+		int NumDisplayed = 0;
+		int NumInRow = 0;
+		int CurrentRow = 0;
+
+		for(int OverflowIndex = 0; OverflowIndex < (Overflow ? 3 : 1); OverflowIndex++)
+		{
+			for(int i = 0; i < MAX_CLIENTS && NumDisplayed < MaxTees * MaxRows; i++)
 			{
-				for(int i = 0; i < MAX_CLIENTS && NumDisplayed < MaxTees * MaxRows; i++)
+				if(!m_FrozenHudFrame.m_aIncluded[i])
+					continue;
 				{
-					if(!GameClient()->m_Snap.m_apPlayerInfos[i])
+					const ETcFrozenHudState State = m_FrozenHudFrame.m_aStates[i];
+					const bool Frozen = State == ETcFrozenHudState::FROZEN;
+					const bool Unknown = State == ETcFrozenHudState::UNKNOWN;
+					if(Overflow && TcFrozenHudOverflowPass(State) != OverflowIndex)
 						continue;
-					if(GameClient()->m_Teams.Team(i) == LocalTeamID)
+
+					CTeeRenderInfo TeeInfo = GameClient()->m_aClients[i].m_RenderInfo;
+					if(Frozen && !g_Config.m_TcShowFrozenHudSkins)
+						TeeInfo = FreezeInfo;
+
+					NumDisplayed++;
+					NumInRow++;
+					if(NumInRow > MaxTees)
 					{
-						bool Frozen = false;
-						CTeeRenderInfo TeeInfo = GameClient()->m_aClients[i].m_RenderInfo;
-						if(GameClient()->m_aClients[i].m_FreezeEnd > 0 || GameClient()->m_aClients[i].m_DeepFrozen)
-						{
-							if(!g_Config.m_TcShowFrozenHudSkins)
-								TeeInfo = FreezeInfo;
-							Frozen = true;
-						}
-
-						if(Overflow && Frozen && OverflowIndex == 0)
-							continue;
-						if(Overflow && !Frozen && OverflowIndex == 1)
-							continue;
-
-						NumDisplayed++;
-						NumInRow++;
-						if(NumInRow > MaxTees)
-						{
-							NumInRow = 1;
-							ProgressiveOffset = 0.0f;
-							CurrentRow++;
-						}
-
-						TeeInfo.m_Size = TeeSize;
-						const CAnimState *pIdleState = CAnimState::GetIdle();
-						vec2 OffsetToMid;
-						CRenderTools::GetRenderTeeOffsetToRenderedTee(pIdleState, &TeeInfo, OffsetToMid);
-						vec2 TeeRenderPos(StartPos + ProgressiveOffset, TeeSize * (0.7f) + CurrentRow * TeeSize);
-						float Alpha = 1.0f;
-						CNetObj_Character CurChar = GameClient()->m_aClients[i].m_RenderCur;
-						if(g_Config.m_TcShowFrozenHudSkins && Frozen)
-						{
-							Alpha = 0.6f;
-							TeeInfo.m_ColorBody.r *= 0.4f;
-							TeeInfo.m_ColorBody.g *= 0.4f;
-							TeeInfo.m_ColorBody.b *= 0.4f;
-							TeeInfo.m_ColorFeet.r *= 0.4f;
-							TeeInfo.m_ColorFeet.g *= 0.4f;
-							TeeInfo.m_ColorFeet.b *= 0.4f;
-						}
-						if(Frozen)
-							RenderTools()->RenderTee(pIdleState, &TeeInfo, EMOTE_PAIN, vec2(1.0f, 0.0f), TeeRenderPos, Alpha);
-						else
-							RenderTools()->RenderTee(pIdleState, &TeeInfo, CurChar.m_Emote, vec2(1.0f, 0.0f), TeeRenderPos);
-						ProgressiveOffset += TeeSize;
+						NumInRow = 1;
+						ProgressiveOffset = 0.0f;
+						CurrentRow++;
 					}
+
+					TeeInfo.m_Size = TeeSize;
+					const CAnimState *pIdleState = CAnimState::GetIdle();
+					vec2 OffsetToMid;
+					CRenderTools::GetRenderTeeOffsetToRenderedTee(pIdleState, &TeeInfo, OffsetToMid);
+					vec2 TeeRenderPos(StartPos + ProgressiveOffset, TeeRow.y + TeeSize * (0.7f) + CurrentRow * TeeSize);
+					float Alpha = 1.0f;
+					CNetObj_Character CurChar = GameClient()->m_aClients[i].m_RenderCur;
+					if(g_Config.m_TcShowFrozenHudSkins && Frozen)
+					{
+						Alpha = 0.6f;
+						TeeInfo.m_ColorBody.r *= 0.4f;
+						TeeInfo.m_ColorBody.g *= 0.4f;
+						TeeInfo.m_ColorBody.b *= 0.4f;
+						TeeInfo.m_ColorFeet.r *= 0.4f;
+						TeeInfo.m_ColorFeet.g *= 0.4f;
+						TeeInfo.m_ColorFeet.b *= 0.4f;
+					}
+					if(Unknown)
+					{
+						// Unknown is not a frozen x_ninja: retain the player's skin,
+						// dim it and use a question mark instead of a cached emote.
+						RenderTools()->RenderTee(pIdleState, &TeeInfo, EMOTE_NORMAL, vec2(1.0f, 0.0f), TeeRenderPos, 0.45f);
+						// Text rendering applies tc_font_size before pixel alignment.
+						// Cap the marker to its Tee slot, without changing global text
+						// scale or enlarging the original background/known-Tee bounds.
+						const float FontSize = TeeSize * 0.55f / std::max(1.0f, g_Config.m_TcFontSize / 100.0f);
+						const float MarkWidth = TextRender()->TextWidth(FontSize, "?", -1, -1.0f);
+						TextRender()->TextColor(ColorRGBA(1.0f, 1.0f, 1.0f, 0.9f));
+						TextRender()->TextOutlineColor(ColorRGBA(0.0f, 0.0f, 0.0f, 0.9f));
+						TextRender()->Text(TeeRenderPos.x - MarkWidth / 2.0f, TeeRenderPos.y - TeeSize * 0.45f, FontSize, "?");
+						TextRender()->TextColor(m_FrozenHudTextColor);
+						TextRender()->TextOutlineColor(m_FrozenHudTextOutlineColor);
+					}
+					else if(Frozen)
+						RenderTools()->RenderTee(pIdleState, &TeeInfo, EMOTE_PAIN, vec2(1.0f, 0.0f), TeeRenderPos, Alpha);
+					else
+						RenderTools()->RenderTee(pIdleState, &TeeInfo, CurChar.m_Emote, vec2(1.0f, 0.0f), TeeRenderPos);
+					ProgressiveOffset += TeeSize;
 				}
 			}
 		}
 	}
+	TextRender()->TextColor(OldTextColor);
+	TextRender()->TextOutlineColor(OldTextOutlineColor);
+	TextRender()->SetRenderFlags(OldTextFlags);
+	Graphics()->MapScreen(OldScreen);
 }
 
 void CHud::RenderConnectionWarning()
@@ -2127,6 +2196,7 @@ void CHud::OnNewSnapshot()
 
 void CHud::OnRender()
 {
+	m_FrozenHudPending = false;
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return;
 

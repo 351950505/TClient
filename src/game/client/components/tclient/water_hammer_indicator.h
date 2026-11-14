@@ -11,8 +11,9 @@ class CWaterHammerIndicator : public CComponent
 {
 	CTcWaterHammerInputCache m_Inputs;
 	std::array<float, MAX_CLIENTS> m_aHoldSeconds{};
+	std::array<ETcWaterHammerAction, MAX_CLIENTS> m_aLastActions{};
 
-	bool IsMarkedNow(int ClientId) const;
+	ETcWaterHammerAction ActionNow(int ClientId) const;
 
 public:
 	int Sizeof() const override { return sizeof(*this); }
@@ -26,6 +27,7 @@ public:
 	void OnLocalInput(bool Hammer);
 	void OnDummySwap();
 	bool IsMarked(int ClientId) const;
+	ETcWaterHammerAction HighlightAction(int ClientId) const;
 };
 
 #endif // GAME_CLIENT_COMPONENTS_TCLIENT_WATER_HAMMER_INDICATOR_H

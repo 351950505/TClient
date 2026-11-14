@@ -66,16 +66,59 @@ inline bool TcIsWaterHammerTarget(int ClientId, int LocalClientId, bool Active, 
 		Active && !Spectator && Visible && SameTeam;
 }
 
-inline bool TcShouldMarkWaterHammer(int FreezeEnd, bool LiveFrozen, int CurrentWeapon, const STcWaterHammerInputState &PreInput, const CNetObj_PlayerInput *pLocalInput)
+enum class ETcWaterHammerAction
 {
-	if(!pLocalInput && !PreInput.m_Received)
-		return false;
+	NONE,
+	HOOK,
+	HAMMER,
+};
+
+inline ETcWaterHammerAction TcWaterHammerAction(int FreezeEnd, bool LiveFrozen, int CurrentWeapon, const STcWaterHammerInputState &PreInput, const CNetObj_PlayerInput *pLocalInput)
+{
+	if((!pLocalInput && !PreInput.m_Received) || (FreezeEnd == 0 && !LiveFrozen))
+		return ETcWaterHammerAction::NONE;
 
 	const int WantedWeapon = pLocalInput ? pLocalInput->m_WantedWeapon : PreInput.m_WantedWeapon;
 	const int Fire = pLocalInput ? pLocalInput->m_Fire : PreInput.m_Fire;
 	const int Hook = pLocalInput ? pLocalInput->m_Hook : PreInput.m_Hook;
 	const bool HammerHeld = (WantedWeapon == WEAPON_HAMMER + 1 || CurrentWeapon == WEAPON_HAMMER) && (Fire & 1) != 0;
-	return (FreezeEnd != 0 || LiveFrozen) && (HammerHeld || Hook != 0);
+	// Hammer colors take priority when both inputs are held.
+	if(HammerHeld)
+		return ETcWaterHammerAction::HAMMER;
+	return Hook != 0 ? ETcWaterHammerAction::HOOK : ETcWaterHammerAction::NONE;
+}
+
+inline bool TcShouldMarkWaterHammer(int FreezeEnd, bool LiveFrozen, int CurrentWeapon, const STcWaterHammerInputState &PreInput, const CNetObj_PlayerInput *pLocalInput)
+{
+	return TcWaterHammerAction(FreezeEnd, LiveFrozen, CurrentWeapon, PreInput, pLocalInput) != ETcWaterHammerAction::NONE;
+}
+
+inline bool TcUpdateWaterHammerAction(float &HoldSeconds, ETcWaterHammerAction &LastAction, ETcWaterHammerAction Action, float DeltaSeconds)
+{
+	const bool Marked = TcUpdateWaterHammerHold(HoldSeconds, Action != ETcWaterHammerAction::NONE, DeltaSeconds);
+	// Only a visible action replaces the palette. Release and the next hold delay
+	// keep the last palette for the existing fade-out.
+	if(Marked)
+		LastAction = Action;
+	return Marked;
+}
+
+struct STcWaterHammerColors
+{
+	unsigned m_Body;
+	unsigned m_Feet;
+};
+
+inline STcWaterHammerColors TcWaterHammerColors(bool SeparateColors, ETcWaterHammerAction Action, STcWaterHammerColors Shared, STcWaterHammerColors Hook, STcWaterHammerColors Hammer)
+{
+	if(SeparateColors)
+	{
+		if(Action == ETcWaterHammerAction::HAMMER)
+			return Hammer;
+		if(Action == ETcWaterHammerAction::HOOK)
+			return Hook;
+	}
+	return Shared;
 }
 
 // Frozen katana is a drawing override, never a change to the shared character.

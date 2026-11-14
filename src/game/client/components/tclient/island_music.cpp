@@ -3245,7 +3245,7 @@ public:
 		return m_CoverTextureValid;
 	}
 
-	void Render()
+	void Render(CUIRect &OccupiedRect)
 	{
 		if(m_pClient->State() != IClient::STATE_ONLINE && m_pClient->State() != IClient::STATE_DEMOPLAYBACK)
 			return;
@@ -3582,7 +3582,18 @@ public:
 
 		// 夹住水平位置：偏移量很大时（滑条 ±600 还要乘缩放）胶囊会被推出屏幕，
 		// 右端的圆头和等化器被裁掉，看起来就是"右边没了"。留 8px 边距。
-		const float X = std::clamp((ScreenW - Width) * 0.5f + OffsetX, 8.0f, std::max(8.0f, ScreenW - Width - 8.0f));
+			const float X = std::clamp((ScreenW - Width) * 0.5f + OffsetX, 8.0f, std::max(8.0f, ScreenW - Width - 8.0f));
+
+			// Publish only a visible capsule, after idle hiding and width animation.
+			// Convert each axis separately: HUD aspect may be user-stretched.
+			const float Left = std::clamp(X - 1.0f, 0.0f, ScreenW);
+			const float Right = std::clamp(X + Width + 1.0f, 0.0f, ScreenW);
+			const float Top = std::clamp(PillY - 1.0f, 0.0f, (float)RealH);
+			const float Bottom = std::clamp(PillY + Height + 1.0f, 0.0f, (float)RealH);
+			const float HudScaleX = 300.0f * m_pGraphics->ScreenAspect() / ScreenW;
+			const float HudScaleY = 300.0f / (float)RealH;
+			OccupiedRect = {Left * HudScaleX, Top * HudScaleY, (Right - Left) * HudScaleX, (Bottom - Top) * HudScaleY};
+
 
 		// ---- draw the capsule body ------------------------------------------
 		// Gauge style: no halo, no glow. One inset hairline marks the rim, and the
@@ -4138,12 +4149,16 @@ void CIslandMusic::OnReset()
 void CIslandMusic::OnRender()
 {
 	EnsureImpl();
+	CUIRect OccupiedRect = {};
 #if TCLIENT_HAS_WINRT_MUSIC
 	if(g_Config.m_TcIslandEnable)
 		m_pImpl->StartWorker();
 	m_pImpl->StartCoverDecodeThread();
-	m_pImpl->Render();
+	m_pImpl->Render(OccupiedRect);
 #endif
+	// HUD precedes the island in the render stack. Finish only its frozen rows
+	// now, using this frame's bounds (also empty on unsupported/hidden islands).
+	GameClient()->m_Hud.RenderFrozenHud(OccupiedRect);
 }
 
 void CIslandMusic::OnShutdown()

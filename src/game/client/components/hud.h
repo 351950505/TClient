@@ -9,6 +9,7 @@
 #include <generated/protocol.h>
 
 #include <game/client/component.h>
+#include <game/client/components/tclient/frozen_hud_logic.h>
 #include <game/client/ui.h>
 
 struct SScoreInfo
@@ -46,6 +47,14 @@ struct SScoreInfo
 class CHud : public CComponent
 {
 	float m_Width, m_Height;
+
+	// Only the frozen count/tee row wait for the island's current-frame bounds.
+	bool m_FrozenHudPending = false;
+	int m_FrozenHudTeam = 0;
+	STcFrozenHudFrame<MAX_CLIENTS> m_FrozenHudFrame;
+	ColorRGBA m_FrozenHudTextColor;
+	ColorRGBA m_FrozenHudTextOutlineColor;
+	unsigned m_FrozenHudTextFlags = 0;
 
 	int m_HudQuadContainerIndex;
 	SScoreInfo m_aScoreInfo[2];
@@ -122,6 +131,10 @@ public:
 	void OnRender() override;
 	void OnInit() override;
 	void OnNewSnapshot() override;
+
+	// Called after island rendering, with its occupied rectangle in HUD units.
+	void RenderFrozenHud(const CUIRect &Island);
+	static float FrozenHudRowY(const CUIRect &Row, const CUIRect &Island, float ScreenHeight);
 
 	// DDRace
 

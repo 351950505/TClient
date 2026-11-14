@@ -378,6 +378,16 @@ int CClient::SendMsg(int Conn, CMsgPacker *pMsg, int Flags)
 	if(!(Flags & MSGFLAG_NOSEND))
 	{
 		m_aNetClient[Conn].Send(&Packet);
+		// Include user chat and execute-on-join chat, not only our timeout string.
+		// The packet header is already repacked into the connection's protocol.
+		if(Conn >= CONN_MAIN && Conn < NUM_DUMMIES && !pMsg->m_System)
+		{
+			CUnpacker Unpacker;
+			Unpacker.Reset(Pack.Data(), Pack.Size());
+			const int MsgId = Unpacker.GetInt() >> 1;
+			if(!Unpacker.Error() && MsgId == (IsSixup() ? (int)protocol7::NETMSGTYPE_CL_SAY : (int)NETMSGTYPE_CL_SAY))
+				m_aFrozenTeesShowAll[Conn].OnChatSent(time_get(), time_freq());
+		}
 	}
 
 	return 0;
@@ -687,6 +697,7 @@ void CClient::EnterGame(int Conn)
 		return;
 
 	m_aDidPostConnect[Conn] = false;
+	m_aFrozenTeesShowAll[Conn].Reset();
 
 	// TClient
 	m_aExecuteOnJoinDone[Conn] = false;
@@ -702,6 +713,7 @@ void CClient::EnterGame(int Conn)
 
 void CClient::OnPostConnect(int Conn)
 {
+	m_aFrozenTeesShowAll[Conn].OnPostConnect(time_get(), time_freq());
 	if(!m_ServerCapabilities.m_ChatTimeoutCode)
 		return;
 
@@ -737,22 +749,61 @@ void CClient::OnPostConnect(int Conn)
 		str_append(aBufMsg, ";");
 		str_append(aBufMsg, g_Config.m_ClRunOnJoin);
 	}
+	SendChatCommand(Conn, aBufMsg);
+}
+
+void CClient::SendChatCommand(int Conn, const char *pCommand)
+{
 	if(IsSixup())
 	{
 		protocol7::CNetMsg_Cl_Say Msg7;
 		Msg7.m_Mode = protocol7::CHAT_ALL;
 		Msg7.m_Target = -1;
-		Msg7.m_pMessage = aBufMsg;
+		Msg7.m_pMessage = pCommand;
 		SendPackMsg(Conn, &Msg7, MSGFLAG_VITAL, true);
 	}
 	else
 	{
 		CNetMsg_Cl_Say MsgP;
 		MsgP.m_Team = 0;
-		MsgP.m_pMessage = aBufMsg;
-		CMsgPacker PackerTimeout(&MsgP);
-		MsgP.Pack(&PackerTimeout);
-		SendMsg(Conn, &PackerTimeout, MSGFLAG_VITAL);
+		MsgP.m_pMessage = pCommand;
+		CMsgPacker Packer(&MsgP);
+		MsgP.Pack(&Packer);
+		SendMsg(Conn, &Packer, MSGFLAG_VITAL);
+	}
+}
+
+void CClient::UpdateFrozenTeesShowAll(int Conn, const CSnapshot *pSnapshot)
+{
+	const bool Online = State() == IClient::STATE_ONLINE && m_aNetClient[Conn].State() == NETSTATE_ONLINE;
+	if(!Online || !pSnapshot)
+		return; // Includes demo playback; never send from demo/render/swap paths.
+
+	int InfoExSize = -1;
+	int Version = -1;
+	int Flags = 0;
+	for(int Index = 0; Index < pSnapshot->NumItems(); ++Index)
+	{
+		if(pSnapshot->GetItemType(Index) != NETOBJTYPE_GAMEINFOEX)
+			continue;
+		InfoExSize = pSnapshot->GetItemSize(Index);
+		const auto *pInfo = reinterpret_cast<const CNetObj_GameInfoEx *>(pSnapshot->GetItem(Index)->Data());
+		if(InfoExSize >= 4)
+			Flags = pInfo->m_Flags;
+		if(InfoExSize >= 8)
+			Version = pInfo->m_Version;
+		break;
+	}
+	// Same legacy fallback as GetGameInfo. Modern servers' explicit entity
+	// flags take precedence, including a negative result for the inactive Conn.
+	const bool FallbackDDRace = str_find_nocase(m_CurrentServerInfo.m_aGameType, "ddrace") ||
+		str_find_nocase(m_CurrentServerInfo.m_aGameType, "mkrace");
+	const bool EntitiesDDRace = TcFrozenTeesEntitiesDDRace(InfoExSize, Version, Flags, FallbackDDRace);
+	const bool Requested = g_Config.m_TcFrozenTeesShowAll && (g_Config.m_TcShowFrozenHud || g_Config.m_TcShowFrozenText);
+	if(m_aFrozenTeesShowAll[Conn].Update(time_get(), time_freq(), Online, Requested, EntitiesDDRace))
+	{
+		SendChatCommand(Conn, "/showall 1");
+		dbg_msg("tee-status", "conn=%d: requested native /showall 1 (unconfirmed)", Conn);
 	}
 }
 
@@ -920,6 +971,7 @@ void CClient::DisconnectWithReason(const char *pReason)
 		pReason = nullptr;
 
 	DummyDisconnect(pReason);
+	m_aFrozenTeesShowAll[CONN_MAIN].Reset();
 	m_LinkProbeTracker.Reset(time_get());
 	for(auto &SnapshotGapTracker : m_aSnapshotGapTrackers)
 		SnapshotGapTracker.Reset();
@@ -1058,6 +1110,7 @@ void CClient::DummyConnect()
 
 void CClient::DummyDisconnect(const char *pReason)
 {
+	m_aFrozenTeesShowAll[CONN_DUMMY].Reset();
 	m_aNetClient[CONN_DUMMY].Disconnect(pReason);
 	g_Config.m_ClDummy = 0;
 
@@ -2614,10 +2667,11 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 					if(m_aReceivedSnapshots[Conn] > GameTickSpeed() && !m_aDidPostConnect[Conn])
 					{
 						OnPostConnect(Conn);
-						m_aDidPostConnect[Conn] = true;
-					}
+							m_aDidPostConnect[Conn] = true;
+						}
+						UpdateFrozenTeesShowAll(Conn, AltSnapBuffer.AsSnapshot());
 
-					// ack snapshot
+						// ack snapshot
 					m_aAckGameTick[Conn] = GameTick;
 				}
 			}

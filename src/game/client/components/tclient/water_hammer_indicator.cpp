@@ -9,13 +9,14 @@ void CWaterHammerIndicator::OnReset()
 {
 	m_Inputs.Reset();
 	m_aHoldSeconds = {};
+	m_aLastActions = {};
 }
 
 void CWaterHammerIndicator::OnUpdate()
 {
 	const float DeltaSeconds = Client()->RenderFrameTime();
 	for(int i = 0; i < MAX_CLIENTS; ++i)
-		TcUpdateWaterHammerHold(m_aHoldSeconds[i], IsMarkedNow(i), DeltaSeconds);
+		TcUpdateWaterHammerAction(m_aHoldSeconds[i], m_aLastActions[i], ActionNow(i), DeltaSeconds);
 }
 
 void CWaterHammerIndicator::OnSnapshot(int Connection, int SnapshotTick, const CSnapshot *pSnapshot)
@@ -43,7 +44,10 @@ void CWaterHammerIndicator::OnClientDrop(int Connection, int ClientId)
 {
 	m_Inputs.ResetClient(Connection, ClientId);
 	if(ClientId >= 0 && ClientId < MAX_CLIENTS)
+	{
 		m_aHoldSeconds[ClientId] = 0.0f;
+		m_aLastActions[ClientId] = ETcWaterHammerAction::NONE;
+	}
 }
 
 void CWaterHammerIndicator::OnDummyDisconnect()
@@ -74,14 +78,19 @@ bool CWaterHammerIndicator::IsMarked(int ClientId) const
 		m_aHoldSeconds[ClientId] >= TcWaterHammerMarkDelaySeconds;
 }
 
-bool CWaterHammerIndicator::IsMarkedNow(int ClientId) const
+ETcWaterHammerAction CWaterHammerIndicator::HighlightAction(int ClientId) const
+{
+	return ClientId >= 0 && ClientId < MAX_CLIENTS ? m_aLastActions[ClientId] : ETcWaterHammerAction::NONE;
+}
+
+ETcWaterHammerAction CWaterHammerIndicator::ActionNow(int ClientId) const
 {
 	if(!g_Config.m_TcWaterHammerHighlight || ClientId < 0 || ClientId >= MAX_CLIENTS)
-		return false;
+		return ETcWaterHammerAction::NONE;
 
 	const int LocalClientId = GameClient()->m_Snap.m_LocalClientId;
 	if(LocalClientId < 0 || LocalClientId >= MAX_CLIENTS)
-		return false;
+		return ETcWaterHammerAction::NONE;
 
 	const auto &ClientData = GameClient()->m_aClients[ClientId];
 	const bool Visible = GameClient()->m_Snap.m_aCharacters[ClientId].m_Active &&
@@ -89,13 +98,13 @@ bool CWaterHammerIndicator::IsMarkedNow(int ClientId) const
 	if(!TcIsWaterHammerTarget(ClientId, LocalClientId, ClientData.m_Active,
 		ClientData.m_Spec || ClientData.m_Team == TEAM_SPECTATORS, Visible,
 		GameClient()->m_Teams.Team(ClientId) == GameClient()->m_Teams.Team(LocalClientId)))
-		return false;
+		return ETcWaterHammerAction::NONE;
 
 	const int CurrentLocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy];
 	const int DummyLocalId = GameClient()->m_aLocalIds[!g_Config.m_ClDummy];
 	const auto InputSource = TcWaterHammerInputSource(ClientId, CurrentLocalId, DummyLocalId, Client()->DummyConnected());
 	if(!TcShouldHighlightWaterHammerSource(InputSource, g_Config.m_TcWaterHammerHighlightSelf != 0))
-		return false;
+		return ETcWaterHammerAction::NONE;
 	const CNetObj_PlayerInput *pLocalInput = nullptr;
 	STcWaterHammerInputState RemoteInput{};
 	switch(InputSource)
@@ -106,13 +115,13 @@ bool CWaterHammerIndicator::IsMarkedNow(int ClientId) const
 	case ETcWaterHammerInputSource::DUMMY_LOCAL:
 		// Never substitute a delayed server echo for missing local lifecycle input.
 		if(!m_Inputs.HasLocalInput(!g_Config.m_ClDummy, ClientId, g_Config.m_ClDummyHammer != 0))
-			return false;
+			return ETcWaterHammerAction::NONE;
 		pLocalInput = g_Config.m_ClDummyHammer ? &GameClient()->m_HammerInput : &GameClient()->m_DummyInput;
 		break;
 	case ETcWaterHammerInputSource::REMOTE:
 		RemoteInput = m_Inputs.PreInput(g_Config.m_ClDummy, ClientId);
 		break;
 	}
-	return TcShouldMarkWaterHammer(ClientData.m_FreezeEnd, ClientData.m_LiveFrozen,
+	return TcWaterHammerAction(ClientData.m_FreezeEnd, ClientData.m_LiveFrozen,
 		ClientData.m_RenderCur.m_Weapon, RemoteInput, pLocalInput);
 }

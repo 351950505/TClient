@@ -1230,8 +1230,12 @@ void CPlayers::OnRender()
 		Alpha = TcAdvanceWaterHammerHighlight(Alpha, Marked, Client()->RenderFrameTime());
 		if(Alpha > 0.001f)
 		{
-			const ColorRGBA BodyColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcWaterHammerBodyColor));
-			const ColorRGBA FeetColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcWaterHammerFeetColor));
+			const auto Colors = TcWaterHammerColors(g_Config.m_TcWaterHammerSeparateColors != 0, GameClient()->m_WaterHammerIndicator.HighlightAction(i),
+				{g_Config.m_TcWaterHammerBodyColor, g_Config.m_TcWaterHammerFeetColor},
+				{g_Config.m_TcWaterHammerHookBodyColor, g_Config.m_TcWaterHammerHookFeetColor},
+				{g_Config.m_TcWaterHammerHammerBodyColor, g_Config.m_TcWaterHammerHammerFeetColor});
+			const ColorRGBA BodyColor = color_cast<ColorRGBA>(ColorHSLA(Colors.m_Body));
+			const ColorRGBA FeetColor = color_cast<ColorRGBA>(ColorHSLA(Colors.m_Feet));
 			m_aWaterHammerBaseRenderInfo[i] = aRenderInfo[i];
 			aRenderInfo[i].m_CustomColoredSkin = true;
 			aRenderInfo[i].m_ColorBody = BodyColor;

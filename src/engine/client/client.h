@@ -3,6 +3,7 @@
 #ifndef ENGINE_CLIENT_CLIENT_H
 #define ENGINE_CLIENT_CLIENT_H
 
+#include "frozen_tees_showall.h"
 #include "graph.h"
 #include "jitter_buffer.h"
 #include "link_probe.h"
@@ -147,6 +148,7 @@ class CClient : public IClient, public CDemoPlayer::IListener
 
 	char m_aTimeoutCodes[NUM_DUMMIES][32] = {"", ""};
 	bool m_aDidPostConnect[NUM_DUMMIES] = {false, false};
+	CFrozenTeesShowAll m_aFrozenTeesShowAll[NUM_DUMMIES];
 	bool m_GenerateTimeoutSeed = true;
 
 	// TClient
@@ -363,6 +365,8 @@ public:
 
 	// called once after being ingame for 1 second
 	void OnPostConnect(int Conn);
+	void SendChatCommand(int Conn, const char *pCommand);
+	void UpdateFrozenTeesShowAll(int Conn, const CSnapshot *pSnapshot);
 
 	void Connect(const char *pAddress, const char *pPassword = nullptr) override;
 	void DisconnectWithReason(const char *pReason);

@@ -1611,6 +1611,13 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 				g_Config.m_TcShowFrozenText = g_Config.m_TcShowFrozenText != 2 ? 2 : 1;
 		}
 	}
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesShowAll, TCLocalize("Request full-distance tee status (native /showall)"), &g_Config.m_TcFrozenTeesShowAll, &Column, LineSize);
+	{
+		SLabelProperties Props;
+		Props.m_MaxWidth = Column.w;
+		Column.HSplitTop(LineSize * 4, &Label, &Column);
+		Ui()->DoLabel(&Label, TCLocalize("With tee icons or text enabled, requests /showall 1 once per connection on DDRace. Requires native /showall server support and may increase traffic. Other visibility limits still apply; not a confirmation. Disabling does not send /showall 0."), FontSize, TEXTALIGN_TL, Props);
+	}
 	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
 
 	// ***** Tile Outlines ***** //
@@ -4226,9 +4233,21 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	if(g_Config.m_TcWaterHammerHighlight)
 	{
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlightSelf, TCLocalize("Highlight your own frozen tee and dummy"), &g_Config.m_TcWaterHammerHighlightSelf, &RightView, LineSize);
-		static CButtonContainer s_WaterHammerBodyColor, s_WaterHammerFeetColor;
-		DoLine_ColorPicker(&s_WaterHammerBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen highlight body color"), &g_Config.m_TcWaterHammerBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerBodyColor)), false);
-		DoLine_ColorPicker(&s_WaterHammerFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen highlight feet color"), &g_Config.m_TcWaterHammerFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerFeetColor)), false);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerSeparateColors, TCLocalize("Separate hook and hammer colors"), &g_Config.m_TcWaterHammerSeparateColors, &RightView, LineSize);
+		if(g_Config.m_TcWaterHammerSeparateColors)
+		{
+			static CButtonContainer s_WaterHammerHookBodyColor, s_WaterHammerHookFeetColor, s_WaterHammerHammerBodyColor, s_WaterHammerHammerFeetColor;
+			DoLine_ColorPicker(&s_WaterHammerHookBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen hook highlight body color"), &g_Config.m_TcWaterHammerHookBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHookBodyColor)), false);
+			DoLine_ColorPicker(&s_WaterHammerHookFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen hook highlight feet color"), &g_Config.m_TcWaterHammerHookFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHookFeetColor)), false);
+			DoLine_ColorPicker(&s_WaterHammerHammerBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen hammer highlight body color"), &g_Config.m_TcWaterHammerHammerBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHammerBodyColor)), false);
+			DoLine_ColorPicker(&s_WaterHammerHammerFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen hammer highlight feet color"), &g_Config.m_TcWaterHammerHammerFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHammerFeetColor)), false);
+		}
+		else
+		{
+			static CButtonContainer s_WaterHammerBodyColor, s_WaterHammerFeetColor;
+			DoLine_ColorPicker(&s_WaterHammerBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen highlight body color"), &g_Config.m_TcWaterHammerBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerBodyColor)), false);
+			DoLine_ColorPicker(&s_WaterHammerFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen highlight feet color"), &g_Config.m_TcWaterHammerFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerFeetColor)), false);
+		}
 	}
 
 	// The columns' remaining height may be negative after scrolling; only their consumed height is content.

@@ -1,12 +1,16 @@
 #include <game/client/components/tclient/water_hammer_indicator_logic.h>
 
 #ifdef TC_WATER_HAMMER_STANDALONE
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #define TEST(Suite, Name) static void Suite##_##Name()
 #define EXPECT_TRUE(Value) do { if(!(Value)) { std::fprintf(stderr, "failed at line %d: %s\n", __LINE__, #Value); std::abort(); } } while(false)
 #define EXPECT_FALSE(Value) EXPECT_TRUE(!(Value))
 #define EXPECT_EQ(Left, Right) EXPECT_TRUE((Left) == (Right))
+#define EXPECT_GT(Left, Right) EXPECT_TRUE((Left) > (Right))
+#define EXPECT_LT(Left, Right) EXPECT_TRUE((Left) < (Right))
+#define EXPECT_NEAR(Left, Right, Tolerance) EXPECT_TRUE(std::fabs((Left) - (Right)) <= (Tolerance))
 #else
 #include <gtest/gtest.h>
 #endif
@@ -134,6 +138,144 @@ TEST(WaterHammer, HighlightTransitionsFadeInAndOut)
 	EXPECT_NEAR(Alpha, 0.0f, 0.0001f);
 	EXPECT_EQ(TcAdvanceWaterHammerHighlight(0.0f, true, 0.0f), 0.0f);
 	EXPECT_EQ(TcAdvanceWaterHammerHighlight(0.0f, true, 1.0f), 1.0f);
+}
+
+TEST(WaterHammer, ActionSelectionAndHammerPriority)
+{
+	EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_GUN, {true, 0, 0, 1}, nullptr), ETcWaterHammerAction::HOOK);
+	EXPECT_EQ(TcWaterHammerAction(-1, false, WEAPON_NINJA, {true, 0, 0, 1}, nullptr), ETcWaterHammerAction::HOOK);
+	EXPECT_EQ(TcWaterHammerAction(0, true, WEAPON_GUN, {true, WEAPON_HAMMER + 1, 1, 0}, nullptr), ETcWaterHammerAction::HAMMER);
+	EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_GUN, {true, WEAPON_HAMMER + 1, 3, 1}, nullptr), ETcWaterHammerAction::HAMMER);
+	EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_HAMMER, {true, WEAPON_GUN + 1, 1, 1}, nullptr), ETcWaterHammerAction::HAMMER);
+	EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_HAMMER, {true, 0, 2, 1}, nullptr), ETcWaterHammerAction::HOOK);
+	EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_GUN, {true, 0, 1, 1}, nullptr), ETcWaterHammerAction::HOOK);
+	EXPECT_EQ(TcWaterHammerAction(0, false, WEAPON_HAMMER, {true, 0, 1, 1}, nullptr), ETcWaterHammerAction::NONE);
+	EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_HAMMER, {}, nullptr), ETcWaterHammerAction::NONE);
+}
+
+TEST(WaterHammer, ActionUsesLocalInputOverRemoteEcho)
+{
+	CNetObj_PlayerInput Local{};
+	Local.m_Hook = 1;
+	EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_GUN, {true, WEAPON_HAMMER + 1, 1, 0}, &Local), ETcWaterHammerAction::HOOK);
+	Local.m_WantedWeapon = WEAPON_HAMMER + 1;
+	Local.m_Fire = 1;
+	EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_GUN, {true, 0, 0, 1}, &Local), ETcWaterHammerAction::HAMMER);
+	Local.m_Hook = 0;
+	Local.m_Fire = 2;
+	EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_HAMMER, {true, 0, 1, 1}, &Local), ETcWaterHammerAction::NONE);
+}
+
+TEST(WaterHammer, ActionDetectionPreservesExistingTrigger)
+{
+	for(int FreezeEnd : {0, -1, 100})
+		for(bool LiveFrozen : {false, true})
+			for(int CurrentWeapon : {WEAPON_HAMMER, WEAPON_GUN, WEAPON_NINJA})
+				for(int WantedWeapon : {0, WEAPON_HAMMER + 1, WEAPON_GUN + 1, WEAPON_NINJA + 1})
+					for(int Fire = 0; Fire < 64; ++Fire)
+						for(int Hook : {0, 1})
+							for(bool Received : {false, true})
+								for(bool UseLocal : {false, true})
+								{
+									const STcWaterHammerInputState PreInput{Received, WantedWeapon, Fire, Hook};
+									CNetObj_PlayerInput Local{};
+									Local.m_WantedWeapon = WantedWeapon;
+									Local.m_Fire = Fire;
+									Local.m_Hook = Hook;
+									const bool HammerHeld = (WantedWeapon == WEAPON_HAMMER + 1 || CurrentWeapon == WEAPON_HAMMER) && (Fire & 1) != 0;
+									const bool Expected = (UseLocal || Received) && (FreezeEnd != 0 || LiveFrozen) && (HammerHeld || Hook != 0);
+									const auto *pLocal = UseLocal ? &Local : nullptr;
+									EXPECT_EQ(TcWaterHammerAction(FreezeEnd, LiveFrozen, CurrentWeapon, PreInput, pLocal) != ETcWaterHammerAction::NONE, Expected);
+									EXPECT_EQ(TcShouldMarkWaterHammer(FreezeEnd, LiveFrozen, CurrentWeapon, PreInput, pLocal), Expected);
+								}
+}
+
+TEST(WaterHammer, SharedColorsRemainDefaultForEveryAction)
+{
+	const STcWaterHammerColors Shared{123456, 654321}; // Existing user colors need not be the defaults.
+	const STcWaterHammerColors Hook{111, 222};
+	const STcWaterHammerColors Hammer{333, 444};
+	for(auto Action : {ETcWaterHammerAction::NONE, ETcWaterHammerAction::HOOK, ETcWaterHammerAction::HAMMER})
+	{
+		const auto Colors = TcWaterHammerColors(false, Action, Shared, Hook, Hammer);
+		EXPECT_EQ(Colors.m_Body, Shared.m_Body);
+		EXPECT_EQ(Colors.m_Feet, Shared.m_Feet);
+	}
+}
+
+TEST(WaterHammer, SeparateColorsSelectBothPartsWithoutChangingPalettes)
+{
+	const STcWaterHammerColors Shared{123456, 654321};
+	const STcWaterHammerColors Hook{111, 222};
+	const STcWaterHammerColors Hammer{333, 444};
+	const auto HookColors = TcWaterHammerColors(true, ETcWaterHammerAction::HOOK, Shared, Hook, Hammer);
+	EXPECT_EQ(HookColors.m_Body, Hook.m_Body);
+	EXPECT_EQ(HookColors.m_Feet, Hook.m_Feet);
+	const auto HammerColors = TcWaterHammerColors(true, ETcWaterHammerAction::HAMMER, Shared, Hook, Hammer);
+	EXPECT_EQ(HammerColors.m_Body, Hammer.m_Body);
+	EXPECT_EQ(HammerColors.m_Feet, Hammer.m_Feet);
+	const auto UnmarkedColors = TcWaterHammerColors(true, ETcWaterHammerAction::NONE, Shared, Hook, Hammer);
+	EXPECT_EQ(UnmarkedColors.m_Body, Shared.m_Body);
+	EXPECT_EQ(UnmarkedColors.m_Feet, Shared.m_Feet);
+	const auto SharedAgain = TcWaterHammerColors(false, ETcWaterHammerAction::HAMMER, Shared, Hook, Hammer);
+	EXPECT_EQ(SharedAgain.m_Body, Shared.m_Body);
+	EXPECT_EQ(SharedAgain.m_Feet, Shared.m_Feet);
+	const auto HookAgain = TcWaterHammerColors(true, ETcWaterHammerAction::HOOK, Shared, Hook, Hammer);
+	EXPECT_EQ(HookAgain.m_Body, Hook.m_Body);
+	EXPECT_EQ(HookAgain.m_Feet, Hook.m_Feet);
+}
+
+TEST(WaterHammer, ActionSwitchDoesNotRestartHoldOrFade)
+{
+	float Hold = 0.0f;
+	auto LastAction = ETcWaterHammerAction::NONE;
+	EXPECT_FALSE(TcUpdateWaterHammerAction(Hold, LastAction, ETcWaterHammerAction::HOOK, 0.25f));
+	EXPECT_EQ(LastAction, ETcWaterHammerAction::NONE);
+	EXPECT_TRUE(TcUpdateWaterHammerAction(Hold, LastAction, ETcWaterHammerAction::HAMMER, 0.25f));
+	EXPECT_EQ(LastAction, ETcWaterHammerAction::HAMMER);
+	float Alpha = TcAdvanceWaterHammerHighlight(0.0f, true, 0.06f);
+	const bool Marked = TcUpdateWaterHammerAction(Hold, LastAction, ETcWaterHammerAction::HOOK, 0.06f);
+	EXPECT_TRUE(Marked);
+	EXPECT_EQ(LastAction, ETcWaterHammerAction::HOOK);
+	EXPECT_EQ(Hold, TcWaterHammerMarkDelaySeconds);
+	Alpha = TcAdvanceWaterHammerHighlight(Alpha, Marked, 0.06f);
+	EXPECT_NEAR(Alpha, 1.0f, 0.0001f);
+}
+
+TEST(WaterHammer, ReleaseFadeKeepsLastVisibleAction)
+{
+	const STcWaterHammerColors Shared{123456, 654321};
+	const STcWaterHammerColors Hook{111, 222};
+	const STcWaterHammerColors Hammer{333, 444};
+	for(auto Action : {ETcWaterHammerAction::HOOK, ETcWaterHammerAction::HAMMER})
+	{
+		float Hold = 0.0f;
+		auto LastAction = ETcWaterHammerAction::NONE;
+		EXPECT_FALSE(TcUpdateWaterHammerAction(Hold, LastAction, Action, -1.0f));
+		EXPECT_FALSE(TcUpdateWaterHammerAction(Hold, LastAction, Action, 0.0f));
+		EXPECT_TRUE(TcUpdateWaterHammerAction(Hold, LastAction, Action, 0.5f));
+		EXPECT_EQ(LastAction, Action);
+		const auto BeforeRelease = TcWaterHammerColors(true, LastAction, Shared, Hook, Hammer);
+		float Alpha = TcAdvanceWaterHammerHighlight(0.0f, true, 0.12f);
+		const bool Marked = TcUpdateWaterHammerAction(Hold, LastAction, ETcWaterHammerAction::NONE, 0.03f);
+		EXPECT_FALSE(Marked);
+		EXPECT_EQ(Hold, 0.0f);
+		EXPECT_EQ(LastAction, Action);
+		Alpha = TcAdvanceWaterHammerHighlight(Alpha, Marked, 0.03f);
+		EXPECT_GT(Alpha, 0.0f);
+		EXPECT_LT(Alpha, 1.0f);
+
+		const auto NextAction = Action == ETcWaterHammerAction::HOOK ? ETcWaterHammerAction::HAMMER : ETcWaterHammerAction::HOOK;
+		EXPECT_FALSE(TcUpdateWaterHammerAction(Hold, LastAction, NextAction, 0.03f));
+		EXPECT_EQ(LastAction, Action); // An unready new action must not recolor the outgoing fade.
+		const auto DuringFade = TcWaterHammerColors(true, LastAction, Shared, Hook, Hammer);
+		EXPECT_EQ(DuringFade.m_Body, BeforeRelease.m_Body);
+		EXPECT_EQ(DuringFade.m_Feet, BeforeRelease.m_Feet);
+		Alpha = TcAdvanceWaterHammerHighlight(Alpha, false, 0.12f);
+		EXPECT_NEAR(Alpha, 0.0f, 0.0001f);
+		EXPECT_TRUE(TcUpdateWaterHammerAction(Hold, LastAction, NextAction, 0.5f));
+		EXPECT_EQ(LastAction, NextAction);
+	}
 }
 
 TEST(WaterHammer, PreInputHookPersistsUntilReleaseOrClientReset)
@@ -365,6 +507,14 @@ TEST(WaterHammer, FrozenKatanaDoesNotChangeRealWeapon)
 int main()
 {
 	WaterHammer_FreezeAndMissingInput();
+	WaterHammer_MarkDelayRequiresPersistentState();
+	WaterHammer_ActionSelectionAndHammerPriority();
+	WaterHammer_ActionUsesLocalInputOverRemoteEcho();
+	WaterHammer_ActionDetectionPreservesExistingTrigger();
+	WaterHammer_SharedColorsRemainDefaultForEveryAction();
+	WaterHammer_SeparateColorsSelectBothPartsWithoutChangingPalettes();
+	WaterHammer_ActionSwitchDoesNotRestartHoldOrFade();
+	WaterHammer_ReleaseFadeKeepsLastVisibleAction();
 	WaterHammer_WeaponAndFireCounter();
 	WaterHammer_LocalInputTakesPriority();
 	WaterHammer_TargetFilters();
@@ -384,6 +534,6 @@ int main()
 	WaterHammer_NewSessionDoesNotInheritEitherConnection();
 	WaterHammer_LocalSwapRecordsCopiedInputWithoutActiveSnapshot();
 	WaterHammer_FrozenKatanaDoesNotChangeRealWeapon();
-	std::puts("WaterHammer: 20 test groups passed");
+	std::puts("WaterHammer: 28 test groups passed");
 }
 #endif

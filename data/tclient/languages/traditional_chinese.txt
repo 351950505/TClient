@@ -4,6 +4,36 @@
 
 ##### translated strings #####
 
+Frozen hammer/hook highlight
+== 凍結錘子／鉤子高亮
+
+Highlight frozen teammates, yourself and your dummy holding hammer fire or hook
+== 凍結時按住錘擊或鉤子的隊友、自己及分身均會高亮
+
+Highlight your own frozen tee and dummy
+== 高亮自己的凍結 tee 和 dummy
+
+Frozen highlight body color
+== 凍結高亮身體顏色
+
+Frozen highlight feet color
+== 凍結高亮腳部顏色
+
+Separate hook and hammer colors
+== 分別設定顏色
+
+Frozen hook highlight body color
+== 鉤子高亮身體顏色
+
+Frozen hook highlight feet color
+== 鉤子高亮腳部顏色
+
+Frozen hammer highlight body color
+== 錘子高亮身體顏色
+
+Frozen hammer highlight feet color
+== 錘子高亮腳部顏色
+
 Translated text hidden due to streamer mode
 == 
 
@@ -400,6 +430,12 @@ Tees left alive text
 
 Count frozen tees
 == 
+
+Request full-distance tee status (native /showall)
+== 請求全距離Tee狀態（原生 /showall）
+
+With tee icons or text enabled, requests /showall 1 once per connection on DDRace. Requires native /showall server support and may increase traffic. Other visibility limits still apply; not a confirmation. Disabling does not send /showall 0.
+== 啟用Tee圖示或文字時，在DDRace中每個連線嘗試一次 /showall 1。需伺服器支援原生 /showall，可能增加流量。其他可見性限制仍適用；不代表已確認生效。關閉不會傳送 /showall 0。
 
 Tile Outlines
 == 

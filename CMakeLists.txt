@@ -2712,6 +2712,7 @@ if(CLIENT)
 
   set_src(ENGINE_CLIENT GLOB_RECURSE src/engine/client
     # tidy-alphabetical-start
+    auto_session_log.h
     backend/backend_base.cpp
     backend/backend_base.h
     backend/glsl_shader_compiler.cpp
@@ -2751,7 +2752,6 @@ if(CLIENT)
     favorites.cpp
     friends.cpp
     friends.h
-    frozen_tees_showall.h
     ghost.cpp
     ghost.h
     graph.cpp
@@ -2913,7 +2913,6 @@ if(CLIENT)
     components/tclient/custom_communities.cpp
     components/tclient/custom_communities.h
     components/tclient/data_version.h
-    components/tclient/frozen_hud_logic.h
     components/tclient/gradient.cpp
     components/tclient/gradient.h
     components/tclient/gradient_math.cpp
@@ -3771,9 +3770,9 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     snapshot_test.cpp
     str_test.cpp
     swap_endian_test.cpp
+    tclient_auto_session_log_test.cpp
     tclient_console_filter_test.cpp
     tclient_fastinput_test.cpp
-    tclient_frozen_hud_test.cpp
     tclient_gradient_test.cpp
     tclient_jitter_buffer_test.cpp
     tclient_relay_test.cpp

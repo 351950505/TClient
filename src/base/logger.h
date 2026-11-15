@@ -155,6 +155,34 @@ void log_global_logger_finish();
 /**
  * @ingroup Log
  *
+ * TClient: whether any error-level (`E`) message was logged during this
+ * session. The auto session log (see engine/client/client.cpp) is only kept
+ * when this is true or the process terminated abnormally.
+ */
+bool log_session_had_error();
+
+/**
+ * @ingroup Log
+ *
+ * TClient: optional hook that rewrites a log message (the part after
+ * "system: ") into another language before it is written to the auto session
+ * log. Called from arbitrary threads; implementations must be pure and
+ * thread-safe. Return true if `pBuf` holds the translated message, false to
+ * keep the original text.
+ */
+typedef bool (*TCLIENT_LOG_TRANSLATE_FN)(char *pBuf, unsigned BufSize, const char *pSystem, const char *pMessage);
+
+/**
+ * @ingroup Log
+ *
+ * TClient: set the translator applied by the auto session log. Pass nullptr
+ * to remove it.
+ */
+void log_set_line_translator(TCLIENT_LOG_TRANSLATE_FN pfnTranslator);
+
+/**
+ * @ingroup Log
+ *
  * Get the logger active in the current scope. This might be the global default
  * logger or some other logger set via `log_set_scope_logger`.
  */
@@ -214,8 +242,13 @@ std::unique_ptr<ILogger> log_logger_file(IOHANDLE file);
  *
  * @param file File to write to, must be opened for writing.
  * @param MaxBytes Maximum number of bytes to write, or 0 for no limit.
+ * @param pRemoveOnCleanExit `nullptr` for an ordinary limited logger. A
+ * non-null value marks an auto session logger whose messages are translated.
+ * If nonempty, it must be the absolute path that `GlobalFinish` deletes after
+ * a clean, error-free session; an empty string enables translation without
+ * deletion for storage fallback logs.
  */
-std::unique_ptr<ILogger> log_logger_file_limited(IOHANDLE file, uint64_t MaxBytes);
+std::unique_ptr<ILogger> log_logger_file_limited(IOHANDLE file, uint64_t MaxBytes, const char *pRemoveOnCleanExit = nullptr);
 
 /**
  * @ingroup Log

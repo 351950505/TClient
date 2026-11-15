@@ -1591,11 +1591,27 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowFrozenHud, TCLocalize("Show frozen tee display"), &g_Config.m_TcShowFrozenHud, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowFrozenHudSkins, TCLocalize("Use skins instead of ninja tees"), &g_Config.m_TcShowFrozenHudSkins, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenHudTeamOnly, TCLocalize("Only show after joining a team"), &g_Config.m_TcFrozenHudTeamOnly, &Column, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesInlineIsland, TCLocalize("Same line as the dynamic island"), &g_Config.m_TcFrozenTeesInlineIsland, &Column, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesAliveOnly, TCLocalize("Show only alive teammates"), &g_Config.m_TcFrozenTeesAliveOnly, &Column, LineSize);
 
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenMaxRows, &g_Config.m_TcFrozenMaxRows, &Button, TCLocalize("Max Rows"), 1, 6);
 	Column.HSplitTop(LineSize, &Button, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenHudTeeSize, &g_Config.m_TcFrozenHudTeeSize, &Button, TCLocalize("Tee Size"), 8, 27);
+	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenTeesMaxDisplay, &g_Config.m_TcFrozenTeesMaxDisplay, &Button, TCLocalize("Max displayed (0 = all)"), 0, 64);
+	Column.HSplitTop(LineSize, &Button, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenHudTeeSize, &g_Config.m_TcFrozenHudTeeSize, &Button, TCLocalize("Tee Size"), 8, 20);
+	// Position and overall scale of the redesigned capsule, same structure as
+	// the Dynamic Island sliders above.
+	Column.HSplitTop(LineSize, &Button, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenTeesOffsetX, &g_Config.m_TcFrozenTeesOffsetX, &Button, TCLocalize("Horizontal offset"), -600, 600, &CUi::ms_LinearScrollbarScale, 0, "px");
+	Column.HSplitTop(LineSize, &Button, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenTeesOffsetY, &g_Config.m_TcFrozenTeesOffsetY, &Button, TCLocalize("Vertical offset"), -600, 600, &CUi::ms_LinearScrollbarScale, 0, "px");
+	Column.HSplitTop(LineSize, &Button, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenTeesScale, &g_Config.m_TcFrozenTeesScale, &Button, TCLocalize("Scale"), 60, 200, &CUi::ms_LinearScrollbarScale, 0, "%");
+	{
+		static CButtonContainer s_FrozenTeesAccentColorId;
+		DoLine_ColorPicker(&s_FrozenTeesAccentColorId, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Status dot color"), &g_Config.m_TcFrozenTeesAccentColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcFrozenTeesAccentColor)), false);
+	}
 
 	{
 		CUIRect CheckBoxRect, CheckBoxRect2;
@@ -2755,6 +2771,8 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 	View.HSplitTop(MarginSmall * 4, nullptr, &View);
 	View.HSplitTop(LineSize, &Button, &View);
 	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelVolume, &g_Config.m_TcPingwheelVolume, &Button, TCLocalize("Signal sound volume"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+	View.HSplitTop(LineSize, &Button, &View);
+	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelMarkerOpacity, &g_Config.m_TcPingwheelMarkerOpacity, &Button, TCLocalize("Marker opacity"), 10, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 	View.HSplitTop(LineSize, &Button, &View);
 	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelSoundRange, &g_Config.m_TcPingwheelSoundRange, &Button, TCLocalize("Sound audible range (0 = whole map)"), 0, 5000, &CUi::ms_LinearScrollbarScale, 0, "");
 	View.HSplitTop(MarginSmall * 4, nullptr, &View);
@@ -4229,10 +4247,11 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
 	Ui()->DoLabel(&Label, TCLocalize("Frozen hammer/hook highlight"), HeadlineFontSize, TEXTALIGN_ML);
 	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlight, TCLocalize("Highlight frozen teammates, yourself and your dummy holding hammer fire or hook"), &g_Config.m_TcWaterHammerHighlight, &RightView, LineSize);
-	if(g_Config.m_TcWaterHammerHighlight)
-	{
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlightSelf, TCLocalize("Highlight your own frozen tee and dummy"), &g_Config.m_TcWaterHammerHighlightSelf, &RightView, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHookHighlight, TCLocalize("Enable frozen hook highlight"), &g_Config.m_TcWaterHookHighlight, &RightView, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlight, TCLocalize("Enable frozen hammer highlight"), &g_Config.m_TcWaterHammerHighlight, &RightView, LineSize);
+		if(g_Config.m_TcWaterHookHighlight || g_Config.m_TcWaterHammerHighlight)
+		{
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlightSelf, TCLocalize("Highlight your own frozen tee and dummy"), &g_Config.m_TcWaterHammerHighlightSelf, &RightView, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerSeparateColors, TCLocalize("Separate hook and hammer colors"), &g_Config.m_TcWaterHammerSeparateColors, &RightView, LineSize);
 		if(g_Config.m_TcWaterHammerSeparateColors)
 		{

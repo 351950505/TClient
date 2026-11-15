@@ -46,7 +46,7 @@ public:
 	static constexpr const char *CHAT_PREFIX = "\xE2\x9F\xA8P:";
 	// 注意：'B' 是十六进制字符，不能直接跟在 \xA8 后（会被贪婪解析），用字面量拼接
 	static constexpr const char *CHAT_PREFIX_BIN = "\xE2\x9F\xA8" "B:";
-	static constexpr float MARKER_LIFE = 6.0f; // 标记存活秒数
+	static constexpr float MARKER_LIFE = 1.5f; // 标记存活秒数
 
 	struct CMarker
 	{

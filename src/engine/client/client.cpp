@@ -3,6 +3,7 @@
 
 #include "client.h"
 
+#include "auto_session_log.h"
 #include "demoedit.h"
 #include "friends.h"
 #include "serverbrowser.h"
@@ -121,6 +122,119 @@ static constexpr ColorRGBA CLIENT_NETWORK_PRINT_ERROR_COLOR = ColorRGBA(1.0f, 0.
 static constexpr int TCLIENT_AUTO_LOG_MAX_FILES = 10;
 static constexpr uint64_t TCLIENT_AUTO_LOG_MAX_BYTES = 10ULL * 1024 * 1024;
 
+// TClient v1.7.8.84: Chinese translations for common error messages in the
+// auto session log (data/log). Matching is on exact well-known patterns;
+// anything else is written verbatim so diagnostics never lose information.
+static const char *TcCurlErrorText(unsigned Code)
+{
+	switch(Code)
+	{
+	case 3: return "URL 格式错误";
+	case 6: return "无法解析主机名";
+	case 7: return "无法连接到服务器";
+	case 22: return "HTTP 响应错误";
+	case 23: return "写入失败";
+	case 28: return "操作超时";
+	case 35: return "SSL/TLS 握手失败";
+	case 42: return "请求被中断（退出或超时）";
+	case 47: return "重定向次数过多";
+	case 52: return "服务器返回空响应";
+	case 55: return "发送网络数据失败";
+	case 56: return "接收网络数据失败";
+	case 60: return "SSL 证书验证失败";
+	case 63: return "超过最大文件大小";
+	case 83: return "SSL 引擎错误";
+	case 92: return "HTTP/2 流错误";
+	default: return nullptr;
+	}
+}
+
+static bool TcTranslateLogMessage(char *pBuf, unsigned BufSize, const char *pSystem, const char *pMessage)
+{
+	// http failures: "<url> failed. libcurl error (<code>): <detail>"
+	if(str_comp(pSystem, "http") == 0)
+	{
+		static const char NEEDLE[] = " failed. libcurl error (";
+		const char *pNeedle = strstr(pMessage, NEEDLE);
+		if(pNeedle)
+		{
+			const int UrlLength = (int)(pNeedle - pMessage);
+			const char *pCode = pNeedle + sizeof(NEEDLE) - 1;
+			unsigned Code = 0;
+			bool HaveCode = false;
+			while(*pCode >= '0' && *pCode <= '9')
+			{
+				Code = Code * 10 + (unsigned)(*pCode - '0');
+				HaveCode = true;
+				++pCode;
+			}
+			const char *pDetail = HaveCode ? str_startswith(pCode, "): ") : nullptr;
+			if(pDetail)
+			{
+				char aUrl[512];
+				str_truncate(aUrl, sizeof(aUrl), pMessage, UrlLength);
+				if(const char *pText = TcCurlErrorText(Code))
+					str_format(pBuf, BufSize, "请求失败：%s。libcurl 错误(%u)：%s；原文：%s", aUrl, Code, pText, pDetail);
+				else
+					str_format(pBuf, BufSize, "请求失败：%s。libcurl 错误(%u)；原文：%s", aUrl, Code, pDetail);
+				return true;
+			}
+		}
+	}
+	// Assertion preamble written by the assertion logger. Crashdump builds add
+	// another requested artifact, so match both complete variants explicitly.
+	if(str_comp(pSystem, "assertion") == 0)
+	{
+		static const char CRASHDUMP_PREAMBLE[] = "An assertion error occurred. Please take a screenshot and report this error.\nPlease also share the assert log and crash log found in the 'dumps' folder in your config directory.";
+		static const char PREAMBLE[] = "An assertion error occurred. Please take a screenshot and report this error.\nPlease also share the assert log found in the 'dumps' folder in your config directory.";
+		if(str_startswith(pMessage, CRASHDUMP_PREAMBLE))
+		{
+			str_format(pBuf, BufSize, "发生断言错误。请截图并上报此错误。\n请同时分享配置目录 dumps 文件夹里的断言日志和崩溃日志。%s", pMessage + sizeof(CRASHDUMP_PREAMBLE) - 1);
+			return true;
+		}
+		if(str_startswith(pMessage, PREAMBLE))
+		{
+			str_format(pBuf, BufSize, "发生断言错误。请截图并上报此错误。\n请同时分享配置目录 dumps 文件夹里的断言日志。%s", pMessage + sizeof(PREAMBLE) - 1);
+			return true;
+		}
+	}
+	// assert messages: keep the file:line prefix, translate known phrases
+	if(str_comp(pSystem, "assert") == 0)
+	{
+		static const char REQUEST_NOT_DONE[] = "Request not done";
+		const int Suffix = (int)sizeof(REQUEST_NOT_DONE) - 1;
+		const int Len = str_length(pMessage);
+		if(Len > Suffix && str_endswith(pMessage, REQUEST_NOT_DONE))
+		{
+			str_format(pBuf, BufSize, "%.*s请求未完成（内部状态断言）", Len - Suffix, pMessage);
+			return true;
+		}
+	}
+	// file open failures (console exec, client logging, storage)
+	static const char OPEN_NEEDLE[] = "failed to open '";
+	if(str_comp(pSystem, "console") == 0 || str_comp(pSystem, "client") == 0 || str_comp(pSystem, "storage") == 0)
+	{
+		const char *pNeedle = strstr(pMessage, OPEN_NEEDLE);
+		if(pNeedle)
+		{
+			const char *pPath = pNeedle + sizeof(OPEN_NEEDLE) - 1;
+			const char *pQuote = strchr(pPath, '\'');
+			if(pQuote)
+			{
+				const int PathLength = (int)(pQuote - pPath);
+				char aPath[512];
+				str_truncate(aPath, sizeof(aPath), pPath, PathLength);
+				if(str_startswith(pQuote + 1, " for logging"))
+					str_format(pBuf, BufSize, "无法打开 '%s' 写入日志", aPath);
+				else
+					str_format(pBuf, BufSize, "无法打开 '%s'", aPath);
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 #if defined(CONF_FAMILY_WINDOWS)
 struct SUpdaterReadyMarker
 {
@@ -198,37 +312,9 @@ static bool WriteUpdaterReadyMarker(const SUpdaterReadyMarker &Marker)
 }
 #endif
 
-static bool IsAutoLogFilename(const char *pFilename)
-{
-	static const char PREFIX[] = "ddnet-log-";
-	static const char SUFFIX[] = ".log";
-	constexpr int TIMESTAMP_LEN = 19; // %Y-%m-%d_%H-%M-%S
-	const int Length = str_length(pFilename);
-	if(Length != (int)sizeof(PREFIX) - 1 + TIMESTAMP_LEN + (int)sizeof(SUFFIX) - 1)
-		return false;
-	if(!str_startswith(pFilename, PREFIX) || !str_endswith(pFilename, SUFFIX))
-		return false;
-	const char *pTimestamp = pFilename + sizeof(PREFIX) - 1;
-	for(int i = 0; i < TIMESTAMP_LEN; i++)
-	{
-		const bool IsSeparatorPosition = i == 4 || i == 7 || i == 10 || i == 13 || i == 16;
-		if(IsSeparatorPosition)
-		{
-			const char Expected = i == 10 ? '_' : '-';
-			if(pTimestamp[i] != Expected)
-				return false;
-		}
-		else if(pTimestamp[i] < '0' || pTimestamp[i] > '9')
-		{
-			return false;
-		}
-	}
-	return true;
-}
-
 static int AutoLogfileListCallback(const char *pFilename, int IsDir, int StorageType, void *pUser)
 {
-	if(IsDir || !IsAutoLogFilename(pFilename))
+	if(IsDir || !TClientAutoSessionLog::IsFilename(pFilename))
 		return 0;
 	static_cast<std::vector<std::string> *>(pUser)->emplace_back(pFilename);
 	return 0;
@@ -246,6 +332,25 @@ static void PruneAutoLogfiles(IStorage *pStorage, int MaxFiles)
 		char aPath[IO_MAX_PATH_LENGTH];
 		str_format(aPath, sizeof(aPath), "logs/%s", vNames.front().c_str());
 		if(!pStorage->RemoveFile(aPath, IStorage::TYPE_SAVE))
+			break; // e.g. still open by another client; do not spin
+		vNames.erase(vNames.begin());
+	}
+}
+
+// TClient v1.7.8.84: same retention rule, but for the absolute
+// <install>/data/log directory (fs-based, no storage paths involved).
+static void PruneAutoLogfilesInDir(const char *pDir, int MaxFiles)
+{
+	std::vector<std::string> vNames;
+	fs_listdir(pDir, AutoLogfileListCallback, 0, &vNames);
+	// Names use a sortable timestamp, oldest first.
+	std::sort(vNames.begin(), vNames.end());
+	// Leave room for the file this launch is about to create.
+	while((int)vNames.size() >= MaxFiles)
+	{
+		char aPath[IO_MAX_PATH_LENGTH];
+		str_format(aPath, sizeof(aPath), "%s/%s", pDir, vNames.front().c_str());
+		if(fs_remove(aPath) != 0)
 			break; // e.g. still open by another client; do not spin
 		vNames.erase(vNames.begin());
 	}
@@ -5740,28 +5845,75 @@ int main(int argc, const char **argv)
 
 	// TClient: default to a per-launch session log so disconnects and crashes are
 	// always diagnosable afterwards (the 2026-11-03 connection-drop investigation
-	// was blind because no client build wrote a console log). The auto-assigned
-	// path is cleared again below so it never becomes a sticky settings.cfg entry
-	// frozen at the first launch date; an explicit logfile= keeps working.
-	bool AutoLogfile = false;
-	if(!g_Config.m_Logfile[0])
+	// was blind because no client build wrote a console log). An explicit
+	// logfile= keeps working unchanged.
+	// v1.7.8.84: session logs live in <install>/data/log; a clean shutdown with
+	// no error-level output deletes its own file, so only sessions that errored
+	// out or crashed leave a record. If opening the install path fails, retry the
+	// storage logs/ directory (those fallback files are always kept).
+	const bool AutoLogfile = !g_Config.m_Logfile[0];
+
+	// TClient v1.7.8.84: session log messages go through the Chinese
+	// translation hook; only the auto session log applies it (log.cpp).
+	log_set_line_translator(TcTranslateLogMessage);
+
+	if(AutoLogfile)
 	{
-		PruneAutoLogfiles(pStorage, TCLIENT_AUTO_LOG_MAX_FILES);
 		char aTimestamp[32];
 		str_timestamp(aTimestamp, sizeof(aTimestamp));
-		str_format(g_Config.m_Logfile, sizeof(g_Config.m_Logfile), "logs/ddnet-log-%s.log", aTimestamp);
-		AutoLogfile = true;
-	}
+		char aFilename[64];
+		TClientAutoSessionLog::FormatFilename(aFilename, sizeof(aFilename), aTimestamp, process_id());
 
-	if(g_Config.m_Logfile[0])
+		char aStorageLogfile[IO_MAX_PATH_LENGTH];
+		str_format(aStorageLogfile, sizeof(aStorageLogfile), "logs/%s", aFilename);
+		char aStorageLogPath[IO_MAX_PATH_LENGTH];
+		pStorage->GetCompletePath(IStorage::TYPE_SAVE, aStorageLogfile, aStorageLogPath, sizeof(aStorageLogPath));
+
+		char aInstallLogPath[IO_MAX_PATH_LENGTH];
+		aInstallLogPath[0] = '\0';
+		char aExePath[IO_MAX_PATH_LENGTH];
+		if(pStorage->GetBinaryPathAbsolute(CLIENT_EXEC PLAT_EXT, aExePath, sizeof(aExePath)) != nullptr &&
+			fs_parent_dir(aExePath) == 0) // aExePath is now the install directory
+		{
+			char aInstallLogDir[IO_MAX_PATH_LENGTH];
+			str_format(aInstallLogDir, sizeof(aInstallLogDir), "%s/data/log", aExePath);
+			// These calls only create missing directories. The actual file open
+			// below decides whether the install path is usable.
+			(void)fs_makedir_rec_for(aInstallLogDir);
+			(void)fs_makedir(aInstallLogDir);
+			PruneAutoLogfilesInDir(aInstallLogDir, TCLIENT_AUTO_LOG_MAX_FILES);
+			str_format(aInstallLogPath, sizeof(aInstallLogPath), "%s/%s", aInstallLogDir, aFilename);
+		}
+
+		const int Mode = g_Config.m_Logappend ? IOFLAG_APPEND : IOFLAG_WRITE;
+		const TClientAutoSessionLog::SOpenResult OpenResult = TClientAutoSessionLog::OpenFile(
+			aInstallLogPath,
+			aStorageLogPath,
+			Mode,
+			[pStorage] { PruneAutoLogfiles(pStorage, TCLIENT_AUTO_LOG_MAX_FILES); });
+		if(OpenResult.m_File)
+		{
+			char aSessionLogCleanupPath[IO_MAX_PATH_LENGTH];
+			aSessionLogCleanupPath[0] = '\0';
+			if(OpenResult.m_Location == TClientAutoSessionLog::EOpenLocation::INSTALL)
+				str_copy(aSessionLogCleanupPath, aInstallLogPath, sizeof(aSessionLogCleanupPath));
+			auto pFileLogger = log_logger_file_limited(OpenResult.m_File, TCLIENT_AUTO_LOG_MAX_BYTES, aSessionLogCleanupPath);
+			pFileLogger->SetFilter(CLogFilter{IConsole::ToLogLevelFilter(g_Config.m_Loglevel)});
+			pFutureFileLogger->Set(std::move(pFileLogger));
+		}
+		else
+		{
+			log_error("client", "failed to open automatic log in install path '%s' and storage path '%s'", aInstallLogPath, aStorageLogPath);
+			pFutureFileLogger->Set(log_logger_noop());
+		}
+	}
+	else if(g_Config.m_Logfile[0])
 	{
 		const int Mode = g_Config.m_Logappend ? IOFLAG_APPEND : IOFLAG_WRITE;
 		IOHANDLE Logfile = pStorage->OpenFile(g_Config.m_Logfile, Mode, IStorage::TYPE_SAVE_OR_ABSOLUTE);
 		if(Logfile)
 		{
-			auto pFileLogger = AutoLogfile ?
-						   log_logger_file_limited(Logfile, TCLIENT_AUTO_LOG_MAX_BYTES) :
-						   log_logger_file(Logfile);
+			auto pFileLogger = log_logger_file(Logfile);
 			pFileLogger->SetFilter(CLogFilter{IConsole::ToLogLevelFilter(g_Config.m_Loglevel)});
 			pFutureFileLogger->Set(std::move(pFileLogger));
 		}
@@ -5770,8 +5922,6 @@ int main(int argc, const char **argv)
 			log_error("client", "failed to open '%s' for logging", g_Config.m_Logfile);
 			pFutureFileLogger->Set(log_logger_noop());
 		}
-		if(AutoLogfile)
-			g_Config.m_Logfile[0] = '\0';
 	}
 	else
 	{

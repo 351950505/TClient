@@ -528,6 +528,7 @@ void CPingWheel::RenderMarkers()
 	Graphics()->MapScreen(ScreenRect);
 
 	const float Now = Client()->LocalTime();
+	const float Opacity = g_Config.m_TcPingwheelMarkerOpacity / 100.0f;
 	for(const CMarker &Marker : m_aMarkers)
 	{
 		if(Marker.m_StartTime < 0.0f)
@@ -535,7 +536,7 @@ void CPingWheel::RenderMarkers()
 		const float Age = Now - Marker.m_StartTime;
 		if(Age < 0.0f || Age > MARKER_LIFE)
 			continue;
-		const float Fade = Age > MARKER_LIFE - 1.0f ? 1.0f - (Age - (MARKER_LIFE - 1.0f)) : 1.0f;
+		const float Fade = (Age > MARKER_LIFE - 1.0f ? 1.0f - (Age - (MARKER_LIFE - 1.0f)) : 1.0f) * Opacity;
 		const vec3 &Color = s_aSignalColors[Marker.m_Type];
 		const float Phase = std::fmod(Age, 0.9f) / 0.9f;
 
@@ -551,6 +552,7 @@ void CPingWheel::RenderMarkers()
 			Graphics()->TextureSet(m_aSignalTextures[Marker.m_Type]);
 			Graphics()->QuadsSetSubset(0, 0, 1, 1);
 			Graphics()->QuadsBegin();
+			Graphics()->SetColor(1.0f, 1.0f, 1.0f, Opacity * (Age > MARKER_LIFE - 1.0f ? 1.0f - (Age - (MARKER_LIFE - 1.0f)) : 1.0f));
 			IGraphics::CQuadItem QuadItem(Marker.m_WorldPos.x, Marker.m_WorldPos.y, 56.0f, 56.0f);
 			Graphics()->QuadsDraw(&QuadItem, 1);
 			Graphics()->QuadsEnd();

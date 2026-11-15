@@ -166,6 +166,68 @@ TEST(WaterHammer, ActionUsesLocalInputOverRemoteEcho)
 	EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_HAMMER, {true, 0, 1, 1}, &Local), ETcWaterHammerAction::NONE);
 }
 
+TEST(WaterHammer, IndependentActionEnableCombinationsUseLocalAndRemoteInput)
+{
+	const STcWaterHammerInputState Remote{true, WEAPON_HAMMER + 1, 1, 1};
+	CNetObj_PlayerInput Local{};
+	Local.m_WantedWeapon = WEAPON_HAMMER + 1;
+	Local.m_Fire = 1;
+	Local.m_Hook = 1;
+	for(bool UseLocal : {false, true})
+	{
+		const auto *pLocal = UseLocal ? &Local : nullptr;
+		EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_GUN, Remote, pLocal, false, false), ETcWaterHammerAction::NONE);
+		EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_GUN, Remote, pLocal, true, false), ETcWaterHammerAction::HOOK);
+		EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_GUN, Remote, pLocal, false, true), ETcWaterHammerAction::HAMMER);
+		EXPECT_EQ(TcWaterHammerAction(100, false, WEAPON_GUN, Remote, pLocal, true, true), ETcWaterHammerAction::HAMMER);
+	}
+	EXPECT_FALSE(TcWaterHammerHighlightEnabled(false, false));
+	EXPECT_TRUE(TcWaterHammerHighlightEnabled(true, false));
+	EXPECT_TRUE(TcWaterHammerHighlightEnabled(false, true));
+	EXPECT_TRUE(TcWaterHammerHighlightEnabled(true, true));
+}
+
+TEST(WaterHammer, ToggleChangesPreserveFallbackButDisabledActionsResetHold)
+{
+	const STcWaterHammerInputState Remote{true, WEAPON_HAMMER + 1, 1, 1};
+	CNetObj_PlayerInput Local{};
+	Local.m_WantedWeapon = WEAPON_HAMMER + 1;
+	Local.m_Fire = 1;
+	Local.m_Hook = 1;
+	for(bool UseLocal : {false, true})
+	{
+		const auto *pLocal = UseLocal ? &Local : nullptr;
+		float Hold = 0.0f;
+		auto LastAction = ETcWaterHammerAction::NONE;
+
+		auto Action = TcWaterHammerAction(100, false, WEAPON_GUN, Remote, pLocal, true, true);
+		EXPECT_EQ(Action, ETcWaterHammerAction::HAMMER);
+		EXPECT_FALSE(TcUpdateWaterHammerAction(Hold, LastAction, Action, 0.25f));
+
+		Action = TcWaterHammerAction(100, false, WEAPON_GUN, Remote, pLocal, true, false);
+		EXPECT_EQ(Action, ETcWaterHammerAction::HOOK);
+		EXPECT_TRUE(TcUpdateWaterHammerAction(Hold, LastAction, Action, 0.25f));
+		EXPECT_EQ(LastAction, ETcWaterHammerAction::HOOK);
+
+		Action = TcWaterHammerAction(100, false, WEAPON_GUN, Remote, pLocal, false, true);
+		EXPECT_EQ(Action, ETcWaterHammerAction::HAMMER);
+		EXPECT_TRUE(TcUpdateWaterHammerAction(Hold, LastAction, Action, 0.0f));
+		EXPECT_EQ(LastAction, ETcWaterHammerAction::HAMMER);
+
+		Action = TcWaterHammerAction(100, false, WEAPON_GUN, Remote, pLocal, false, false);
+		EXPECT_EQ(Action, ETcWaterHammerAction::NONE);
+		EXPECT_FALSE(TcUpdateWaterHammerAction(Hold, LastAction, Action, 0.01f));
+		EXPECT_EQ(Hold, 0.0f);
+		EXPECT_EQ(LastAction, ETcWaterHammerAction::HAMMER);
+
+		Action = TcWaterHammerAction(100, false, WEAPON_GUN, Remote, pLocal, true, false);
+		EXPECT_FALSE(TcUpdateWaterHammerAction(Hold, LastAction, Action, 0.49f));
+		EXPECT_EQ(LastAction, ETcWaterHammerAction::HAMMER);
+		EXPECT_TRUE(TcUpdateWaterHammerAction(Hold, LastAction, Action, 0.02f));
+		EXPECT_EQ(LastAction, ETcWaterHammerAction::HOOK);
+	}
+}
+
 TEST(WaterHammer, ActionDetectionPreservesExistingTrigger)
 {
 	for(int FreezeEnd : {0, -1, 100})
@@ -510,6 +572,8 @@ int main()
 	WaterHammer_MarkDelayRequiresPersistentState();
 	WaterHammer_ActionSelectionAndHammerPriority();
 	WaterHammer_ActionUsesLocalInputOverRemoteEcho();
+	WaterHammer_IndependentActionEnableCombinationsUseLocalAndRemoteInput();
+	WaterHammer_ToggleChangesPreserveFallbackButDisabledActionsResetHold();
 	WaterHammer_ActionDetectionPreservesExistingTrigger();
 	WaterHammer_SharedColorsRemainDefaultForEveryAction();
 	WaterHammer_SeparateColorsSelectBothPartsWithoutChangingPalettes();
@@ -534,6 +598,6 @@ int main()
 	WaterHammer_NewSessionDoesNotInheritEitherConnection();
 	WaterHammer_LocalSwapRecordsCopiedInputWithoutActiveSnapshot();
 	WaterHammer_FrozenKatanaDoesNotChangeRealWeapon();
-	std::puts("WaterHammer: 28 test groups passed");
+	std::puts("WaterHammer: 30 test groups passed");
 }
 #endif

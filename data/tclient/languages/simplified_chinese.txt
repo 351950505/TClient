@@ -153,11 +153,26 @@ Use skins instead of ninja tees
 Only show after joining a team
 == 仅在加入队伍后显示
 
+Same line as the dynamic island
+== 与灵动岛同行
+
+Show only alive teammates
+== 只显示存活的队友
+
 Max Rows
 == 最大行数
 
+Max displayed (0 = all)
+== 最大显示数（0 = 全部）
+
 Tee Size
 == Tee尺寸
+
+Scale
+== 缩放
+
+Status dot color
+== 状态点颜色
 
 Tees left alive text
 == 显示剩余存活Tee的数量
@@ -1234,6 +1249,9 @@ Text outline strength
 Signal sound volume
 == 信号音效音量
 
+Marker opacity
+== 标记透明度
+
 Quick zoom
 == 一键缩放
 
@@ -1904,8 +1922,11 @@ When disabled, tune zones use your entity tiles without added colors.
 Frozen hammer/hook highlight
 == 冻结卡锤／卡钩高亮
 
-Highlight frozen teammates, yourself and your dummy holding hammer fire or hook
-== 冻结时按住锤击或钩子的队友、自己及分身均会高亮
+Enable frozen hook highlight
+== 启用冻结卡钩高亮
+
+Enable frozen hammer highlight
+== 启用冻结卡锤高亮
 
 Steam
 == Steam

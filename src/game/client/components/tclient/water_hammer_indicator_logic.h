@@ -73,24 +73,30 @@ enum class ETcWaterHammerAction
 	HAMMER,
 };
 
-inline ETcWaterHammerAction TcWaterHammerAction(int FreezeEnd, bool LiveFrozen, int CurrentWeapon, const STcWaterHammerInputState &PreInput, const CNetObj_PlayerInput *pLocalInput)
+inline bool TcWaterHammerHighlightEnabled(bool HookEnabled, bool HammerEnabled)
 {
-	if((!pLocalInput && !PreInput.m_Received) || (FreezeEnd == 0 && !LiveFrozen))
+	return HookEnabled || HammerEnabled;
+}
+
+inline ETcWaterHammerAction TcWaterHammerAction(int FreezeEnd, bool LiveFrozen, int CurrentWeapon, const STcWaterHammerInputState &PreInput, const CNetObj_PlayerInput *pLocalInput, bool HookEnabled = true, bool HammerEnabled = true)
+{
+	if(!TcWaterHammerHighlightEnabled(HookEnabled, HammerEnabled) ||
+		(!pLocalInput && !PreInput.m_Received) || (FreezeEnd == 0 && !LiveFrozen))
 		return ETcWaterHammerAction::NONE;
 
 	const int WantedWeapon = pLocalInput ? pLocalInput->m_WantedWeapon : PreInput.m_WantedWeapon;
 	const int Fire = pLocalInput ? pLocalInput->m_Fire : PreInput.m_Fire;
 	const int Hook = pLocalInput ? pLocalInput->m_Hook : PreInput.m_Hook;
 	const bool HammerHeld = (WantedWeapon == WEAPON_HAMMER + 1 || CurrentWeapon == WEAPON_HAMMER) && (Fire & 1) != 0;
-	// Hammer colors take priority when both inputs are held.
-	if(HammerHeld)
+	// Hammer colors take priority when both enabled inputs are held.
+	if(HammerEnabled && HammerHeld)
 		return ETcWaterHammerAction::HAMMER;
-	return Hook != 0 ? ETcWaterHammerAction::HOOK : ETcWaterHammerAction::NONE;
+	return HookEnabled && Hook != 0 ? ETcWaterHammerAction::HOOK : ETcWaterHammerAction::NONE;
 }
 
-inline bool TcShouldMarkWaterHammer(int FreezeEnd, bool LiveFrozen, int CurrentWeapon, const STcWaterHammerInputState &PreInput, const CNetObj_PlayerInput *pLocalInput)
+inline bool TcShouldMarkWaterHammer(int FreezeEnd, bool LiveFrozen, int CurrentWeapon, const STcWaterHammerInputState &PreInput, const CNetObj_PlayerInput *pLocalInput, bool HookEnabled = true, bool HammerEnabled = true)
 {
-	return TcWaterHammerAction(FreezeEnd, LiveFrozen, CurrentWeapon, PreInput, pLocalInput) != ETcWaterHammerAction::NONE;
+	return TcWaterHammerAction(FreezeEnd, LiveFrozen, CurrentWeapon, PreInput, pLocalInput, HookEnabled, HammerEnabled) != ETcWaterHammerAction::NONE;
 }
 
 inline bool TcUpdateWaterHammerAction(float &HoldSeconds, ETcWaterHammerAction &LastAction, ETcWaterHammerAction Action, float DeltaSeconds)

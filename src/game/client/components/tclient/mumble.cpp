@@ -16,7 +16,9 @@ void CMumble::MakeContext()
 	m_pContext = mumble_create_context_args("DDNet", "DDraceNetwork (DDNet) is an actively maintained version of DDRace, a Teeworlds modification with a unique cooperative gameplay.");
 	if(!m_pContext)
 	{
-		log_error("mumble", "Failed to create context");
+		// Routine when Mumble is not running; an error would trip the session
+		// log's keep-on-error flag on every launch without Mumble.
+		log_warn("mumble", "Failed to create context");
 		return;
 	}
 	m_LastClientId = -1;

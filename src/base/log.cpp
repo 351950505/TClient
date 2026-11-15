@@ -1,7 +1,9 @@
 #include "aio.h"
 #include "color.h"
 #include "dbg.h"
+#include "fs.h"
 #include "logger.h"
+#include "mem.h"
 #include "str.h"
 #include "time.h"
 #include "windows.h"
@@ -9,6 +11,7 @@
 #include <atomic>
 #include <cstdio>
 #include <memory>
+#include <string>
 
 #if defined(CONF_FAMILY_WINDOWS)
 #include <fcntl.h>
@@ -27,6 +30,24 @@
 static std::atomic<ILogger *> global_logger = nullptr;
 thread_local ILogger *scope_logger = nullptr; // NOLINT(misc-use-internal-linkage) // TODO: remove NOLINT when updating clang-tidy version
 thread_local bool in_logger = false; // NOLINT(misc-use-internal-linkage) // TODO: remove NOLINT when updating clang-tidy version
+
+// TClient: set when any error-level message passes through the logging system,
+// regardless of filters. The auto session log consults this on shutdown.
+static std::atomic<bool> session_had_error = false;
+
+bool log_session_had_error()
+{
+	return session_had_error.load(std::memory_order_acquire);
+}
+
+// TClient: translation hook applied by the auto session log (see
+// CLoggerAsync::Log). Null until the game registers one.
+static std::atomic<TCLIENT_LOG_TRANSLATE_FN> gs_pfnLineTranslator = nullptr;
+
+void log_set_line_translator(TCLIENT_LOG_TRANSLATE_FN pfnTranslator)
+{
+	gs_pfnLineTranslator.store(pfnTranslator, std::memory_order_release);
+}
 
 void log_set_global_logger(ILogger *logger)
 {
@@ -76,6 +97,12 @@ void log_set_scope_logger(ILogger *logger)
 
 [[gnu::format(printf, 5, 0)]] static void log_log_impl(LEVEL level, bool have_color, LOG_COLOR color, const char *sys, const char *fmt, va_list args)
 {
+	// TClient: remember error-level output regardless of any filters, so the
+	// auto session log knows whether it should be kept after shutdown.
+	if(level == LEVEL_ERROR)
+	{
+		session_had_error.store(true, std::memory_order_relaxed);
+	}
 	// Make sure we're not logging recursively.
 	if(in_logger)
 	{
@@ -241,6 +268,8 @@ class CLoggerAsync : public ILogger
 	uint64_t m_BytesSubmitted;
 	unsigned m_DroppedMessages;
 	bool m_TruncationReported;
+	const bool m_IsAutoSessionLog;
+	std::string m_RemoveOnCleanExit;
 
 	void WriteNotice(const char *pNotice)
 	{
@@ -251,15 +280,18 @@ class CLoggerAsync : public ILogger
 	}
 
 public:
-	CLoggerAsync(IOHANDLE File, bool AnsiTruecolor, bool Close, uint64_t MaxBytes = 0) :
+	CLoggerAsync(IOHANDLE File, bool AnsiTruecolor, bool Close, uint64_t MaxBytes = 0, const char *pRemoveOnCleanExit = nullptr) :
 		m_pAio(aio_new(File)),
 		m_AnsiTruecolor(AnsiTruecolor),
 		m_Close(Close),
 		m_MaxBytes(MaxBytes),
 		m_BytesSubmitted(0),
 		m_DroppedMessages(0),
-		m_TruncationReported(false)
+		m_TruncationReported(false),
+		m_IsAutoSessionLog(pRemoveOnCleanExit != nullptr)
 	{
+		if(pRemoveOnCleanExit)
+			m_RemoveOnCleanExit = pRemoveOnCleanExit;
 	}
 	void Log(const CLogMessage *pMessage) override
 	{
@@ -268,9 +300,40 @@ public:
 			return;
 		}
 
+		// TClient v1.7.8.84: auto session logs rewrite messages through the
+		// registered translation hook; every other logger writes them verbatim.
+		char aLine[8192];
+		int LineLength;
+		if(m_IsAutoSessionLog)
+		{
+			mem_copy(aLine, pMessage->m_aLine, pMessage->m_LineMessageOffset);
+			LineLength = pMessage->m_LineMessageOffset;
+			char aMessage[sizeof(pMessage->m_aLine)];
+			bool DidTranslate = false;
+			TCLIENT_LOG_TRANSLATE_FN pfnTranslator = gs_pfnLineTranslator.load(std::memory_order_acquire);
+			if(pfnTranslator)
+				DidTranslate = pfnTranslator(aMessage, sizeof(aMessage), pMessage->m_aSystem, pMessage->m_aLine + pMessage->m_LineMessageOffset);
+			const char *pPart = DidTranslate ? aMessage : pMessage->m_aLine + pMessage->m_LineMessageOffset;
+			const int PartLength = DidTranslate ? str_length(aMessage) : pMessage->m_LineLength - pMessage->m_LineMessageOffset;
+			if(LineLength + PartLength < (int)sizeof(aLine) - 1)
+			{
+				mem_copy(aLine + LineLength, pPart, PartLength);
+				LineLength += PartLength;
+			}
+			else
+			{
+				mem_copy(aLine, pMessage->m_aLine, pMessage->m_LineLength);
+				LineLength = pMessage->m_LineLength;
+			}
+		}
+		else
+		{
+			mem_copy(aLine, pMessage->m_aLine, pMessage->m_LineLength);
+			LineLength = pMessage->m_LineLength;
+		}
 		const bool Ansi = m_AnsiTruecolor && pMessage->m_HaveColor;
 		// Upper bound of one complete record including ANSI prefix, reset and newline.
-		const uint64_t Needed = (uint64_t)pMessage->m_LineLength + (Ansi ? 32 + 4 : 0) + 1;
+		const uint64_t Needed = (uint64_t)LineLength + (Ansi ? 32 + 4 : 0) + 1;
 
 		aio_lock(m_pAio);
 
@@ -328,8 +391,8 @@ public:
 			aio_write_unlocked(m_pAio, aAnsi, str_length(aAnsi));
 			m_BytesSubmitted += str_length(aAnsi);
 		}
-		aio_write_unlocked(m_pAio, pMessage->m_aLine, pMessage->m_LineLength);
-		m_BytesSubmitted += pMessage->m_LineLength;
+		aio_write_unlocked(m_pAio, aLine, LineLength);
+		m_BytesSubmitted += LineLength;
 		if(Ansi)
 		{
 			const char aResetColor[] = "\x1b[0m";
@@ -360,6 +423,12 @@ public:
 			aio_close(m_pAio);
 		}
 		aio_wait(m_pAio);
+		// TClient: the global logger chain is intentionally leaked, so this —
+		// not the destructor — is what runs on a normal exit (via atexit).
+		// A crash skips it, which is exactly when the auto session log must
+		// be kept. The file handle is closed before the cleanup attempt.
+		if(!m_RemoveOnCleanExit.empty() && !log_session_had_error())
+			(void)fs_remove(m_RemoveOnCleanExit.c_str());
 	}
 };
 
@@ -368,9 +437,9 @@ std::unique_ptr<ILogger> log_logger_file(IOHANDLE logfile)
 	return std::make_unique<CLoggerAsync>(logfile, false, true);
 }
 
-std::unique_ptr<ILogger> log_logger_file_limited(IOHANDLE logfile, uint64_t MaxBytes)
+std::unique_ptr<ILogger> log_logger_file_limited(IOHANDLE logfile, uint64_t MaxBytes, const char *pRemoveOnCleanExit)
 {
-	return std::make_unique<CLoggerAsync>(logfile, false, true, MaxBytes);
+	return std::make_unique<CLoggerAsync>(logfile, false, true, MaxBytes, pRemoveOnCleanExit);
 }
 
 #if defined(CONF_FAMILY_WINDOWS)

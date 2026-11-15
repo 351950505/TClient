@@ -54,6 +54,13 @@ MACRO_CONFIG_INT(TcShowFrozenHudSkins, tc_frozen_tees_hud_skins, 1, 0, 1, CFGFLA
 MACRO_CONFIG_INT(TcFrozenHudTeeSize, tc_frozen_tees_size, 15, 8, 20, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Size of tees in frozen tee hud. (Default : 15)")
 MACRO_CONFIG_INT(TcFrozenMaxRows, tc_frozen_tees_max_rows, 1, 1, 6, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Maximum number of rows in frozen tee HUD display")
 MACRO_CONFIG_INT(TcFrozenHudTeamOnly, tc_frozen_tees_only_inteam, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Only render frozen tee HUD display while in team")
+MACRO_CONFIG_INT(TcFrozenTeesOffsetX, tc_frozen_tees_offset_x, 0, -600, 600, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Horizontal offset of the frozen tee HUD in pixels")
+MACRO_CONFIG_INT(TcFrozenTeesOffsetY, tc_frozen_tees_offset_y, 0, -600, 600, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Vertical offset of the frozen tee HUD in pixels")
+MACRO_CONFIG_INT(TcFrozenTeesScale, tc_frozen_tees_scale, 100, 60, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Overall scale of the frozen tee HUD in percent")
+MACRO_CONFIG_COL(TcFrozenTeesAccentColor, tc_frozen_tees_accent_color, 9240460, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Status dot accent color for frozen teammates")
+MACRO_CONFIG_INT(TcFrozenTeesInlineIsland, tc_frozen_tees_inline_island, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Place the frozen tee HUD on the same line as the dynamic island, to its right")
+MACRO_CONFIG_INT(TcFrozenTeesAliveOnly, tc_frozen_tees_alive_only, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show only alive (unfrozen) teammates in the frozen tee HUD")
+MACRO_CONFIG_INT(TcFrozenTeesMaxDisplay, tc_frozen_tees_max_display, 0, 0, 64, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Maximum number of teammates to show in the frozen tee HUD (0 = show all)")
 
 MACRO_CONFIG_INT(TcNameplatePingCircle, tc_nameplate_ping_circle, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Shows a circle to indicate ping in the nameplate")
 MACRO_CONFIG_INT(TcNameplateCountry, tc_nameplate_country, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Shows the country flag in the nameplate")
@@ -168,7 +175,8 @@ MACRO_CONFIG_INT(TcAntiPingUncertaintyScale, tc_antiping_uncertainty_scale, 150,
 MACRO_CONFIG_INT(TcColorFreeze, tc_color_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use skin colors for frozen tees")
 MACRO_CONFIG_INT(TcColorFreezeDarken, tc_color_freeze_darken, 90, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Makes color of tees darker when in freeze (0-100)")
 MACRO_CONFIG_INT(TcColorFreezeFeet, tc_color_freeze_feet, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Also use color for frozen tee feet")
-MACRO_CONFIG_INT(TcWaterHammerHighlight, tc_water_hammer_highlight, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight frozen teammates, yourself and your dummy holding hammer fire or hook")
+MACRO_CONFIG_INT(TcWaterHammerHighlight, tc_water_hammer_highlight, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight frozen teammates, yourself and your dummy holding hammer fire")
+MACRO_CONFIG_INT(TcWaterHookHighlight, tc_water_hook_highlight, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight frozen teammates, yourself and your dummy holding hook")
 MACRO_CONFIG_INT(TcWaterHammerHighlightSelf, tc_water_hammer_highlight_self, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight your own frozen tee and dummy")
 
 // 卡锤/卡钩高亮和玩家设置状态齿轮使用独立颜色，不改变触发条件。
@@ -466,6 +474,7 @@ MACRO_CONFIG_INT(TcSpectatorFriendsFirst, tc_spectator_friends_first, 1, 0, 1, C
 MACRO_CONFIG_INT(TcFontSize, tc_font_size, 100, 50, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Global text size for all game text in percent (menus, chat, scoreboard, nameplates)")
 MACRO_CONFIG_INT(TcUiScale, tc_ui_scale, 100, 50, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "User interface scale in percent (menus, popups, browser)")
 MACRO_CONFIG_INT(TcPingwheelVolume, tc_pingwheel_volume, 30, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal sound volume (%)")
+MACRO_CONFIG_INT(TcPingwheelMarkerOpacity, tc_pingwheel_marker_opacity, 100, 10, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping marker map overlay opacity (%)")
 MACRO_CONFIG_INT(TcPingwheelSoundRange, tc_pingwheel_sound_range, 600, 0, 10000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel sound audible range in world units (0 = global, no falloff)")
 MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "DEPRECATED: emoticon fallback channel removed, signals always use the relay channel")
 MACRO_CONFIG_INT(TcRelay, tc_relay, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal relay: send/receive pings via the TClient signal server (works while spectating, invisible to chat)")

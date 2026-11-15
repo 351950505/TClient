@@ -74,8 +74,8 @@ void CWaterHammerIndicator::OnDummySwap()
 
 bool CWaterHammerIndicator::IsMarked(int ClientId) const
 {
-	return g_Config.m_TcWaterHammerHighlight && ClientId >= 0 && ClientId < MAX_CLIENTS &&
-		m_aHoldSeconds[ClientId] >= TcWaterHammerMarkDelaySeconds;
+	return TcWaterHammerHighlightEnabled(g_Config.m_TcWaterHookHighlight != 0, g_Config.m_TcWaterHammerHighlight != 0) &&
+		ClientId >= 0 && ClientId < MAX_CLIENTS && m_aHoldSeconds[ClientId] >= TcWaterHammerMarkDelaySeconds;
 }
 
 ETcWaterHammerAction CWaterHammerIndicator::HighlightAction(int ClientId) const
@@ -85,7 +85,9 @@ ETcWaterHammerAction CWaterHammerIndicator::HighlightAction(int ClientId) const
 
 ETcWaterHammerAction CWaterHammerIndicator::ActionNow(int ClientId) const
 {
-	if(!g_Config.m_TcWaterHammerHighlight || ClientId < 0 || ClientId >= MAX_CLIENTS)
+	const bool HookEnabled = g_Config.m_TcWaterHookHighlight != 0;
+	const bool HammerEnabled = g_Config.m_TcWaterHammerHighlight != 0;
+	if(!TcWaterHammerHighlightEnabled(HookEnabled, HammerEnabled) || ClientId < 0 || ClientId >= MAX_CLIENTS)
 		return ETcWaterHammerAction::NONE;
 
 	const int LocalClientId = GameClient()->m_Snap.m_LocalClientId;
@@ -123,5 +125,5 @@ ETcWaterHammerAction CWaterHammerIndicator::ActionNow(int ClientId) const
 		break;
 	}
 	return TcWaterHammerAction(ClientData.m_FreezeEnd, ClientData.m_LiveFrozen,
-		ClientData.m_RenderCur.m_Weapon, RemoteInput, pLocalInput);
+		ClientData.m_RenderCur.m_Weapon, RemoteInput, pLocalInput, HookEnabled, HammerEnabled);
 }

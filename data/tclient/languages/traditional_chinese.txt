@@ -7,8 +7,11 @@
 Frozen hammer/hook highlight
 == 凍結錘子／鉤子高亮
 
-Highlight frozen teammates, yourself and your dummy holding hammer fire or hook
-== 凍結時按住錘擊或鉤子的隊友、自己及分身均會高亮
+Enable frozen hook highlight
+== 啟用凍結卡鉤高亮
+
+Enable frozen hammer highlight
+== 啟用凍結卡錘高亮
 
 Highlight your own frozen tee and dummy
 == 高亮自己的凍結 tee 和 dummy
@@ -419,11 +422,32 @@ Show frozen tee display
 Use skins instead of ninja tees
 == 
 
+Same line as the dynamic island
+== 與靈動島同行
+
+Show only alive teammates
+== 只顯示存活的隊友
+
 Max Rows
-== 
+== 最大行數
+
+Max displayed (0 = all)
+== 最大顯示數（0 = 全部）
 
 Tee Size
 == 
+
+Horizontal offset
+== 水平偏移
+
+Vertical offset
+== 垂直偏移
+
+Scale
+== 縮放
+
+Status dot color
+== 狀態點顏色
 
 Tees left alive text
 == 
@@ -949,3 +973,6 @@ Water hammer highlight
 
 Highlight frozen teammates holding hammer fire
 == 高亮凍結時持錘並按住開火的隊友
+
+Marker opacity
+== 標記透明度

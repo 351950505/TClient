@@ -162,8 +162,8 @@ Show only alive teammates
 Max Rows
 == 最大行数
 
-Max displayed (0 = all)
-== 最大显示数（0 = 全部）
+Max displayed
+== 最大显示数
 
 Tee Size
 == Tee尺寸

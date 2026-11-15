@@ -1597,7 +1597,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenMaxRows, &g_Config.m_TcFrozenMaxRows, &Button, TCLocalize("Max Rows"), 1, 6);
 	Column.HSplitTop(LineSize, &Button, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenTeesMaxDisplay, &g_Config.m_TcFrozenTeesMaxDisplay, &Button, TCLocalize("Max displayed (0 = all)"), 0, 64);
+	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenTeesMaxDisplay, &g_Config.m_TcFrozenTeesMaxDisplay, &Button, TCLocalize("Max displayed"), 1, 10);
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_TcFrozenHudTeeSize, &g_Config.m_TcFrozenHudTeeSize, &Button, TCLocalize("Tee Size"), 8, 20);
 	// Position and overall scale of the redesigned capsule, same structure as

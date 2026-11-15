@@ -810,15 +810,15 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 		const float TeeGap = 3.0f * Scale;
 		const float Pad = 2.0f * Scale;
 
-		// tc_frozen_tees_max_display caps the total shown (0 = show all); the
-		// per-row width is no longer capped — overflow goes to extra rows.
-		const int MaxTees = g_Config.m_TcFrozenTeesMaxDisplay > 0 ?
-			std::min<int>(g_Config.m_TcFrozenTeesMaxDisplay, MAX_CLIENTS) : (int)MAX_CLIENTS;
-		int MaxRows = g_Config.m_TcFrozenMaxRows;
+		// The display limit applies to the whole capsule, not each row.
+		const int MaxDisplayLimit = std::clamp(g_Config.m_TcFrozenTeesMaxDisplay, 1, 10);
+		const int MaxDisplayed = std::min(NumDrawn, MaxDisplayLimit);
+		const int MaxRows = std::clamp(g_Config.m_TcFrozenMaxRows, 1, 6);
+		const int MaxTees = std::max(1, (MaxDisplayed + MaxRows - 1) / MaxRows);
 		float StartPos = m_Width / 2.0f + 38.0f * (m_Width / m_Height) / 1.78f;
 
-		int TotalRows = std::min(MaxRows, (NumDrawn + MaxTees - 1) / MaxTees);
-		const int TeesInRow = std::min(NumDrawn, MaxTees);
+		int TotalRows = std::min(MaxRows, (MaxDisplayed + MaxTees - 1) / MaxTees);
+		const int TeesInRow = std::min(MaxDisplayed, MaxTees);
 		// Feet hang below the body: the old +3 px bottom margin, scaled.
 		const float ContentW = TeesInRow * TeeSize + (TeesInRow - 1) * TeeGap;
 		const float ContentH = TotalRows * TeeSize + (TotalRows - 1) * TeeGap + 3.0f * Scale;
@@ -838,26 +838,24 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 		const float CapsuleW = 2.0f * Pad + (ShowFrozenText ? CountW + TeeGap : 0.0f) + ContentW;
 		const float CapsuleH = 2.0f * Pad + ContentH;
 		// The first tee anchor stays at StartPos; the capsule wraps text and tees.
-		CUIRect Capsule = {StartPos - TeeSize / 2.0f - Pad - (ShowFrozenText ? CountW + TeeGap : 0.0f), -Pad, CapsuleW, CapsuleH};
-		// Inline-island mode: park the capsule on the island's line, to its
-		// right, whenever it fits; otherwise fall back to the normal avoidance.
+		CUIRect Capsule = {StartPos - TeeSize / 2.0f - Pad - (ShowFrozenText ? CountW + TeeGap : 0.0f), 0.0f, CapsuleW, CapsuleH};
+		// Default placement touches the top edge to the island's right. If that
+		// space is too narrow, keep the existing island-avoidance fallback.
 		if(g_Config.m_TcFrozenTeesInlineIsland && Island.w > 0 && Island.h > 0 &&
-			Capsule.x < Island.x + Island.w && Island.x + Island.w + 2.0f + Capsule.w <= m_Width - 8.0f)
+			Island.x + Island.w + 2.0f + Capsule.w <= m_Width - 8.0f)
 		{
 			Capsule.x = Island.x + Island.w + 2.0f;
-			Capsule.y = std::max(0.0f, Island.y + (Island.h - Capsule.h) / 2.0f);
+			Capsule.y = 0.0f;
 		}
 		else
 		{
-			// Island avoidance runs on the base rect (tc_frozen_tees_offset_* default
-			// to 0, so the default placement still dodges the island); the user
-			// offset then wins and the clamp only guarantees an 8 px screen margin.
+			// Explicit offsets still win over automatic island avoidance.
 			Capsule.y = FrozenHudRowY(Capsule, Island, m_Height);
 		}
 		Capsule.x += OffsetX;
 		Capsule.y += OffsetY;
 		Capsule.x = std::clamp(Capsule.x, 8.0f, std::max(8.0f, m_Width - 8.0f - Capsule.w));
-		Capsule.y = std::clamp(Capsule.y, 8.0f, std::max(8.0f, m_Height - 8.0f - Capsule.h));
+		Capsule.y = std::clamp(Capsule.y, 0.0f, std::max(0.0f, m_Height - 8.0f - Capsule.h));
 
 		CUIRect TeeRow = {Capsule.x + Pad + (ShowFrozenText ? CountW + TeeGap : 0.0f), Capsule.y + Pad, ContentW, ContentH};
 
@@ -893,7 +891,7 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 			TextRender()->TextOutlineColor(m_FrozenHudTextOutlineColor);
 		}
 
-		bool Overflow = NumDrawn > MaxTees * MaxRows;
+		bool Overflow = NumDrawn > MaxDisplayed;
 
 		int NumDisplayed = 0;
 		int NumInRow = 0;
@@ -902,7 +900,7 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 
 		for(int OverflowIndex = 0; OverflowIndex < (Overflow ? 3 : 1); OverflowIndex++)
 		{
-			for(int i = 0; i < MAX_CLIENTS && NumDisplayed < MaxTees * MaxRows; i++)
+			for(int i = 0; i < MAX_CLIENTS && NumDisplayed < MaxDisplayed; i++)
 			{
 				if(!m_FrozenHudFrame.m_aIncluded[i])
 					continue;

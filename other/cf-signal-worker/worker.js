@@ -2,11 +2,11 @@
 const encoder = new TextEncoder();
 const MAX_FRAME_BYTES = 512;
 const MAX_PAYLOAD_BYTES = 160;
-const MAX_CONNECTIONS = 32;
+const MAX_CONNECTIONS = 64;
 const MAX_CONNECTIONS_PER_IP = 8;
 const MAX_IP_ATTEMPTS_PER_MINUTE = 20;
-const MAX_TOTAL_ATTEMPTS_PER_DAY = 2000;
-const MAX_ROOMS_PER_DAY = 64;
+const MAX_TOTAL_ATTEMPTS_PER_DAY = 20000;
+const MAX_ROOMS_PER_DAY = 256;
 const MAX_MESSAGES_PER_FIVE_SECONDS = 12;
 
 function reply(status, error, extra = {}) {

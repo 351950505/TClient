@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.85",
+  "version": "1.7.8.86",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17391519,
-  "sha256": "8d81873b25af12c65eba3cfafbbf9e89d0d5ddc29638960e6ae698407c58de7e",
-  "notes": "## 更新内容\n\n- 修复切服/重连时偶发闪退：玩家离开或重连后渲染信息仍会刷新，现在遇到已清空的皮肤信息会安全跳过。\n- 灵动岛歌词新增双行模式（默认关闭）：关闭时显示歌名＋当前句；开启时显示当前句＋下一句。非简体中文歌词有对应译文时显示原文＋简体译文，没有译文时回退当前＋下一句。\n- 更新流程改为完全手动：获取更新、下载、安装并重启三步都由玩家点击触发；启动和定时自动检查、退出时安装提示均已移除。保留清单验签、大小/SHA 校验、断点续传与回滚。\n- 更新器事务恢复加固：中断安装后的回滚与清理按日志哈希校验；恢复时处理被映射的 helper 自身，避免自删失败。\n- 自动会话日志增强：优先写入安装目录 data/log，文件名含进程 ID；正常无错误退出清理该次日志，报错或异常退出保留，并为常见错误补充中文说明。\n- 其他歌词接口解析、渐变/昵称渲染与输入边界的审查修复。\n\n## 下载说明\n\n- **首次安装请选择 TClient-v1.7.8.85-full-win64.zip**，解压后运行 DDNet.exe。\n- DDNet.exe 单文件需要现有完整安装的 DLL 和 data，仅用于替换程序，不是独立免安装客户端。\n- 自动更新只更新程序与 data/tclient，不覆盖玩家自定义素材和配置。\n\n本版在 Windows x64 下构建。Ed25519 更新验签不等于 Windows Authenticode 代码签名。",
+  "size": 17391735,
+  "sha256": "0f013e48c10ef49f62dd26304d06c36749129ac5ec7f4f9673b8de767c2328b7",
+  "notes": "## 更新内容\n\n- 修复：安装完整性校验（data_version）此前是空实现，现在真正生效。更新包会携带 `data/tclient/data_version.txt`，启动时校验程序与 data/tclient 版本是否一致；如果只手动替换了 DDNet.exe 而没有同步更新 data，客户端会在启动时给出明确提示，而不是之后出现各种奇怪问题。\n- 清理：移除战争名单（warlist）里一个从未实现、也从未被调用的排序函数（死代码）。\n\n## 下载说明\n\n- **首次安装请选择 TClient-v1.7.8.86-full-win64.zip**，解压后运行 DDNet.exe。\n- DDNet.exe 单文件需要现有完整安装的 DLL 和 data，仅用于替换程序，不是独立免安装客户端。\n- 自动更新只更新程序与 data/tclient，不覆盖玩家自定义素材和配置。\n\n本版在 Windows x64 下构建。Ed25519 更新验签不等于 Windows Authenticode 代码签名。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 451584,

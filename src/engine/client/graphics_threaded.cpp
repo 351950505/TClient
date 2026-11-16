@@ -1682,7 +1682,12 @@ void CGraphics_Threaded::RenderQuadContainer(int ContainerIndex, int QuadOffset,
 	if(QuadDrawNum == -1)
 		QuadDrawNum = (int)Container.m_vQuads.size() - QuadOffset;
 
-	if((int)Container.m_vQuads.size() < QuadOffset + QuadDrawNum || QuadDrawNum == 0)
+	// Backport of upstream f73e82f26 with a release guard kept: the dbg_assert
+	// only fires in CONF_DEBUG, so the silent early-return stays as a safety
+	// net for out-of-range callers in release builds.
+	dbg_assert(QuadOffset >= 0 && QuadDrawNum > 0 && QuadOffset + QuadDrawNum <= (int)Container.m_vQuads.size(),
+		"Invalid quad container rendered: QuadOffset=%d QuadDrawNum=%d NumQuads=%d", QuadOffset, QuadDrawNum, (int)Container.m_vQuads.size());
+	if((int)Container.m_vQuads.size() < QuadOffset + QuadDrawNum || QuadDrawNum <= 0)
 		return;
 
 	if(IsQuadContainerBufferingEnabled())
@@ -1736,11 +1741,15 @@ void CGraphics_Threaded::RenderQuadContainerEx(int ContainerIndex, int QuadOffse
 {
 	SQuadContainer &Container = m_vQuadContainers[ContainerIndex];
 
-	if((int)Container.m_vQuads.size() < QuadOffset + 1)
-		return;
-
 	if(QuadDrawNum == -1)
 		QuadDrawNum = (int)Container.m_vQuads.size() - QuadOffset;
+
+	// Backport of upstream f73e82f26 with a release guard kept (see
+	// RenderQuadContainer).
+	dbg_assert(QuadOffset >= 0 && QuadDrawNum > 0 && QuadOffset + QuadDrawNum <= (int)Container.m_vQuads.size(),
+		"Invalid quad container rendered: QuadOffset=%d QuadDrawNum=%d NumQuads=%d", QuadOffset, QuadDrawNum, (int)Container.m_vQuads.size());
+	if((int)Container.m_vQuads.size() < QuadOffset + QuadDrawNum || QuadDrawNum <= 0)
+		return;
 
 	if(IsQuadContainerBufferingEnabled())
 	{

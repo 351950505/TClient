@@ -269,16 +269,21 @@ bool IHttpRequest::BeforeInit()
 			if(Existing)
 			{
 				const int64_t ExistingSize = io_length(Existing);
-				if(ExistingSize > 0)
+				if(ExistingSize > 0 && (m_MaxResponseSize < 0 || ExistingSize <= m_MaxResponseSize))
 				{
 					void *pPrefix;
 					unsigned PrefixLength;
 					if(io_read_all(Existing, &pPrefix, &PrefixLength))
 					{
-						sha256_update(&m_ActualSha256Ctx, pPrefix, PrefixLength);
+						// Only resume the exact prefix that was hashed. Oversized or
+						// changed partial files are discarded by opening in write mode.
+						if((int64_t)PrefixLength == ExistingSize)
+						{
+							sha256_update(&m_ActualSha256Ctx, pPrefix, PrefixLength);
+							m_ResumeFrom = ExistingSize;
+							log_info("http", "resuming download of %s from %lld bytes", m_aDest, (long long)m_ResumeFrom);
+						}
 						free(pPrefix);
-						m_ResumeFrom = ExistingSize;
-						log_info("http", "resuming download of %s from %lld bytes", m_aDest, (long long)m_ResumeFrom);
 					}
 				}
 				io_close(Existing);
@@ -299,9 +304,17 @@ size_t IHttpRequest::OnData(const char *pData, size_t DataSize)
 {
 	// Need to check for the maximum response size here as implementation may not support it,
 	// e.g. curl can only guarantee it if the server sets a Content-Length header.
-	if(m_MaxResponseSize >= 0 && m_ResponseLength + DataSize > (uint64_t)m_MaxResponseSize)
+	if(m_MaxResponseSize >= 0)
 	{
-		return 0;
+		const uint64_t MaxSize = (uint64_t)m_MaxResponseSize;
+		const uint64_t PrefixSize = (uint64_t)m_ResumeFrom;
+		// m_ResponseLength is the Range response only. Use subtraction so
+		// the full-file budget cannot wrap before rejecting an extra chunk.
+		if(PrefixSize > MaxSize || m_ResponseLength > MaxSize - PrefixSize || DataSize > MaxSize - PrefixSize - m_ResponseLength)
+		{
+			m_AllowResume = false; // Size-rejected partial files are not reusable.
+			return 0;
+		}
 	}
 
 	if(DataSize == 0)

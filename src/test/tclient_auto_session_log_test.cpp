@@ -51,6 +51,20 @@ TEST(AutoSessionLog, FormatsUniquePidFilenames)
 	EXPECT_TRUE(TClientAutoSessionLog::IsFilename(aSecond));
 }
 
+TEST(AutoSessionLog, StartupFailureCreatesMissingDirectory)
+{
+	CTestInfo Info;
+	Info.m_DeleteTestStorageFilesOnSuccess = true;
+	char aDirectory[IO_MAX_PATH_LENGTH];
+	str_format(aDirectory, sizeof(aDirectory), "%s/install/data/log", Info.m_aFilename);
+	const char *pFilename = "ddnet-log-2026-11-16_19-00-00-123.log";
+	IOHANDLE File = TClientAutoSessionLog::OpenFileInDirectory(aDirectory, pFilename);
+	ASSERT_TRUE(File);
+	EXPECT_FALSE(io_close(File));
+	EXPECT_TRUE(fs_is_dir(aDirectory));
+	EXPECT_FALSE(TClientAutoSessionLog::OpenFileInDirectory(aDirectory, "../../settings.cfg"));
+}
+
 TEST(AutoSessionLog, OpensInstallPathFirst)
 {
 	CTestInfo Info;

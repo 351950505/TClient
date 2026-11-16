@@ -48,7 +48,7 @@ MACRO_CONFIG_INT(TcShowChatClient, tc_show_chat_client, 1, 0, 1, CFGFLAG_CLIENT 
 
 MACRO_CONFIG_INT(TcShowFrozenText, tc_frozen_tees_text, 0, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show how many tees in your team are currently frozen. (0 - off, 1 - show alive, 2 - show frozen)")
 MACRO_CONFIG_INT(TcShowFrozenHud, tc_frozen_tees_hud, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show frozen tee HUD")
-MACRO_CONFIG_INT(TcFrozenTeesShowAll, tc_frozen_tees_showall, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Request native /showall 1 once per connection on DDRace when tee status icons or text are enabled. Requires server support, may increase traffic; other visibility limits still apply. Disabling does not send /showall 0.")
+MACRO_CONFIG_INT(TcFrozenTeesShowAll, tc_frozen_tees_showall, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Request native /showall 1 once per connection on DDRace when tee status icons or text are enabled. Requires server support, may increase traffic; other visibility limits still apply. Disabling does not send /showall 0.")
 MACRO_CONFIG_INT(TcShowFrozenHudSkins, tc_frozen_tees_hud_skins, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use ninja skin, or darkened skin for frozen tees on hud")
 
 MACRO_CONFIG_INT(TcFrozenHudTeeSize, tc_frozen_tees_size, 10, 8, 20, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Size of tees in frozen tee HUD")
@@ -421,6 +421,7 @@ MACRO_CONFIG_INT(TcShowhudDummyAngle, tc_showhud_dummy_angle, 0, 0, 1, CFGFLAG_C
 MACRO_CONFIG_INT(TcIslandEnable, tc_island_enable, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island music HUD")
 MACRO_CONFIG_INT(TcIslandNotch, tc_island_notch, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island notch style (attach to top edge)")
 MACRO_CONFIG_INT(TcIslandShowLyrics, tc_island_show_lyrics, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show synced lyrics")
+MACRO_CONFIG_INT(TcIslandDoubleLyrics, tc_island_double_lyrics, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show the current lyric above a dim preview of the next lyric instead of the song title")
 MACRO_CONFIG_INT(TcIslandShowProgress, tc_island_show_progress, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show game clock (round timer)")
 MACRO_CONFIG_INT(TcIslandShowSongProgress, tc_island_show_song_progress, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island song progress rail at the bottom")
 MACRO_CONFIG_INT(TcIslandLocalClock, tc_island_local_clock, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show local computer time (HH:MM)")

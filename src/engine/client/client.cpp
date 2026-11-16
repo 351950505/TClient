@@ -7,6 +7,7 @@
 #include "demoedit.h"
 #include "friends.h"
 #include "serverbrowser.h"
+#include "snapshot_delta_tick.h"
 
 #include <base/bytes.h>
 #include <base/crashdump.h>
@@ -353,6 +354,45 @@ static void PruneAutoLogfilesInDir(const char *pDir, int MaxFiles)
 		if(fs_remove(aPath) != 0)
 			break; // e.g. still open by another client; do not spin
 		vNames.erase(vNames.begin());
+	}
+}
+
+static void BindStartupFailureLog(CFutureLogger *pFutureLogger, IStorage *pStorage)
+{
+	// The normal logger waits for configuration. A failed startup still needs
+	// a file sink for its buffered diagnostics, without relying on that config.
+	char aTimestamp[32];
+	str_timestamp(aTimestamp, sizeof(aTimestamp));
+	char aFilename[64];
+	TClientAutoSessionLog::FormatFilename(aFilename, sizeof(aFilename), aTimestamp, process_id());
+	char aDirectory[IO_MAX_PATH_LENGTH];
+	char aExecutable[IO_MAX_PATH_LENGTH];
+	IOHANDLE File = nullptr;
+	if(fs_executable_path(aExecutable, sizeof(aExecutable)) == 0 && fs_parent_dir(aExecutable) == 0)
+	{
+		str_format(aDirectory, sizeof(aDirectory), "%s/data/log", aExecutable);
+		PruneAutoLogfilesInDir(aDirectory, TCLIENT_AUTO_LOG_MAX_FILES);
+		File = TClientAutoSessionLog::OpenFileInDirectory(aDirectory, aFilename);
+	}
+	if(!File)
+	{
+		if(pStorage)
+			pStorage->GetCompletePath(IStorage::TYPE_SAVE, "logs", aDirectory, sizeof(aDirectory));
+		else if(fs_storage_path("DDNet", aDirectory, sizeof(aDirectory)) == 0)
+			str_append(aDirectory, "/logs", sizeof(aDirectory));
+		else
+			aDirectory[0] = '\0';
+		if(aDirectory[0])
+		{
+			PruneAutoLogfilesInDir(aDirectory, TCLIENT_AUTO_LOG_MAX_FILES);
+			File = TClientAutoSessionLog::OpenFileInDirectory(aDirectory, aFilename);
+		}
+	}
+	if(File)
+	{
+		// Binding drains pending lines. Normal logger shutdown flushes the file;
+		// leave it open for any further diagnostics emitted during cleanup.
+		pFutureLogger->Set(log_logger_file_limited(File, TCLIENT_AUTO_LOG_MAX_BYTES));
 	}
 }
 
@@ -2512,8 +2552,11 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket, int Conn, bool Dummy)
 				return;
 			}
 
-			int GameTick = Unpacker.GetInt();
-			int DeltaTick = GameTick - Unpacker.GetInt();
+			const int GameTick = Unpacker.GetInt();
+			const int DeltaDistance = Unpacker.GetInt();
+			int DeltaTick;
+			if(Unpacker.Error() || !DecodeSnapshotDeltaTick(GameTick, DeltaDistance, DeltaTick))
+				return;
 
 			int NumParts = 1;
 			int Part = 0;
@@ -5696,6 +5739,7 @@ int main(int argc, const char **argv)
 		if(!pStorage)
 		{
 			log_error("client", "Failed to initialize the storage location (see details above)");
+			BindStartupFailureLog(pFutureFileLogger.get(), nullptr);
 			std::string Message = std::string("Failed to initialize the storage location. See details below.\n\n") + MemoryLogger.ConcatenatedLines();
 			pClient->ShowMessageBox({.m_pTitle = "Storage Error", .m_pMessage = Message.c_str()});
 			PerformAllCleanup();
@@ -5805,6 +5849,7 @@ int main(int argc, const char **argv)
 			char aError[2048];
 			str_format(aError, sizeof(aError), "Failed to load config from '%s'.", s_aConfigDomains[ConfigDomain].m_aConfigPath);
 			log_error("client", "%s", aError);
+			BindStartupFailureLog(pFutureFileLogger.get(), pStorage);
 			pClient->ShowMessageBox({.m_pTitle = "Config File Error", .m_pMessage = aError});
 			PerformAllCleanup();
 			return -1;

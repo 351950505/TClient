@@ -193,9 +193,14 @@ void CTClientGradient::ApplyEverythingGradient(CTextCursor *pCursor, const char 
 	const int CharacterOffset = pCursor->m_CharCount;
 	const float Phase = AnimatePhase(Client()->GlobalTime());
 	const std::vector<STextColorSplit> vSplits = BuildAnimatedTextSplits(pText, ClientId, GameClient(), Phase, Length);
+	const float BaseAlpha = TextRender()->GetTextColor().a;
 	pCursor->m_vColorSplits.reserve(vSplits.size());
 	for(const STextColorSplit &Split : vSplits)
-		pCursor->m_vColorSplits.emplace_back(CharacterOffset + Split.m_CharIndex, Split.m_Length, Split.m_Color);
+	{
+		ColorRGBA Color = Split.m_Color;
+		Color.a *= BaseAlpha;
+		pCursor->m_vColorSplits.emplace_back(CharacterOffset + Split.m_CharIndex, Split.m_Length, Color);
+	}
 }
 
 void CTClientGradient::RefreshCachedText()
@@ -290,6 +295,13 @@ void CTClientGradient::OnRender()
 		const bool ShouldApply = SkinEnabled && GameClient()->m_Snap.m_aCharacters[ClientId].m_Active && AppliesTo(ClientId, GameClient());
 		if(!WasModified && !ShouldApply)
 			continue;
+
+		// 玩家刚离开/切服时 m_pSkinInfo 已被 Reset() 清空，不能再刷新渲染信息。
+		if(GameClient()->m_aClients[ClientId].m_pSkinInfo == nullptr)
+		{
+			m_aModified[ClientId] = false;
+			continue;
+		}
 
 		GameClient()->m_aClients[ClientId].UpdateRenderInfo();
 		m_aModified[ClientId] = false;

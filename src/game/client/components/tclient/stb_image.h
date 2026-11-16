@@ -421,6 +421,9 @@ typedef struct
 //
 
 STBIDEF stbi_uc *stbi_load_from_memory   (stbi_uc           const *buffer, int len   , int *x, int *y, int *channels_in_file, int desired_channels);
+// TClient extension: per-call PNG inflate limit (>0), including bit depth and Adam7 scanlines.
+// Rejects excess inflated scanline data. Other formats and ordinary APIs are unchanged.
+STBIDEF stbi_uc *stbi_load_from_memory_png_bounded(stbi_uc const *buffer, int len, int *x, int *y, int *channels_in_file, int desired_channels, int png_output_limit);
 STBIDEF stbi_uc *stbi_load_from_callbacks(stbi_io_callbacks const *clbk  , void *user, int *x, int *y, int *channels_in_file, int desired_channels);
 
 #ifndef STBI_NO_STDIO
@@ -806,6 +809,7 @@ typedef struct
 {
    stbi__uint32 img_x, img_y;
    int img_n, img_out_n;
+   int png_output_limit; // zero preserves the ordinary PNG decoder
 
    stbi_io_callbacks io;
    void *io_user_data;
@@ -825,6 +829,7 @@ static void stbi__refill_buffer(stbi__context *s);
 // initialize a memory-decode context
 static void stbi__start_mem(stbi__context *s, stbi_uc const *buffer, int len)
 {
+   s->png_output_limit = 0;
    s->io.read = NULL;
    s->read_from_callbacks = 0;
    s->callback_already_read = 0;
@@ -835,6 +840,7 @@ static void stbi__start_mem(stbi__context *s, stbi_uc const *buffer, int len)
 // initialize a callback-based context
 static void stbi__start_callbacks(stbi__context *s, stbi_io_callbacks *c, void *user)
 {
+   s->png_output_limit = 0;
    s->io = *c;
    s->io_user_data = user;
    s->buflen = sizeof(s->buffer_start);
@@ -1194,7 +1200,10 @@ static stbi_uc *stbi__convert_16_to_8(stbi__uint16 *orig, int w, int h, int chan
    stbi_uc *reduced;
 
    reduced = (stbi_uc *) stbi__malloc(img_len);
-   if (reduced == NULL) return stbi__errpuc("outofmem", "Out of memory");
+   if (reduced == NULL) {
+      STBI_FREE(orig);
+      return stbi__errpuc("outofmem", "Out of memory");
+   }
 
    for (i = 0; i < img_len; ++i)
       reduced[i] = (stbi_uc)((orig[i] >> 8) & 0xFF); // top half of each byte is sufficient approx of 16->8 bit scaling
@@ -1430,6 +1439,15 @@ STBIDEF stbi_uc *stbi_load_from_memory(stbi_uc const *buffer, int len, int *x, i
 {
    stbi__context s;
    stbi__start_mem(&s,buffer,len);
+   return stbi__load_and_postprocess_8bit(&s,x,y,comp,req_comp);
+}
+
+STBIDEF stbi_uc *stbi_load_from_memory_png_bounded(stbi_uc const *buffer, int len, int *x, int *y, int *comp, int req_comp, int png_output_limit)
+{
+   stbi__context s;
+   if (png_output_limit <= 0) return stbi__errpuc("bad PNG output limit", "Invalid PNG output limit");
+   stbi__start_mem(&s,buffer,len);
+   s.png_output_limit = png_output_limit;
    return stbi__load_and_postprocess_8bit(&s,x,y,comp,req_comp);
 }
 
@@ -4427,7 +4445,7 @@ static int stbi__parse_uncompressed_block(stbi__zbuf *a)
    nlen = header[3] * 256 + header[2];
    if (nlen != (len ^ 0xffff)) return stbi__err("zlib corrupt","Corrupt PNG");
    if (a->zbuffer + len > a->zbuffer_end) return stbi__err("read past buffer","Corrupt PNG");
-   if (a->zout + len > a->zout_end)
+   if (len > a->zout_end - a->zout)
       if (!stbi__zexpand(a, a->zout, len)) return 0;
    memcpy(a->zout, a->zbuffer, len);
    a->zbuffer += len;
@@ -5075,6 +5093,32 @@ static void stbi__de_iphone(stbi__png *z)
 
 #define STBI__PNG_TYPE(a,b,c,d)  (((unsigned) (a) << 24) + ((unsigned) (b) << 16) + ((unsigned) (c) << 8) + (unsigned) (d))
 
+// Exact PNG scanline output size; empty Adam7 passes have neither pixels nor filters.
+// Use division guards before each operation so even hostile IHDR sizes cannot overflow.
+static int stbi__png_scanline_size(stbi__png *z, int interlaced, int limit, int *out_size)
+{
+   static const int xorig[7] = { 0,4,0,2,0,1,0 };
+   static const int yorig[7] = { 0,0,4,0,2,0,1 };
+   static const int xspc[7] = { 8,8,4,4,2,2,1 };
+   static const int yspc[7] = { 8,8,8,4,4,2,2 };
+   stbi__uint32 total = 0;
+   int p, bits = z->s->img_n * z->depth;
+   for (p = 0; p < (interlaced ? 7 : 1); ++p) {
+      stbi__uint32 x = z->s->img_x, y = z->s->img_y, row;
+      if (interlaced) {
+         if (x <= (stbi__uint32)xorig[p] || y <= (stbi__uint32)yorig[p]) continue;
+         x = (x - xorig[p] - 1) / xspc[p] + 1;
+         y = (y - yorig[p] - 1) / yspc[p] + 1;
+      }
+      if (x > (UINT_MAX - 7) / bits) return stbi__err("PNG output limit", "PNG output limit exceeded");
+      row = (x * bits + 7) / 8 + 1; // packed samples plus one filter byte
+      if (row > ((stbi__uint32)limit - total) / y) return stbi__err("PNG output limit", "PNG output limit exceeded");
+      total += row * y;
+   }
+   *out_size = (int)total;
+   return 1;
+}
+
 static int stbi__parse_png_file(stbi__png *z, int scan, int req_comp)
 {
    stbi_uc palette[1024], pal_img_n=0;
@@ -5201,11 +5245,24 @@ static int stbi__parse_png_file(stbi__png *z, int scan, int req_comp)
             if (first) return stbi__err("first not IHDR", "Corrupt PNG");
             if (scan != STBI__SCAN_load) return 1;
             if (z->idata == NULL) return stbi__err("no IDAT","Corrupt PNG");
-            // initial guess for decoded data size to avoid unnecessary reallocs
-            bpl = (s->img_x * z->depth + 7) / 8; // bytes per line, per component
-            raw_len = bpl * s->img_y * s->img_n /* pixels */ + s->img_y /* filter mode per row */;
-            z->expanded = (stbi_uc *) stbi_zlib_decode_malloc_guesssize_headerflag((char *) z->idata, ioff, raw_len, (int *) &raw_len, !is_iphone);
-            if (z->expanded == NULL) return 0; // zlib should set error
+            if (s->png_output_limit) {
+               stbi__zbuf a;
+               int scanline_size;
+               if (!stbi__png_scanline_size(z, interlace, s->png_output_limit, &scanline_size)) return 0;
+               z->expanded = (stbi_uc *) stbi__malloc(scanline_size);
+               if (z->expanded == NULL) return stbi__err("outofmem", "Out of memory");
+               a.zbuffer = z->idata;
+               a.zbuffer_end = z->idata + ioff;
+               // A non-expandable buffer stops literals, matches and stored blocks before overflow.
+               if (!stbi__do_zlib(&a, (char *)z->expanded, scanline_size, 0, !is_iphone)) return 0;
+               raw_len = (stbi__uint32)(a.zout - a.zout_start);
+            } else {
+               // initial guess for decoded data size to avoid unnecessary reallocs
+               bpl = (s->img_x * z->depth + 7) / 8; // bytes per line, per component
+               raw_len = bpl * s->img_y * s->img_n /* pixels */ + s->img_y /* filter mode per row */;
+               z->expanded = (stbi_uc *) stbi_zlib_decode_malloc_guesssize_headerflag((char *) z->idata, ioff, raw_len, (int *) &raw_len, !is_iphone);
+               if (z->expanded == NULL) return 0; // zlib should set error
+            }
             STBI_FREE(z->idata); z->idata = NULL;
             if ((req_comp == s->img_n+1 && req_comp != 3 && !pal_img_n) || has_trans)
                s->img_out_n = s->img_n+1;

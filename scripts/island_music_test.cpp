@@ -13,6 +13,8 @@
 #include <cstring>
 #include <exception>
 #include <functional>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -803,6 +805,70 @@ int main()
 	Tests.Group("QQMusic session starts its native lyric provider", [&] {
 		Tests.Case("Tencent.QQMusic bypasses NetEase resolve", TestQQMusicStartsOwnProvider);
 	});
+	Tests.Group("source identity isolates same-song provider switches", [&] {
+		Tests.Case("canonical provider keys and duration jitter", [&] {
+			auto Net = Track("TrackA", "CloudMusic.exe");
+			auto Alias = Track("TrackA", "netease-title");
+			auto QQ = Track("TrackA", "Tencent.QQMusic");
+			Alias.m_DurationMs = 0;
+			Check(CMusic::BuildCacheKey(Net) == CMusic::BuildCacheKey(Alias), "NetEase aliases or duration jitter split lrclib identity");
+			Check(CMusic::NeteaseCacheKey(Net) == CMusic::NeteaseCacheKey(Alias), "NetEase aliases split provider identity");
+			Check(CMusic::BuildCacheKey(Net) != CMusic::BuildCacheKey(QQ) && CMusic::NeteaseCacheKey(Net) != CMusic::NeteaseCacheKey(QQ), "provider identity is missing from cache keys");
+		});
+		Tests.Case("SMTC/title monitor and empty-service fallback stay stable", [&] {
+			CFixture Fixture;
+			Render(Fixture);
+			const auto Key = Fixture.Music().m_ActiveKey;
+			const auto pRequest = Last(NET_SEARCH);
+			for(int Frame = 0; Frame < 100; ++Frame)
+			{
+				Fixture.m_Track.m_ServiceId = Frame % 3 == 0 ? "" : Frame % 3 == 1 ? "CloudMusic.exe" : "netease-title";
+				Fixture.m_Track.m_Album = Frame % 2 ? "SMTC album" : "";
+				Fixture.m_Track.m_DurationMs = Frame % 2 ? 120000 : 0;
+				Render(Fixture);
+				Check(Fixture.Music().m_ActiveKey == Key && !pRequest->m_Aborted && Count(NET_SEARCH) == 1, "same-source fallback metadata restarted requests");
+			}
+		});
+		for(const auto Stage : {EStage::NET_SEARCH, EStage::NET_LYRIC, EStage::QQ_SEARCH, EStage::QQ_LYRIC, EStage::LRCLIB})
+			Tests.Case(std::string(StageName(Stage)) + " same metadata NetEase -> QQ cancels old job", [&] {
+				CFixture Fixture;
+				Prepare(Fixture, Stage);
+				const auto OldKey = Fixture.Music().m_ActiveKey;
+				auto pRequest = RequestFor(Fixture, Stage);
+				pRequest->Complete(ResponseFor(Stage));
+				Poll(Fixture, Stage);
+				auto pJob = JobFor(Fixture, Stage);
+				Fixture.m_Track.m_ServiceId = "Tencent.QQMusic";
+				Render(Fixture);
+				Check(Fixture.Music().m_ActiveKey != OldKey && pRequest->m_Aborted && pJob->State() == IJob::STATE_ABORTED, "same-song provider switch retained the old request/job");
+				const auto &Meta = Fixture.Music().m_NeteaseData.at(Fixture.Music().m_ActiveKey);
+				Check(!Meta.m_TriedQQ && !Meta.m_TriedKugou && !Meta.m_TriedLrclib && Meta.m_vLines.empty() && Meta.m_vFallbackLines.empty() && Meta.m_QQMid.empty(), "new provider inherited old tried/READY state");
+				Check(Last(QQ_SEARCH) != pRequest, "QQ source did not start its own request");
+				Fixture.m_Engine.Run(pJob);
+				Last(QQ_SEARCH)->Complete(QQ_FOUND);
+				Tick(Fixture);
+				Last(QQ_LYRIC)->Complete(QQ_LINES);
+				CheckReady(Fixture, "QQ lyric");
+			});
+		Tests.Case("READY and lrclib fallback are provider-local", [&] {
+			CFixture Fixture;
+			Prepare(Fixture, EStage::NET_LYRIC);
+			Last(NET_LYRIC)->Complete(NET_LINES);
+			CheckReady(Fixture, "Net lyric");
+			const auto OldKey = Fixture.Music().m_ActiveKey;
+			Fixture.m_Track.m_ServiceId = "Tencent.QQMusic";
+			Render(Fixture);
+			Check(Fixture.Music().m_ActiveKey != OldKey && Fixture.Music().m_vLines.empty() && Fixture.Music().m_LyricsState != EState::READY, "NetEase READY leaked into QQ");
+			Fixture.Music().m_NeteaseData.at(Fixture.Music().m_ActiveKey).m_TriedKugou = true;
+			Last(QQ_SEARCH)->Complete("{}");
+			Tick(Fixture);
+			Last(LRCLIB)->Complete(LRC_LINES);
+			CheckReady(Fixture, "lrclib lyric");
+			Fixture.m_Track.m_ServiceId = "CloudMusic.exe";
+			CheckReady(Fixture, "Net lyric");
+			Check(Count(NET_SEARCH) == 1, "returning to a known provider lost its own READY cache");
+		});
+	});
 	Tests.Group("worker-only parsing, single enqueue, STATE_DONE publication", [&] {
 		for(const auto Stage : STAGES)
 			Tests.Case(StageName(Stage), [&] { TestDeferredPublication(Stage, false); });
@@ -904,5 +970,90 @@ int main()
 				Check(Count(QQ_SEARCH) == 0 && Count(LRCLIB) == 0, "valid NetEase lyrics triggered fallback");
 			});
 	});
-	return Tests.Finish();
+		Tests.Group("duplicate timestamp attachment stays near-linear", [&] {
+			double SmallMs = 0, LargeMs = 0;
+			for(int Count : {2000, 8000, 32000})
+				Tests.Case("duplicate group " + std::to_string(Count), [&] {
+					std::vector<SLyricLine> Lines(Count);
+					std::string Translations;
+					for(int i = 0; i < Count; ++i)
+					{
+						Lines[i].m_StartMs = 1000;
+						Lines[i].m_Text = "original " + std::to_string(i);
+						Translations += "[00:01.00]译文" + std::to_string(i) + "\n";
+					}
+					const auto Start = std::chrono::steady_clock::now();
+					TcLyric::AttachTranslatedLyrics(Lines, Translations.c_str());
+					const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
+					for(const auto &Line : Lines) Check(Line.m_Translation == "译文0", "duplicate cue group lost the first equal-distance translation");
+					printf("ATTACH duplicate originals=%d translations=%d elapsed_ms=%.3f\n", Count, Count, Ms);
+					if(Count == 2000) SmallMs = Ms;
+					if(Count == 32000) LargeMs = Ms;
+				});
+			Tests.Case("16x rows is not quadratic", [&] {
+				Check(LargeMs < std::max(400.0, SmallMs * 64.0), "16x duplicate rows incurred quadratic attachment work");
+			});
+		});
+		Tests.Group("provider translations stay attached to the original timeline", [&] {
+			Tests.Case("mixed Chinese ytlrc wins while tlyric fills only missing cues", [&] {
+				CFixture Fixture;
+				Prepare(Fixture, EStage::NET_LYRIC);
+				Last(NET_LYRIC)->Complete(R"({"yrc":{"lyric":"[1000,1000](1000,1000,0)Baby\n[3000,1000](3000,1000,0)Next"},"lrc":{"lyric":"[00:01.00]Baby\n[00:03.00]Next"},"ytlrc":{"lyric":"[00:01.12]Baby，寶貝\n[00:03.00]tsugi no uta"},"tlyric":{"lyric":"[00:01.00]低优先级\n[00:03.00]下一首"}})");
+				Tick(Fixture);
+				const auto &Lines = Fixture.Music().m_vLines;
+				const auto &Fallback = Fixture.Music().m_NeteaseData.at(Fixture.Music().m_ActiveKey).m_vFallbackLines;
+				Check(Lines.size() == 2 && Fallback.size() == 2, "YRC/LRC timeline missing");
+				for(const auto *pLines : {&Lines, &Fallback})
+					Check((*pLines)[0].m_Translation == "Baby，宝贝" && (*pLines)[1].m_Translation == "下一首", "mixed translation/ytlrc priority/fallback was lost");
+			});
+			Tests.Case("QQ mixed Chinese trans", [&] {
+				CFixture Fixture;
+				Prepare(Fixture, EStage::QQ_LYRIC);
+				Last(QQ_LYRIC)->Complete(R"({"code":0,"lyric":"[00:01.00]Baby","trans":"[00:01.00]Baby，宝贝"})");
+				Tick(Fixture);
+				Check(Fixture.Music().m_vLines.size() == 1 && Fixture.Music().m_vLines[0].m_Translation == "Baby，宝贝", "mixed QQ translation was filtered");
+			});
+			for(const char *pKey : {"tlyric", "ytlrc"})
+				Tests.Case(pKey, [&] {
+					CFixture Fixture;
+					Prepare(Fixture, EStage::NET_LYRIC);
+					const std::string Body = std::string(R"({"yrc":{"lyric":"[1000,1000](1000,400,0)Hello (1400,600,0)world"},"lrc":{"lyric":"[00:01.00]Hello world"},")") + pKey + R"(":{"lyric":"[00:01.00]你好世界"}})";
+					Last(NET_LYRIC)->Complete(Body.c_str());
+					Tick(Fixture);
+					Check(Fixture.Music().m_vLines.size() == 1 && Fixture.Music().m_vLines[0].m_Translation == "你好世界", "NetEase translation was not published with YRC");
+					const auto &Fallback = Fixture.Music().m_NeteaseData.at(Fixture.Music().m_ActiveKey).m_vFallbackLines;
+					Check(Fallback.size() == 1 && Fallback[0].m_Translation == "你好世界", "NetEase fallback translation lost");
+					Check(Fixture.Music().m_vLines[0].m_vWords.front().m_StartMs == 1000 && Fixture.Music().m_vLines[0].m_vWords.back().m_EndMs == 2000, "translation altered YRC timings");
+				});
+			Tests.Case("QQ trans", [&] {
+				CFixture Fixture;
+				Prepare(Fixture, EStage::QQ_LYRIC);
+				Last(QQ_LYRIC)->Complete(R"({"code":0,"lyric":"[00:01.00]Hello world","trans":"[00:01.00]你好世界"})");
+				Tick(Fixture);
+				Check(Fixture.Music().m_vLines.size() == 1 && Fixture.Music().m_vLines[0].m_Translation == "你好世界", "QQ translation not published");
+			});
+		});
+		if(const char *pResponsePath = std::getenv("ISLAND_MUSIC_TEST_RESPONSE"))
+		{
+			Tests.Case("captured NetEase bilingual response", [&] {
+				std::ifstream File(pResponsePath, std::ios::binary);
+				Check(File.good(), "captured response file not available");
+				const std::string Body((std::istreambuf_iterator<char>(File)), std::istreambuf_iterator<char>());
+				Check(Body.size() <= 4u * 1024u * 1024u, "captured response too large");
+				CFixture Fixture;
+				Prepare(Fixture, EStage::NET_LYRIC);
+				Last(NET_LYRIC)->Complete(Body.c_str());
+				Tick(Fixture);
+				int Translated = 0;
+				for(const auto &Line : Fixture.Music().m_vLines)
+				{
+					if(!Line.m_Translation.empty()) ++Translated;
+					if(Line.m_StartMs >= 12000 && Line.m_StartMs < 21000)
+						std::printf("CAPTURE cue=%lld simplified=%d translation=%d original=%s translated=%s\n", (long long)Line.m_StartMs, Line.m_IsSimplifiedChinese, !Line.m_Translation.empty(), Line.m_Text.c_str(), Line.m_Translation.c_str());
+				}
+				std::printf("CAPTURE total=%zu translated=%d\n", Fixture.Music().m_vLines.size(), Translated);
+				Check(Translated > 0, "captured response translations were discarded");
+			});
+		}
+		return Tests.Finish();
 }

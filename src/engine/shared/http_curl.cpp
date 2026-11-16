@@ -87,6 +87,8 @@ bool CHttpRequestCurl::ConfigureHandle(CURL *pHandle)
 	curl_easy_setopt(pHandle, CURLOPT_LOW_SPEED_TIME, m_Timeout.m_LowSpeedTime);
 	if(m_MaxResponseSize >= 0)
 	{
+		// curl can compare the complete remote entity size even on Range requests.
+		// Keep the full budget here; OnData separately accounts for the prefix.
 		curl_easy_setopt(pHandle, CURLOPT_MAXFILESIZE_LARGE, (curl_off_t)m_MaxResponseSize);
 	}
 	if(m_IfModifiedSince >= 0)
@@ -261,7 +263,7 @@ void CHttpRequestCurl::OnCompletionInternal(CURL *pHandle, CURLcode Code)
 		State = EHttpState::DONE;
 	}
 
-	if(m_ResumeFrom > 0 && (Code == CURLE_RANGE_ERROR || Code == CURLE_BAD_DOWNLOAD_RESUME))
+	if(Code == CURLE_FILESIZE_EXCEEDED || (m_ResumeFrom > 0 && (Code == CURLE_RANGE_ERROR || Code == CURLE_BAD_DOWNLOAD_RESUME)))
 		m_AllowResume = false;
 	IHttpRequest::OnCompletionInternal(State);
 }

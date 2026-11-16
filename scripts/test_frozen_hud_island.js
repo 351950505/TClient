@@ -29,6 +29,7 @@ try {
   assert(!hud.includes('IslandSuppressed'), 'Island must not suppress frozen controls');
   assert(hud.includes('const bool ShowFrozenText = g_Config.m_TcShowFrozenText > 0;'));
   assert(hud.includes('const bool ShowFrozenHud = g_Config.m_TcShowFrozenHud > 0;'));
+  assert(config.includes('MACRO_CONFIG_INT(TcFrozenTeesShowAll, tc_frozen_tees_showall, 0, 0, 1,'), 'native /showall requests are opt-in by default');
   assert(hud.includes('ShowFrozenHud && !GameClient()->m_Scoreboard.IsActive() && !(LocalTeamID == 0 && g_Config.m_TcFrozenHudTeamOnly)'));
   const info = between(hud, 'void CHud::RenderTextInfo()', 'float CHud::FrozenHudRowY(');
   assert(info.includes('g_Config.m_TcNotifyWhenLastX / 100.0f') && info.includes('g_Config.m_TcNotifyWhenLastY / 100.0f'));
@@ -63,29 +64,30 @@ try {
   assert(draw.includes('EMOTE_PAIN, vec2(1.0f, 0.0f), TeeRenderPos, Alpha'), 'Frozen tee emote unchanged');
   assert(draw.includes('Alpha = 0.85f;') && draw.includes('TeeInfo.m_ColorBody.Multiply(AccentColor)') && draw.includes('TeeInfo.m_ColorFeet.Multiply(AccentColor)'), 'Skins-mode frozen tint multiplies toward the accent color');
   assert(draw.includes('g_Config.m_TcFrozenTeesScale / 100.0f') && draw.includes('g_Config.m_TcFrozenTeesOffsetX * Scale') && draw.includes('g_Config.m_TcFrozenTeesOffsetY * Scale'), 'Offset/scale cvars drive capsule placement');
-  assert(draw.includes('Capsule.y = FrozenHudRowY(Capsule, Island, m_Height);'), 'Island avoidance still runs on the base rect');
-  assert(draw.includes('std::clamp(Capsule.x, 8.0f,') && draw.includes('std::clamp(Capsule.y, 0.0f,'), 'Keep horizontal margins without preventing the capsule from touching the top edge');
+  assert(draw.includes('FrozenHudCapsulePlacement(Capsule, Island, m_Width, m_Height, OffsetX, OffsetY)'), 'production uses the tested right-side and vertical-follow placement');
+  assert(hud.includes('Capsule.y = Island.y;') && hud.includes('std::clamp(Capsule.y, 0.0f,'), 'island vertical offset follows with on-screen clamping');
   assert(draw.includes('Overflow ? 3 : 1') && draw.includes('TcFrozenHudOverflowPass(State) != OverflowIndex'));
   assert(config.includes('MACRO_CONFIG_INT(TcFrozenHudTeeSize, tc_frozen_tees_size, 10, 8, 20,'), 'tee size defaults to 10');
   assert(config.includes('MACRO_CONFIG_INT(TcFrozenTeesInlineIsland, tc_frozen_tees_inline_island, 1, 0, 1,'), 'placement to the right of the island is enabled by default');
   assert(config.includes('MACRO_CONFIG_INT(TcFrozenTeesAliveOnly, tc_frozen_tees_alive_only, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show only alive (unfrozen) teammates in the frozen tee HUD")'), 'alive-only cvar declared');
   assert(config.indexOf('MACRO_CONFIG_INT(TcFrozenTeesInlineIsland') > config.indexOf('MACRO_CONFIG_COL(TcFrozenTeesAccentColor'), 'inline-island cvar follows the accent color entry');
-  assert(menus.includes('DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesInlineIsland, TCLocalize("Same line as the dynamic island"), &g_Config.m_TcFrozenTeesInlineIsland, &Column, LineSize);'), 'inline-island checkbox rendered');
+  assert(!menus.includes('DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesInlineIsland'), 'right-side anchor no longer depends on the retired checkbox');
+  assert(!draw.includes('g_Config.m_TcFrozenTeesInlineIsland'), 'legacy saved inline setting cannot disable right-side anchoring');
   assert(menus.includes('DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesAliveOnly, TCLocalize("Show only alive teammates"), &g_Config.m_TcFrozenTeesAliveOnly, &Column, LineSize);'), 'alive-only checkbox rendered');
-  assert(menus.indexOf('TcFrozenTeesInlineIsland') > menus.indexOf('TCLocalize("Only show after joining a team")') && menus.indexOf('TcFrozenTeesInlineIsland') < menus.indexOf('Ui()->DoScrollbarOption(&g_Config.m_TcFrozenMaxRows'), 'new checkboxes sit inside the Frozen Tee Display block');
+  assert(menus.indexOf('TcFrozenTeesAliveOnly') > menus.indexOf('TCLocalize("Only show after joining a team")') && menus.indexOf('TcFrozenTeesAliveOnly') < menus.indexOf('Ui()->DoScrollbarOption(&g_Config.m_TcFrozenMaxRows'), 'alive-only checkbox remains inside the Frozen Tee Display block');
   for(const [lang, inline, alive] of [['simplified_chinese', '与灵动岛同行', '只显示存活的队友'], ['traditional_chinese', '與靈動島同行', '只顯示存活的隊友']]) {
     const dict = readLang(lang);
     assert(dict.includes('Same line as the dynamic island\n== ' + inline), lang + ' inline-island label translated');
     assert(dict.includes('Show only alive teammates\n== ' + alive), lang + ' alive-only label translated');
   }
-  assert(draw.includes('if(g_Config.m_TcFrozenTeesInlineIsland && Island.w > 0 && Island.h > 0 &&') && draw.includes('Island.x + Island.w + 2.0f + Capsule.w <= m_Width - 8.0f') && !draw.includes('Capsule.x < Island.x + Island.w &&'), 'inline-island branch requires room, not an existing overlap');
-  assert(draw.includes('Capsule.x = Island.x + Island.w + 2.0f;') && draw.includes('Capsule.y = 0.0f;'), 'inline-island branch parks the capsule to the island right at the screen top');
+  assert(hud.includes('Capsule.x = Island.x + Island.w + 2.0f;') && hud.includes('Capsule.y = Island.y;'), 'capsule anchors to the current island right and y');
+  assert(draw.includes('Graphics()->MapScreenToSize(m_Width / CapsuleScale, m_Height / CapsuleScale);') && draw.includes('Capsule.x = PlacedCapsule.x / CapsuleScale;'), 'fitting scales contents without moving the right-side anchor');
   assert(config.includes('MACRO_CONFIG_INT(TcFrozenTeesMaxDisplay, tc_frozen_tees_max_display, 7, 1, 10,'), 'tee display defaults to 7 and accepts only 1 through 10');
   assert(menus.includes('TCLocalize("Max displayed"), 1, 10)'), 'menu exposes only the bounded display count');
   assert(!menus.includes('Max displayed (0 = all)'), 'unlimited display option is retired');
   assert(draw.includes('const int MaxDisplayLimit = std::clamp(g_Config.m_TcFrozenTeesMaxDisplay, 1, 10);') && draw.includes('const int MaxDisplayed = std::min(NumDrawn, MaxDisplayLimit);'), 'rendering enforces the icon limit independently of row count');
   assert(draw.includes('i < MAX_CLIENTS && NumDisplayed < MaxDisplayed;') && !draw.includes('NumDisplayed < MaxTees * MaxRows'), 'additional rows cannot multiply the total icon limit');
-  assert(draw.indexOf('Capsule.x = Island.x + Island.w + 2.0f;') < draw.indexOf('Capsule.y = FrozenHudRowY(Capsule, Island, m_Height);'), 'inline-island placement decided before the avoidance fallback');
+  assert(!draw.includes('Island.x + Island.w + 2.0f + Capsule.w <='), 'narrow right-hand space must not send the capsule back to the old position');
   assert(draw.includes('const bool AliveOnly = g_Config.m_TcFrozenTeesAliveOnly != 0;') && draw.includes('const int NumDrawn = AliveOnly ? m_FrozenHudFrame.m_Counts.m_KnownUnfrozen : NumInTeam;'), 'alive-only count defined from the captured frame');
   assert(draw.includes('if(CapsuleShown && NumDrawn > 0)') && draw.includes('int TotalRows = std::min(MaxRows, (MaxDisplayed + MaxTees - 1) / MaxTees);') && draw.includes('const int TeesInRow = std::min(MaxDisplayed, MaxTees);') && draw.includes('bool Overflow = NumDrawn > MaxDisplayed;'), 'capped icon count drives the layout while the full count drives overflow priority');
   {
@@ -106,7 +108,7 @@ try {
   const sizeBlock = between(draw, 'float TeeSize = g_Config.m_TcFrozenHudTeeSize * Scale;', '// The display limit');
   const startPosBlock = between(draw, 'float StartPos =', 'int TotalRows =');
   const contentBlock = between(draw, 'const float ContentW =', 'char aCountBuf');
-  const capsuleBlock = between(draw, 'const float CapsuleW =', 'CUIRect TeeRow =');
+  const capsuleBlock = between(draw, 'const float CapsuleW =', 'if(CapsuleScale <= 0.0f)');
   const dotBlock = between(draw, 'const float DotR =', 'const ColorRGBA DotColor =');
   const metrics = between(island, 'const float UiScale =', 'const int PillCorners =');
   const x = between(island, 'const float X = std::clamp((ScreenW - Width)', '// ---- draw the capsule body');
@@ -131,6 +133,7 @@ struct Graphics { float m_Aspect; float ScreenAspect() const { return m_Aspect; 
 class CHud {
  public:
 	static float FrozenHudRowY(const CUIRect &, const CUIRect &, float);
+	static CUIRect FrozenHudCapsulePlacement(CUIRect, const CUIRect &, float, float, float, float);
 	static CUIRect FrozenCapsule(bool ShowFrozenText, float CountW, int TeesInRow, int TotalRows, const CUIRect &Island, float m_Width, float m_Height);
 	static vec2 FrozenDot(bool ShowFrozenText, float CountW, int TeesInRow, int TotalRows, int Row, int TeeInRow, const CUIRect &Island, float m_Width, float m_Height);
 };
@@ -142,7 +145,7 @@ CUIRect CHud::FrozenCapsule(bool ShowFrozenText, float CountW, int TeesInRow, in
  ${startPosBlock}
  ${contentBlock}
  ${capsuleBlock}
- return Capsule;
+ return PlacedCapsule;
 }
 // Status dot placement model, again production expressions verbatim.
 vec2 CHud::FrozenDot(bool ShowFrozenText, float CountW, int TeesInRow, int TotalRows, int Row, int TeeInRow, const CUIRect &Island, float m_Width, float m_Height) {
@@ -151,11 +154,14 @@ vec2 CHud::FrozenDot(bool ShowFrozenText, float CountW, int TeesInRow, int Total
  ${startPosBlock}
  ${contentBlock}
  ${capsuleBlock}
+ if(CapsuleScale<=0.0f) return {};
+ Capsule.x=PlacedCapsule.x/CapsuleScale;
+ Capsule.y=PlacedCapsule.y/CapsuleScale;
  const CUIRect TeeRow{Capsule.x + Pad + (ShowFrozenText ? CountW + TeeGap : 0.0f), Capsule.y + Pad, ContentW, ContentH};
  vec2 TeeRenderPos(TeeRow.x + TeeSize / 2.0f + TeeInRow * (TeeSize + TeeGap), TeeRow.y + TeeSize * (0.7f) + Row * (TeeSize + TeeGap));
  const int CurrentRow = Row;
  ${dotBlock}
- return vec2(DotX, DotY);
+ return vec2(DotX * CapsuleScale, DotY * CapsuleScale);
 }
 // Alive-only count model: production NumDrawn/row/overflow expressions verbatim.
 void AliveLayout(bool AliveOnly, int NumInTeam, int KnownUnfrozen, bool CapsuleShown, int DisplayLimit, int RowLimit, int *pTotalRows, int *pTeesInRow, bool *pOverflow, bool *pVisible, int *pDisplayed = nullptr) {
@@ -242,14 +248,14 @@ try {
   Check(std::fabs(Capsule.y-std::clamp((float)OffY*Scale, 0.0f, std::max(0.0f, 300.0f-8.0f-Capsule.h)))<0.001f, "vertical offset applied while allowing a flush top edge");
   ++CapsuleCases;
  }
- // Default placement still dodges the island; an explicit offset wins over it.
+ // Legacy disabled inline setting cannot restore the overlapping old anchor.
  g_Config.m_TcFrozenTeesScale=100; g_Config.m_TcFrozenTeesOffsetX=0; g_Config.m_TcFrozenHudTeeSize=15; g_Config.m_TcFontSize=100; g_Config.m_TcFrozenTeesInlineIsland=0;
  for(int OffY : {-600,-15,0,15}) {
   g_Config.m_TcFrozenTeesOffsetY=OffY;
-  const CUIRect Island{200,0,200,24};
-  const CUIRect Capsule=CHud::FrozenCapsule(true, 42.0f, 6, 1, Island, 300.0f*1.777778f, 300.0f);
-  Check(OffY!=0 || !Overlaps(Capsule,Island), "default placement must still dodge the island");
-  Check(OffY>=0 || Overlaps(Capsule,Island), "explicit negative offset wins over island avoidance");
+  const CUIRect Island{200,40,200,24};
+  const CUIRect Capsule=CHud::FrozenCapsule(true,42.0f,6,1,Island,300.0f*1.777778f,300.0f);
+  Check(std::fabs(Capsule.x-402.0f)<0.001f && !Overlaps(Capsule,Island),"legacy inline off cannot disable the right anchor");
+  Check(std::fabs(Capsule.y-std::max(0.0f,40.0f+(float)OffY))<0.001f,"tee vertical offset is relative to the island");
  }
  // Status dot placement and count-font fit, modeled on production expressions.
  int MarkerCases=0;
@@ -289,13 +295,18 @@ try {
   const float ContentW=6*TeeSize+5*TeeGap;
   const float CapsuleW=2.0f*Pad+(42.0f+TeeGap)+ContentW;
   const float BaseX=W/2.0f+38.0f*(W/300.0f)/1.78f-TeeSize/2.0f-Pad-(42.0f+TeeGap);
-  const bool Inline=IslandW>0 && 200.0f+IslandW+2.0f+CapsuleW<=W-8.0f;
-  if(Inline) {
-   Check(std::fabs(Capsule.x-std::clamp(200.0f+IslandW+2.0f+(float)OffX*Scale, 8.0f, std::max(8.0f, W-8.0f-CapsuleW)))<0.001f, "inline island parks right of the island, then offset and clamp");
-   Check(std::fabs(Capsule.y-std::clamp((float)OffY*Scale, 0.0f, std::max(0.0f, 300.0f-8.0f-Capsule.h)))<0.001f, "inline island stays flush to the top, then applies explicit vertical offset");
+  if(IslandW>0) {
+   const float AnchorX=std::clamp(200.0f+IslandW+2.0f+(float)OffX*Scale,8.0f,std::max(8.0f,W-8.0f));
+   const float Fit=std::min(1.0f,std::max(0.0f,W-8.0f-AnchorX)/CapsuleW);
+   if(Fit<=0.0f) Check(Capsule.w==0.0f && Capsule.h==0.0f,"no space must not cause an overlapping fallback");
+   else {
+    Check(std::fabs(Capsule.x-AnchorX)<0.001f,"island right anchor survives fitting");
+    Check(std::fabs(Capsule.w-CapsuleW*Fit)<0.001f,"narrow space scales the whole capsule");
+    Check(std::fabs(Capsule.y-std::clamp(10.0f+(float)OffY*Scale,0.0f,std::max(0.0f,300.0f-8.0f-Capsule.h)))<0.001f,"island vertical offset follows before explicit tee offset");
+   }
   } else {
-   Check(std::fabs(Capsule.x-std::clamp(BaseX+(float)OffX*Scale, 8.0f, std::max(8.0f, W-8.0f-CapsuleW)))<0.001f, "inline fallback keeps the base x path");
-   Check(std::fabs(Capsule.y-std::clamp(CHud::FrozenHudRowY(CUIRect{BaseX,0.0f,CapsuleW,Capsule.h},Island,300.0f)+(float)OffY*Scale, 0.0f, std::max(0.0f, 300.0f-8.0f-Capsule.h)))<0.001f, "inline fallback keeps the island avoidance path");
+   Check(std::fabs(Capsule.x-std::clamp(BaseX+(float)OffX*Scale,8.0f,std::max(8.0f,W-8.0f-CapsuleW)))<0.001f,"hidden island keeps the standalone base x");
+   Check(std::fabs(Capsule.y-std::clamp((float)OffY*Scale,0.0f,std::max(0.0f,300.0f-8.0f-Capsule.h)))<0.001f,"hidden island keeps the standalone base y");
   }
   ++InlineCases;
  }
@@ -310,7 +321,7 @@ try {
   const CUIRect Island{W*0.2f,IslandY,80.0f,24.0f};
   const CUIRect Capsule=CHud::FrozenCapsule(true,20.0f,Tees,1,Island,W,300.0f);
   Check(std::fabs(Capsule.x-(Island.x+Island.w+2.0f))<0.001f, "default capsule must start to the right of the island");
-  Check(Capsule.y==0.0f, "default capsule must touch the top edge, not vertically center on the island");
+  Check(Capsule.y==IslandY, "default capsule follows the island y, including vertical offset");
   Check(!Overlaps(Capsule,Island), "default capsule overlaps the island");
   Check(Capsule.x+Capsule.w<=W-8.0f+0.001f, "default capsule exceeds right screen boundary");
   ++TopCases;
@@ -321,7 +332,7 @@ try {
   Check(Capsule.y==std::max(0,OffY), "top edge remains reachable with or without the island");
   ++TopCases;
  }
- std::printf("PASS: %d top-flush/default-right placement cases with size 10 and up to 10 icons\\n", TopCases);
+ std::printf("PASS: %d default-right/vertical-follow placement cases with size 10 and up to 10 icons\\n", TopCases);
  // Alive-only counts: production NumDrawn/row/overflow expressions verbatim.
  int AliveCases=0;
  int AliveTotalRows, AliveTeesInRow; bool AliveOverflow, AliveVisible;

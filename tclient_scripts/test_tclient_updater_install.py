@@ -669,6 +669,243 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         self.record.update(observations)
         self.record["passed"] = True
 
+    def stop_owned(self, process: subprocess.Popen) -> None:
+        handle, expected = self.processes[process.pid]
+        self.verify_image(handle, expected)
+        if self.is_alive_handle(handle):
+            if not self.kernel32.TerminateProcess(handle, 0xE0F3):
+                raise OSError(ctypes.get_last_error(), "fixture termination failed")
+        process.wait(timeout=5)
+
+    def pause_updater(self, point: str) -> subprocess.Popen:
+        if os.environ.get("TCLIENT_UPDATER_TEST_FAULTS") != "1":
+            self.skipTest("requires isolated build with TCLIENT_UPDATER_TEST_FAULTS")
+        event = self.case / ("fault-" + point + ".event")
+        event.unlink(missing_ok=True)
+        self.log.parent.mkdir(parents=True, exist_ok=True)
+        environment = dict(self.environment)
+        environment.update({"TCLIENT_UPDATER_TEST_PAUSE": point, "TCLIENT_UPDATER_TEST_EVENT": str(event),
+                            "TCLIENT_UPDATER_NO_UI": "1", "TCLIENT_UPDATER_HEALTH_TIMEOUT_MS": "3000"})
+        process = self.start(self.updater, ["--pid", "0", "--zip", str(self.archive), "--sha256", file_sha256(self.archive),
+                                          "--target", str(self.target), "--restart", str(self.target / "DDNet.exe"), "--log", str(self.log)], environment)
+        deadline = time.monotonic() + 15
+        while not event.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.025)
+        self.assertTrue(event.exists(), "fault point not reached\n" + self.log_text())
+        self.assertIsNone(process.poll())
+        return process
+
+    def interrupted_install(self, point: str = "installed-1") -> str:
+        old_hash = self.install_old()
+        (self.target / "client.dll").write_bytes(b"old dll")
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes()), ("client.dll", b"new dll"), ("new.bin", b"new transaction file")])
+        process = self.pause_updater(point)
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), file_sha256(self.healthy))
+        if point == "installed-1":
+            self.assertEqual((self.target / "client.dll").read_bytes(), b"old dll")
+        self.assertTrue((self.target / ".tclient-update-journal").is_file())
+        self.stop_owned(process)
+        return old_hash
+
+    def test_interrupted_mixed_install_recovers_before_equal_version_gate(self) -> None:
+        self.interrupted_install()
+        log = self.assert_code(self.run_updater(version="1.7.8.71"), 0)
+        self.assertIn("before version check", log)
+        self.assertIn("installed=1.7.8.70 package=1.7.8.71", log)
+        self.assertEqual((self.target / "client.dll").read_bytes(), b"new dll")
+        self.assertFalse((self.target / ".tclient-update-journal").exists())
+        self.passed(mixed_install_recovered=True)
+
+    def test_new_mapped_helper_without_old_backup_recovers_and_cleans_later(self) -> None:
+        self.install_old()
+        helper = self.target / "TClientUpdater.exe"
+        self.assertFalse(helper.exists(), "fixture must have no old helper backup")
+        dll = self.target / "client.dll"
+        dll.write_bytes(b"old dll")
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes()), ("TClientUpdater.exe", self.updater.read_bytes()), ("client.dll", b"new dll")])
+        interrupted = self.pause_updater("installed-2")
+        self.assertEqual(dll.read_bytes(), b"old dll")
+        journal = self.target / ".tclient-update-journal"
+        helper_record = next(line.split("\t") for line in journal.read_text(encoding="utf-8").splitlines()[4:] if line.endswith("\tTClientUpdater.exe"))
+        self.assertEqual(helper_record[0], "-")
+        self.stop_owned(interrupted)
+        log = self.assert_code(self.run_updater(executable=helper, version="1.7.8.71"), 0)
+        self.assertIn("installed=1.7.8.70 package=1.7.8.71", log)
+        self.assertFalse(journal.exists())
+        self.assertEqual(file_sha256(helper), file_sha256(self.updater))
+        self.assertEqual(dll.read_bytes(), b"new dll")
+        renamed = list(self.target.glob("TClientUpdater.exe.old_*"))
+        self.assertEqual(len(renamed), 1, "mapped image cleanup must wait until the helper exits")
+        self.assertEqual(file_sha256(renamed[0]), file_sha256(self.updater))
+        # A later successful update may remove the now-unmapped transaction artifact,
+        # but never follows a reparse link or removes its external target.
+        outside = self.case / "outside mapped cleanup"
+        outside.mkdir()
+        sentinel = outside / "must-survive.bin"
+        sentinel.write_bytes(b"user sentinel")
+        self.make_junction(self.target / "TClientUpdater.exe.old_external", outside)
+        payload = self.healthy.read_bytes().replace(b"TClientAppVersion=1.7.8.71", b"TClientAppVersion=1.7.8.72")
+        write_zip(self.archive, [("DDNet.exe", payload), ("TClientUpdater.exe", self.updater.read_bytes()), ("client.dll", b"newer dll")])
+        self.assert_code(self.run_updater(version="1.7.8.72"), 0)
+        self.assertFalse(renamed[0].exists(), "exited mapped recovery artifact should be cleaned")
+        self.assertEqual(sentinel.read_bytes(), b"user sentinel")
+        self.passed(new_mapped_helper_recovered=True, deferred_cleanup_safe=True)
+
+    def test_recovery_interruption_and_repeated_recovery_are_idempotent(self) -> None:
+        old_hash = self.interrupted_install("installed-3")
+        # First interrupt after deleting a transaction-created file, then interrupt
+        # after restoring the entire transaction but before removing its journal.
+        self.stop_owned(self.pause_updater("recovered-file"))
+        self.assertFalse((self.target / "new.bin").exists())
+        self.stop_owned(self.pause_updater("recovered-all"))
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), old_hash)
+        self.assertEqual((self.target / "client.dll").read_bytes(), b"old dll")
+        self.assert_code(self.run_updater(), 0)
+        self.assertFalse((self.target / ".tclient-update-journal").exists())
+        self.passed(repeated_recovery_idempotent=True)
+
+    def test_completed_journal_cleanup_never_rolls_back(self) -> None:
+        self.install_old()
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])
+        process = self.pause_updater("completed")
+        new_pid = self.event_pid(self.new_event)
+        self.stop_owned(process)
+        journal = self.target / ".tclient-update-journal"
+        self.assertIn("\ncompleted\n", journal.read_text(encoding="utf-8"))
+        log = self.assert_code(self.run_updater(), 12)
+        self.assertIn("cleaning only, not rolling back", log)
+        self.assertEqual(file_sha256(self.target / "DDNet.exe"), file_sha256(self.healthy))
+        self.assertTrue(self.alive(new_pid))
+        self.assertFalse(journal.exists())
+        self.passed(completed_cleanup_only=True)
+
+    def test_malformed_journal_fails_closed_without_restart(self) -> None:
+        old_hash = self.install_old()
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])
+        journal = self.target / ".tclient-update-journal"
+        for contents in (b"not a journal\n", b"TCLIENT-INSTALL-1\n", b"\x00\n", b"x" * (4 * 1024 * 1024 + 1)):
+            with self.subTest(size=len(contents)):
+                journal.write_bytes(contents)
+                self.assert_code(self.run_updater(), 10)
+                self.assertEqual(file_sha256(self.target / "DDNet.exe"), old_hash)
+                self.assertEqual(journal.read_bytes(), contents)
+                self.assertFalse(self.old_event.exists())
+                self.assertFalse(self.new_event.exists())
+        self.passed(malformed_journal_rejected=True)
+
+    def test_journal_traversal_protected_paths_and_wrong_identity_are_rejected(self) -> None:
+        self.interrupted_install()
+        journal = self.target / ".tclient-update-journal"
+        original = journal.read_text(encoding="utf-8")
+        sentinel = self.case / "must-survive.bin"
+        sentinel.write_bytes(b"user sentinel")
+        for name in ("../must-survive.bin", str(sentinel), "cfg/settings.cfg", ".tclient-update.lock", "data/../../must-survive.bin"):
+            with self.subTest(name=name):
+                lines = original.splitlines()
+                columns = lines[4].split("\t")
+                columns[2] = name
+                lines[4] = "\t".join(columns)
+                journal.unlink()
+                journal.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
+                self.assert_code(self.run_updater(), 10)
+                self.assertEqual(sentinel.read_bytes(), b"user sentinel")
+                self.assertFalse(self.old_event.exists())
+        lines = original.splitlines()
+        lines[1] = "00000000-00000000-00000000"
+        journal.unlink()
+        journal.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
+        self.assert_code(self.run_updater(), 10)
+        journal.unlink()
+        journal.write_bytes(original.encode("utf-8"))
+        self.assert_code(self.run_updater(), 0)
+        self.passed(journal_paths_and_identity_rejected=True)
+
+    def test_recovery_refuses_changed_user_file_and_missing_backup(self) -> None:
+        self.interrupted_install("installed-3")
+        new_file = self.target / "new.bin"
+        new_file.write_bytes(b"user edited this")
+        self.assert_code(self.run_updater(), 10)
+        self.assertEqual(new_file.read_bytes(), b"user edited this")
+        new_file.write_bytes(b"new transaction file")
+        journal = self.target / ".tclient-update-journal"
+        backup = self.target / journal.read_text(encoding="utf-8").splitlines()[2] / ".tclient-update-rollback" / "client.dll"
+        contents = backup.read_bytes()
+        backup.unlink()
+        self.assert_code(self.run_updater(), 10)
+        self.assertTrue(new_file.exists(), "all records must be validated before deleting anything")
+        backup.write_bytes(contents)
+        self.assert_code(self.run_updater(), 0)
+        self.passed(changed_user_file_preserved=True, missing_backup_rejected=True)
+
+    def test_recovery_backup_reparse_is_rejected(self) -> None:
+        self.interrupted_install()
+        journal = self.target / ".tclient-update-journal"
+        backup = self.target / journal.read_text(encoding="utf-8").splitlines()[2]
+        saved = backup.with_name(backup.name + "_saved")
+        backup.rename(saved)
+        outside = self.case / "outside recovery"
+        outside.mkdir()
+        sentinel = outside / "must-survive.bin"
+        sentinel.write_bytes(b"outside sentinel")
+        self.make_junction(backup, outside)
+        self.assert_code(self.run_updater(), 10)
+        self.assertEqual(sentinel.read_bytes(), b"outside sentinel")
+        self.assertFalse(self.old_event.exists())
+        backup.rmdir()  # remove the link itself only
+        saved.rename(backup)
+        self.assert_code(self.run_updater(), 0)
+        self.passed(recovery_reparse_rejected=True)
+
+    def test_locked_dll_process_abort_recovers_with_unmodified_production_helper(self) -> None:
+        self.install_old()
+        dll = self.target / "client.dll"
+        dll.write_bytes(b"old dll")
+        event = self.event("interrupted-locker.pid", self.locker)
+        locker = self.start(self.locker, [str(dll), str(event)])
+        self.assertEqual(self.event_pid(event), locker.pid)
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes()), ("client.dll", b"new dll")])
+        self.log.parent.mkdir(parents=True, exist_ok=True)
+        env = dict(self.environment)
+        env["TCLIENT_UPDATER_NO_UI"] = "1"
+        process = self.start(self.updater, ["--pid", "0", "--zip", str(self.archive), "--sha256", file_sha256(self.archive),
+                                          "--target", str(self.target), "--restart", str(self.target / "DDNet.exe"), "--log", str(self.log)], env)
+        deadline = time.monotonic() + 10
+        replaced = False
+        while process.poll() is None and time.monotonic() < deadline:
+            try:
+                replaced = file_sha256(self.target / "DDNet.exe") == file_sha256(self.healthy)
+            except OSError:
+                pass
+            if replaced:
+                break
+            time.sleep(0.005)
+        self.assertTrue(replaced, "EXE replacement never occurred\n" + self.log_text())
+        self.assertEqual(dll.read_bytes(), b"old dll", "fixture must really leave a mixed install")
+        self.stop_owned(process)
+        self.stop_owned(locker)
+        log = self.assert_code(self.run_updater(version="1.7.8.71"), 0)
+        self.assertIn("before version check", log)
+        self.assertIn("installed=1.7.8.70 package=1.7.8.71", log)
+        self.assertEqual(dll.read_bytes(), b"new dll")
+        self.passed(real_process_abort_recovered=True)
+
+    def test_recovery_target_reparse_is_rejected(self) -> None:
+        self.interrupted_install()
+        dll = self.target / "client.dll"
+        dll.unlink()
+        outside = self.case / "outside target recovery"
+        outside.mkdir()
+        sentinel = outside / "must-survive.bin"
+        sentinel.write_bytes(b"outside target sentinel")
+        self.make_junction(dll, outside)
+        self.assert_code(self.run_updater(), 10)
+        self.assertEqual(sentinel.read_bytes(), b"outside target sentinel")
+        self.assertFalse(self.old_event.exists())
+        dll.rmdir()
+        dll.write_bytes(b"old dll")
+        self.assert_code(self.run_updater(), 0)
+        self.passed(target_recovery_reparse_rejected=True)
+
     def test_manifest_version_mismatch_preserves_installed_client(self) -> None:
         old_hash = self.install_old()
         write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])

@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const os = require('node:os');
 const cp = require('node:child_process');
+const { discoverCompiler, compileCommands } = require('./test_compiler');
 
 const root = path.resolve(__dirname, '..');
 const out = fs.mkdtempSync(path.join(os.tmpdir(), 'island-music-test-'));
@@ -77,29 +78,19 @@ ${lyrics}
   const jsonParser = path.join(root, 'src/engine/external/json-parser/json.c');
   for (const file of [testSource, parser, jsonParser]) readSource(path.relative(root, file));
   fs.writeFileSync(path.join(out, 'production-seam.json'), JSON.stringify({ inputs }, null, 2));
-  let binary;
-  if (process.platform === 'win32') {
-    const vswhere = path.join(process.env['ProgramFiles(x86)'] || 'C:/Program Files (x86)', 'Microsoft Visual Studio/Installer/vswhere.exe');
-    const installation = cp.spawnSync(vswhere, ['-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], { encoding: 'utf8' });
-    if (installation.status !== 0 || !installation.stdout.trim()) throw new Error('MSVC Build Tools not found');
-    const tools = path.join(installation.stdout.trim(), 'VC/Tools/MSVC');
-    const msvc = path.join(tools, fs.readdirSync(tools).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop());
-    const kits = path.join(process.env['ProgramFiles(x86)'] || 'C:/Program Files (x86)', 'Windows Kits/10');
-    const version = fs.readdirSync(path.join(kits, 'Include')).filter(v => /^10\./.test(v)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop();
-    const includes = [path.join(msvc, 'include'), ...['ucrt', 'shared', 'um', 'winrt'].map(n => path.join(kits, 'Include', version, n))];
-    const libraries = [path.join(msvc, 'lib/x64'), ...['ucrt', 'um'].map(n => path.join(kits, 'Lib', version, n, 'x64'))];
-    const compiler = path.join(msvc, 'bin/Hostx64/x64/cl.exe');
-    const env = { ...process.env, INCLUDE: includes.join(';'), LIB: libraries.join(';'), VSLANG: '1033' };
-    const jsonObject = path.join(out, 'json.obj');
-    run(compiler, ['/nologo', '/c', '/TC', '/W3', '/utf-8', jsonParser, `/Fo${jsonObject}`], env);
-    binary = path.join(out, 'island_music_test.exe');
-    run(compiler, ['/nologo', '/std:c++17', '/EHsc', '/W3', '/utf-8', '/DCONF_FAMILY_WINDOWS', `/I${path.join(root, 'src')}`, `/I${out}`, testSource, parser, jsonObject, `/Fe${binary}`], env);
-  } else {
-    binary = path.join(out, 'island_music_test');
-    const jsonObject = path.join(out, 'json.o');
-    run(process.env.CC || 'cc', ['-c', jsonParser, '-o', jsonObject]);
-    run(process.env.CXX || 'c++', ['-std=c++17', '-pthread', '-DCONF_FAMILY_WINDOWS', '-I', path.join(root, 'src'), '-I', out, testSource, parser, jsonObject, '-o', binary]);
-  }
+  const toolchain = discoverCompiler();
+  const { binary, commands } = compileCommands(toolchain, {
+    out, binaryName: 'island_music_test', includes: [path.join(root, 'src'), out],
+    sources: [
+      { file: jsonParser, language: 'c' },
+      // Exercise the simulated provider everywhere, but never leak its macro
+      // into the real parser's non-Windows translation unit.
+      { file: testSource, defines: ['CONF_FAMILY_WINDOWS'] },
+      { file: parser, defines: process.platform === 'win32' ? ['CONF_FAMILY_WINDOWS'] : [] },
+    ],
+  });
+  fs.writeFileSync(path.join(out, 'compiler-commands.json'), JSON.stringify(commands.map(({ executable, args }) => ({ executable, args })), null, 2));
+  for (const command of commands) run(command.executable, command.args, command.env);
   const output = run(binary, []);
   fs.writeFileSync(path.join(out, 'test-output.log'), output);
   process.stdout.write(output);

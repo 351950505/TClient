@@ -976,3 +976,15 @@ Highlight frozen teammates holding hammer fire
 
 Marker opacity
 == 標記透明度
+
+Get update
+== 取得更新
+
+Download
+== 下載
+
+Install and restart
+== 安裝並重新啟動
+
+Two-line lyrics (current + next)
+== 雙行歌詞（目前句＋下一句）

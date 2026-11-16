@@ -55,6 +55,7 @@
 #include <cstring>
 #include <cwchar>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -1009,9 +1010,9 @@ namespace
 			return EEntryCheck::REJECT;
 		}
 
-		if(ToLowerWide(Result) == L".tclient-update.lock")
+		if(StartsWithNoCase(Result, L".tclient-update"))
 		{
-			Error = "entry uses the reserved installation transaction lock";
+			Error = "entry uses the reserved installation transaction namespace";
 			return EEntryCheck::REJECT;
 		}
 		OutRelativePath = Result;
@@ -2024,6 +2025,246 @@ namespace
 		bool m_HadBackup = false;
 	};
 
+	// Write-ahead journal: no absolute paths from disk are ever used. The backup and
+	// disposable rollback copies are prepared and flushed before publishing this file.
+	// Consuming a rollback copy by atomic rename makes recovery itself restartable.
+	constexpr const wchar_t *JOURNAL_NAME = L".tclient-update-journal";
+#ifdef TCLIENT_UPDATER_TEST_FAULTS
+	// Only the isolated integration-test build contains fault injection.
+	void TransactionFaultPoint(const std::wstring &Point)
+	{
+		wchar_t aPoint[64] = {}, aEvent[32768] = {};
+		const DWORD PointLength = GetEnvironmentVariableW(L"TCLIENT_UPDATER_TEST_PAUSE", aPoint, 64);
+		const DWORD EventLength = GetEnvironmentVariableW(L"TCLIENT_UPDATER_TEST_EVENT", aEvent, 32768);
+		if(PointLength == 0 || PointLength >= 64 || EventLength == 0 || EventLength >= 32768 || Point != aPoint)
+			return;
+		HANDLE hFile = CreateFileW(aEvent, GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+		if(hFile != INVALID_HANDLE_VALUE)
+			CloseHandle(hFile);
+		Sleep(INFINITE);
+	}
+#else
+	void TransactionFaultPoint(const std::wstring &) {}
+#endif
+	struct SJournalFile
+	{
+		std::wstring m_RelativePath;
+		std::string m_OldHash; // "-" means the target did not exist
+		std::string m_NewHash;
+	};
+	struct SInstallJournal
+	{
+		std::string m_TargetIdentity;
+		std::wstring m_BackupName;
+		bool m_Completed = false;
+		std::vector<SJournalFile> m_Files;
+	};
+
+	bool HashRegularFile(const std::wstring &Path, std::string &Hash, std::string &Error, bool Flush = false)
+	{
+		if(!CheckNoReparsePoints(Path, Error))
+			return false;
+		HANDLE hFile = CreateFileW(LongPath(Path).c_str(), GENERIC_READ | (Flush ? GENERIC_WRITE : 0), FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+		if(hFile == INVALID_HANDLE_VALUE)
+		{
+			Error = "could not open transaction file: " + FormatLastError(GetLastError());
+			return false;
+		}
+		BY_HANDLE_FILE_INFORMATION Info = {};
+		bool Ok = GetFileInformationByHandle(hFile, &Info) != 0 &&
+			(Info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 && Info.nNumberOfLinks == 1;
+		CSha256 Digest;
+		Digest.Init();
+		unsigned char aBuffer[64 * 1024];
+		DWORD Read = 0;
+		while(Ok)
+		{
+			if(!ReadFile(hFile, aBuffer, sizeof(aBuffer), &Read, nullptr))
+			{
+				Ok = false;
+				break;
+			}
+			if(Read == 0)
+				break;
+			Digest.Update(aBuffer, Read);
+		}
+		if(Ok && Flush)
+			Ok = FlushFileBuffers(hFile) != 0;
+		CloseHandle(hFile);
+		if(!Ok)
+		{
+			Error = "could not read/flush regular single-link transaction file";
+			return false;
+		}
+		unsigned char aDigest[32];
+		Digest.Finish(aDigest);
+		Hash.clear();
+		for(unsigned char Byte : aDigest)
+		{
+			Hash.push_back("0123456789abcdef"[Byte >> 4]);
+			Hash.push_back("0123456789abcdef"[Byte & 15]);
+		}
+		return true;
+	}
+
+	bool TargetIdentity(const std::wstring &Target, std::string &Identity, std::string &Error)
+	{
+		if(!CheckNoReparsePoints(Target, Error))
+			return false;
+		HANDLE hDirectory = CreateFileW(LongPath(Target).c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+		BY_HANDLE_FILE_INFORMATION Info = {};
+		const bool Ok = hDirectory != INVALID_HANDLE_VALUE && GetFileInformationByHandle(hDirectory, &Info) &&
+			(Info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 && (Info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
+		if(hDirectory != INVALID_HANDLE_VALUE)
+			CloseHandle(hDirectory);
+		if(!Ok)
+		{
+			Error = "could not identify installation directory";
+			return false;
+		}
+		char aIdentity[64];
+		snprintf(aIdentity, sizeof(aIdentity), "%08lx-%08lx-%08lx", (unsigned long)Info.dwVolumeSerialNumber, (unsigned long)Info.nFileIndexHigh, (unsigned long)Info.nFileIndexLow);
+		Identity = aIdentity;
+		return true;
+	}
+
+	bool JournalHashValid(const std::string &Hash)
+	{
+		return Hash.size() == 64 && Hash.find_first_not_of("0123456789abcdef") == std::string::npos;
+	}
+
+	bool SaveJournal(const std::wstring &Target, const SInstallJournal &Journal, std::string &Error)
+	{
+		std::string Data = "TCLIENT-INSTALL-1\n" + Journal.m_TargetIdentity + "\n" + Utf8FromWide(Journal.m_BackupName) + "\n" + (Journal.m_Completed ? "completed\n" : "active\n");
+		for(const SJournalFile &File : Journal.m_Files)
+			Data += File.m_OldHash + "\t" + File.m_NewHash + "\t" + Utf8FromWide(File.m_RelativePath) + "\n";
+		if(Journal.m_Files.empty() || Journal.m_Files.size() > 10000 || Data.size() > 4 * 1024 * 1024)
+		{
+			Error = "transaction journal exceeds supported limit";
+			return false;
+		}
+		const std::wstring Path = JoinPath(Target, JOURNAL_NAME);
+		const std::wstring Temporary = Path + L".tmp";
+		if(!CheckNoReparsePoints(Path, Error) || !CheckNoReparsePoints(Temporary, Error))
+			return false;
+		// A leftover temp belongs to an interrupted atomic journal write. Never truncate
+		// it (it could be a hard link), and never use it as recovery authority.
+		if(!DeleteFileW(LongPath(Temporary).c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND)
+		{
+			Error = "could not remove temporary transaction journal";
+			return false;
+		}
+		HANDLE hFile = CreateFileW(LongPath(Temporary).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_HIDDEN | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+		if(hFile == INVALID_HANDLE_VALUE)
+		{
+			Error = "could not create transaction journal: " + FormatLastError(GetLastError());
+			return false;
+		}
+		bool Ok = WriteAll(hFile, Data.data(), Data.size(), Error);
+		if(Ok && !FlushFileBuffers(hFile))
+		{
+			Error = "could not flush transaction journal";
+			Ok = false;
+		}
+		CloseHandle(hFile);
+		if(Ok && !MoveFileExW(LongPath(Temporary).c_str(), LongPath(Path).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+		{
+			Error = "could not publish transaction journal: " + FormatLastError(GetLastError());
+			Ok = false;
+		}
+		return Ok;
+	}
+
+	bool LoadJournal(const std::wstring &Target, SInstallJournal &Journal, bool &Exists, std::string &Error)
+	{
+		const std::wstring Path = JoinPath(Target, JOURNAL_NAME);
+		Exists = false;
+		if(!CheckNoReparsePoints(Path, Error))
+			return false;
+		HANDLE hFile = CreateFileW(LongPath(Path).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+		if(hFile == INVALID_HANDLE_VALUE)
+		{
+			if(GetLastError() == ERROR_FILE_NOT_FOUND)
+				return true;
+			Error = "could not open transaction journal";
+			return false;
+		}
+		Exists = true;
+		BY_HANDLE_FILE_INFORMATION Info = {};
+		LARGE_INTEGER Size = {};
+		bool Ok = GetFileInformationByHandle(hFile, &Info) && (Info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) == 0 &&
+			Info.nNumberOfLinks == 1 && GetFileSizeEx(hFile, &Size) && Size.QuadPart > 0 && Size.QuadPart <= 4 * 1024 * 1024;
+		std::string Data(Ok ? (size_t)Size.QuadPart : 0, '\0');
+		DWORD Read = 0;
+		Ok = Ok && ReadFile(hFile, &Data[0], (DWORD)Data.size(), &Read, nullptr) && Read == Data.size();
+		CloseHandle(hFile);
+		if(!Ok || Data.back() != '\n' || Data.find('\0') != std::string::npos)
+		{
+			Error = "malformed transaction journal";
+			return false;
+		}
+		std::istringstream Stream(Data);
+		std::string Line, Backup, State, Identity;
+		std::getline(Stream, Line);
+		std::getline(Stream, Journal.m_TargetIdentity);
+		std::getline(Stream, Backup);
+		std::getline(Stream, State);
+		if(Line != "TCLIENT-INSTALL-1" || !TargetIdentity(Target, Identity, Error) || Identity != Journal.m_TargetIdentity ||
+			Backup.size() < 29 || Backup.size() > 100 || Backup.substr(0, 14) != "update_backup_" || Backup.find_first_not_of("0123456789_abcdef", 14) != std::string::npos ||
+			(State != "active" && State != "completed"))
+		{
+			Error = "invalid transaction journal header or target identity";
+			return false;
+		}
+		Journal.m_BackupName = WideFromUtf8(Backup);
+		Journal.m_Completed = State == "completed";
+		std::set<std::wstring> Seen;
+		while(std::getline(Stream, Line))
+		{
+			const size_t A = Line.find('\t'), B = A == std::string::npos ? A : Line.find('\t', A + 1);
+			if(A == std::string::npos || B == std::string::npos || Line.find('\t', B + 1) != std::string::npos || Journal.m_Files.size() >= 10000)
+			{
+				Error = "malformed transaction journal entry";
+				return false;
+			}
+			SJournalFile File;
+			File.m_OldHash = Line.substr(0, A);
+			File.m_NewHash = Line.substr(A + 1, B - A - 1);
+			const std::string Name = Line.substr(B + 1);
+			bool Directory = false;
+			const std::wstring WideName = WideFromUtf8(Name);
+			if((File.m_OldHash != "-" && !JournalHashValid(File.m_OldHash)) || !JournalHashValid(File.m_NewHash) || Utf8FromWide(WideName) != Name ||
+				CheckEntryName(WideName, Directory, File.m_RelativePath, Error) != EEntryCheck::OK || Directory || !Seen.insert(ToLowerWide(File.m_RelativePath)).second)
+			{
+				Error = "unsafe transaction journal entry";
+				return false;
+			}
+			Journal.m_Files.push_back(File);
+		}
+		if(Journal.m_Files.empty())
+		{
+			Error = "empty transaction journal";
+			return false;
+		}
+		return true;
+	}
+
+	bool RemoveJournal(const std::wstring &Target, std::string &Error)
+	{
+		for(const wchar_t *pSuffix : {L".tmp", L""})
+		{
+			const std::wstring Path = JoinPath(Target, std::wstring(JOURNAL_NAME) + pSuffix);
+			if(!CheckNoReparsePoints(Path, Error))
+				return false;
+			if(!DeleteFileW(LongPath(Path).c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND)
+			{
+				Error = "could not clean transaction journal";
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool EnvironmentEntryHasName(const std::wstring &Entry, const wchar_t *pName)
 	{
 		const size_t NameStart = !Entry.empty() && Entry[0] == L'=' ? 1 : 0;
@@ -2240,68 +2481,112 @@ namespace
 		}
 	}
 
-	bool RollbackInstalledFiles(const std::vector<SInstalledFile> &Installed, size_t InstalledCount, const std::wstring &OwnExecutable, const std::wstring &RenamedOwnExecutable)
+	bool RecoverJournal(const std::wstring &Target, const SInstallJournal &Journal, std::string &Error, std::wstring &RenamedOwnExecutable)
 	{
-		g_Logger.Warn("rolling back %llu installed file(s)", (unsigned long long)InstalledCount);
-		bool Complete = true;
-		for(size_t Index = InstalledCount; Index > 0; Index--)
+		const std::wstring Backup = JoinPath(Target, Journal.m_BackupName);
+		std::vector<std::wstring> Executables;
+		// Validate the entire untrusted record before stopping processes or changing a file.
+		for(const SJournalFile &File : Journal.m_Files)
 		{
-			const SInstalledFile &Record = Installed[Index - 1];
-			std::string PathError;
-			if(!CheckNoReparsePoints(Record.m_TargetPath, PathError) ||
-				(Record.m_HadBackup && !CheckNoReparsePoints(Record.m_BackupPath, PathError)))
+			const std::wstring Destination = JoinPath(Target, File.m_RelativePath);
+			const std::wstring Original = JoinPath(Backup, File.m_RelativePath);
+			const std::wstring Restore = JoinPath(JoinPath(Backup, L".tclient-update-rollback"), File.m_RelativePath);
+			if(!CheckNoReparsePoints(Destination, Error) || !CheckNoReparsePoints(Original, Error) || !CheckNoReparsePoints(Restore, Error) || DirectoryExists(Destination))
 			{
-				Complete = false;
-				g_Logger.Error("unsafe rollback path: %s", PathError.c_str());
-				continue;
-			}
-			ClearReadOnly(Record.m_TargetPath);
-			if(Record.m_HadBackup)
-			{
-				if(CopyFileW(LongPath(Record.m_BackupPath).c_str(), LongPath(Record.m_TargetPath).c_str(), FALSE))
-					g_Logger.Info("restored '%s'", Utf8FromWide(Record.m_TargetPath).c_str());
-				else
-				{
-					Complete = false;
-					g_Logger.Error("could not restore '%s': %s", Utf8FromWide(Record.m_TargetPath).c_str(), FormatLastError(GetLastError()).c_str());
-				}
-			}
-			else if(DeleteFileW(LongPath(Record.m_TargetPath).c_str()))
-			{
-				g_Logger.Info("removed newly created '%s'", Utf8FromWide(Record.m_TargetPath).c_str());
-			}
-			else
-			{
-				const DWORD LastError = GetLastError();
-				if(LastError != ERROR_FILE_NOT_FOUND && LastError != ERROR_PATH_NOT_FOUND)
-				{
-					Complete = false;
-					g_Logger.Error("could not remove '%s': %s", Utf8FromWide(Record.m_TargetPath).c_str(), FormatLastError(LastError).c_str());
-				}
-			}
-		}
-
-		// When the installed helper was used as the fallback helper, its mapped image was renamed
-		// before replacement. Restore it explicitly even if installation failed before reaching its
-		// archive entry. Copying is allowed while this process still executes the renamed image.
-		if(!RenamedOwnExecutable.empty())
-		{
-			std::string PathError;
-			if(!CheckNoReparsePoints(OwnExecutable, PathError) || !CheckNoReparsePoints(RenamedOwnExecutable, PathError))
-			{
-				g_Logger.Error("unsafe fallback helper rollback path: %s", PathError.c_str());
+				Error = "unsafe transaction recovery path: " + Error;
 				return false;
 			}
-			ClearReadOnly(OwnExecutable);
-			if(CopyFileW(LongPath(RenamedOwnExecutable).c_str(), LongPath(OwnExecutable).c_str(), FALSE))
-				g_Logger.Info("restored fallback helper '%s' from '%s'", Utf8FromWide(OwnExecutable).c_str(), Utf8FromWide(RenamedOwnExecutable).c_str());
+			if(Journal.m_Completed)
+				continue;
+			std::string Hash;
+			const bool Present = FileExists(Destination);
+			if(Present && (!HashRegularFile(Destination, Hash, Error) || (Hash != File.m_OldHash && Hash != File.m_NewHash)))
+			{
+				Error = "recovery refuses to overwrite/remove changed user file: " + Utf8FromWide(File.m_RelativePath);
+				return false;
+			}
+			if(File.m_OldHash != "-")
+			{
+				std::string OriginalHash, RestoreHash;
+				if(!HashRegularFile(Original, OriginalHash, Error) || OriginalHash != File.m_OldHash ||
+					(FileExists(Restore) ? (!HashRegularFile(Restore, RestoreHash, Error) || RestoreHash != File.m_OldHash) : (!Present || Hash != File.m_OldHash)))
+				{
+					Error = "missing or changed recovery backup: " + Utf8FromWide(File.m_RelativePath);
+					return false;
+				}
+			}
+			if(EndsWithNoCase(File.m_RelativePath, L".exe"))
+				Executables.push_back(Destination);
+		}
+		if(Journal.m_Completed)
+		{
+			g_Logger.Info("completed transaction journal: cleaning only, not rolling back");
+			return true;
+		}
+		if(!CloseTargetProcesses(Executables, Target, true))
+		{
+			Error = "could not stop target processes before transaction recovery";
+			return false;
+		}
+		g_Logger.Warn("recovering interrupted installation transaction before version check");
+		const std::wstring OwnExecutable = GetOwnExecutablePath();
+		for(auto It = Journal.m_Files.rbegin(); It != Journal.m_Files.rend(); ++It)
+		{
+			const SJournalFile &File = *It;
+			const std::wstring Destination = JoinPath(Target, File.m_RelativePath);
+			const std::wstring Restore = JoinPath(JoinPath(Backup, L".tclient-update-rollback"), File.m_RelativePath);
+			std::string Hash;
+			const bool Present = FileExists(Destination);
+			if(!CheckNoReparsePoints(Destination, Error) || !CheckNoReparsePoints(Restore, Error) ||
+				(Present && (!HashRegularFile(Destination, Hash, Error) || (Hash != File.m_OldHash && Hash != File.m_NewHash))))
+				return false;
+			if((File.m_OldHash == "-" && !Present) || (Present && Hash == File.m_OldHash))
+				continue;
+			// Windows cannot delete OR replace our mapped image. This also applies when
+			// the interrupted transaction created the helper and there is no old backup.
+			// Remember the actual renamed image for the following install and cleanup;
+			// GetModuleFileNameW may continue to report its original path after rename.
+			bool MovedMappedImage = false;
+			if(Present && RenamedOwnExecutable.empty() && SamePath(Destination, OwnExecutable))
+			{
+				const std::wstring Renamed = OwnExecutable + L".old_" + TimestampSuffix() + L"_" + std::to_wstring(GetCurrentProcessId());
+				if(!CheckNoReparsePoints(Renamed, Error) || !MoveFileExW(LongPath(OwnExecutable).c_str(), LongPath(Renamed).c_str(), MOVEFILE_WRITE_THROUGH))
+				{
+					Error = "could not move mapped helper before recovery";
+					return false;
+				}
+				RenamedOwnExecutable = Renamed;
+				MovedMappedImage = true;
+				g_Logger.Info("moved mapped helper before recovery to '%s'; cleanup deferred until it exits", Utf8FromWide(Renamed).c_str());
+			}
+			if(File.m_OldHash == "-")
+			{
+				// The hash guard is essential: a journal cannot authorize deleting arbitrary
+				// files created/modified by the user after the interrupted installation.
+				if(!MovedMappedImage)
+				{
+					ClearReadOnly(Destination);
+					if(!DeleteFileW(LongPath(Destination).c_str()))
+					{
+						Error = "could not remove transaction-created file: " + FormatLastError(GetLastError());
+						return false;
+					}
+				}
+			}
 			else
 			{
-				Complete = false;
-				g_Logger.Error("could not restore fallback helper '%s' from '%s': %s", Utf8FromWide(OwnExecutable).c_str(), Utf8FromWide(RenamedOwnExecutable).c_str(), FormatLastError(GetLastError()).c_str());
+				ClearReadOnly(Destination);
+				if(!MoveFileExW(LongPath(Restore).c_str(), LongPath(Destination).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+				{
+					Error = "could not restore transaction file: " + FormatLastError(GetLastError());
+					return false;
+				}
+				g_Logger.Info("restored '%s'%s", Utf8FromWide(Destination).c_str(), ToLowerWide(PathFilename(File.m_RelativePath)) == L"tclientupdater.exe" ? " (restored fallback helper)" : "");
 			}
+			TransactionFaultPoint(L"recovered-file");
 		}
-		return Complete;
+		TransactionFaultPoint(L"recovered-all");
+		return true;
 	}
 
 	int RestartAfterFailure(int FailureCode, const std::wstring &RestartPath, const std::wstring &TargetDir)
@@ -2317,7 +2602,7 @@ namespace
 
 	// The previous helper executable is renamed out of the way while the update runs, so it can
 	// only be deleted once that process is gone, i.e. on the next start.
-	void RemoveStaleSelfBackups(const std::wstring &Directory)
+	void RemoveStaleSelfBackups(const std::wstring &Directory, const std::wstring &RenamedOwnExecutable)
 	{
 		const std::wstring Pattern = JoinPath(Directory, L"TClientUpdater.exe.old_*");
 		WIN32_FIND_DATAW Data;
@@ -2327,6 +2612,10 @@ namespace
 		do
 		{
 			const std::wstring Path = JoinPath(Directory, Data.cFileName);
+			std::string PathError;
+			if((Data.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0 ||
+				SamePath(Path, RenamedOwnExecutable) || SamePath(Path, GetOwnExecutablePath()) || !CheckNoReparsePoints(Path, PathError))
+				continue;
 			if(DeleteFileW(LongPath(Path).c_str()))
 				g_Logger.Info("removed stale helper backup '%s'", Utf8FromWide(Data.cFileName).c_str());
 		} while(FindNextFileW(hFind, &Data));
@@ -2416,6 +2705,17 @@ namespace
 			g_Logger.Error("timed out after %lu ms waiting for process %lu to exit", (unsigned long)GetWaitTimeout(), Options.m_Pid);
 			return EXIT_PID_TIMEOUT;
 		}
+		SInstallJournal PendingJournal;
+		bool PendingExists = false;
+		std::wstring RenamedOwnExecutable;
+		if(!LoadJournal(TargetDir, PendingJournal, PendingExists, FileError) ||
+			(PendingExists && (!RecoverJournal(TargetDir, PendingJournal, FileError, RenamedOwnExecutable) || !RemoveJournal(TargetDir, FileError))))
+		{
+			g_Logger.Error("installation recovery refused/incomplete: %s; journal and backups retained, no client restarted", FileError.c_str());
+			return EXIT_RECOVERY_FAILED;
+		}
+		if(PendingExists)
+			g_Logger.Info("previous installation transaction recovered/cleaned");
 		auto FinishFailure = [&](int FailureCode) {
 			return RestartAfterFailure(FailureCode, RestartPath, TargetDir);
 		};
@@ -2575,7 +2875,29 @@ namespace
 
 		// 6. Back up the files that are about to be replaced. User data never gets here because
 		// such entries were skipped above.
-		const std::wstring BackupDir = JoinPath(TargetDir, L"update_backup_" + TimestampSuffix());
+		std::wstring BackupName = L"update_backup_" + TimestampSuffix();
+		std::wstring BackupDir = JoinPath(TargetDir, BackupName);
+		for(const SPlannedEntry &Entry : Planned)
+		{
+			if(!CheckNoReparsePoints(JoinPath(BackupDir, Entry.m_RelativePath), FileError))
+			{
+				g_Logger.Error("unsafe backup path: %s", FileError.c_str());
+				RemoveTree(StagingDir, FileError);
+				return FinishFailure(EXIT_FILE_SYSTEM);
+			}
+		}
+		// Never reuse/overwrite a prior backup, even for two attempts in one second.
+		if(DirectoryExists(BackupDir))
+		{
+			BackupName += L"_" + std::to_wstring(GetCurrentProcessId());
+			BackupDir = JoinPath(TargetDir, BackupName);
+		}
+		if(!CheckNoReparsePoints(BackupDir, FileError) || !CreateDirectoryW(LongPath(BackupDir).c_str(), nullptr))
+		{
+			g_Logger.Error("could not create fresh backup directory: %s", FileError.empty() ? FormatLastError(GetLastError()).c_str() : FileError.c_str());
+			RemoveTree(StagingDir, FileError);
+			return FinishFailure(EXIT_FILE_SYSTEM);
+		}
 		std::vector<SInstalledFile> Installed;
 		std::vector<SPlannedEntry> FileEntries;
 		bool BackupDirectoryCreated = false;
@@ -2631,29 +2953,75 @@ namespace
 			Installed.push_back(Record);
 		}
 
+		SInstallJournal Journal;
+		Journal.m_BackupName = BackupName;
+		if(!TargetIdentity(TargetDir, Journal.m_TargetIdentity, FileError))
+		{
+			g_Logger.Error("could not prepare transaction journal: %s", FileError.c_str());
+			RemoveTree(StagingDir, FileError);
+			return FinishFailure(EXIT_FILE_SYSTEM);
+		}
+		for(size_t Index = 0; Index < FileEntries.size(); Index++)
+		{
+			SJournalFile File;
+			File.m_RelativePath = FileEntries[Index].m_RelativePath;
+			File.m_OldHash = "-";
+			bool Ok = HashRegularFile(JoinPath(StagingDir, File.m_RelativePath), File.m_NewHash, FileError, true);
+			if(Ok && Installed[Index].m_HadBackup)
+			{
+				const std::wstring Restore = JoinPath(JoinPath(BackupDir, L".tclient-update-rollback"), File.m_RelativePath);
+				std::string RestoreHash;
+				// Keep the original backup for manual recovery; only this disposable copy is
+				// consumed by rollback. A crash during restore can never leave a half-copy.
+				ClearReadOnly(Installed[Index].m_BackupPath);
+				Ok = HashRegularFile(Installed[Index].m_BackupPath, File.m_OldHash, FileError, true) &&
+					EnsureDirectory(PathDirectory(Restore), FileError) && CheckNoReparsePoints(Restore, FileError) &&
+					CopyFileW(LongPath(Installed[Index].m_BackupPath).c_str(), LongPath(Restore).c_str(), TRUE) &&
+					HashRegularFile(Restore, RestoreHash, FileError, true) && RestoreHash == File.m_OldHash;
+			}
+			if(!Ok)
+			{
+				g_Logger.Error("could not prepare durable recovery files: %s", FileError.c_str());
+				RemoveTree(StagingDir, FileError);
+				return FinishFailure(EXIT_FILE_SYSTEM);
+			}
+			Journal.m_Files.push_back(File);
+		}
+		if(!SaveJournal(TargetDir, Journal, FileError))
+		{
+			g_Logger.Error("could not publish transaction journal: %s; no target files replaced", FileError.c_str());
+			RemoveTree(StagingDir, FileError);
+			return FinishFailure(EXIT_FILE_SYSTEM);
+		}
+		auto RollbackTransaction = [&]() {
+			const bool Ok = RecoverJournal(TargetDir, Journal, FileError, RenamedOwnExecutable) && RemoveJournal(TargetDir, FileError);
+			if(!Ok)
+				g_Logger.Error("transaction rollback incomplete: %s", FileError.c_str());
+			return Ok;
+		};
+
 		// 7. If the archive contains a new version of this helper, move the running executable
 		// out of the way first: Windows refuses to replace a mapped image in place.
 		const std::wstring OwnExecutable = GetOwnExecutablePath();
-		std::wstring RenamedOwnExecutable;
 		for(const SPlannedEntry &Entry : FileEntries)
 		{
 			const std::wstring Destination = JoinPath(TargetDir, Entry.m_RelativePath);
-			if(OwnExecutable.empty() || !SamePath(Destination, OwnExecutable))
+			if(OwnExecutable.empty() || !RenamedOwnExecutable.empty() || !SamePath(Destination, OwnExecutable))
 				continue;
-			RenamedOwnExecutable = OwnExecutable + L".old_" + TimestampSuffix();
+			RenamedOwnExecutable = OwnExecutable + L".old_" + TimestampSuffix() + L"_" + std::to_wstring(GetCurrentProcessId());
 			if(!CheckNoReparsePoints(OwnExecutable, FileError) || !CheckNoReparsePoints(RenamedOwnExecutable, FileError))
 			{
 				RenamedOwnExecutable.clear();
 				g_Logger.Error("unsafe helper replacement path: %s", FileError.c_str());
 				RemoveTree(StagingDir, FileError);
-				return FinishFailure(EXIT_FILE_SYSTEM);
+				return RollbackTransaction() ? FinishFailure(EXIT_FILE_SYSTEM) : EXIT_RECOVERY_FAILED;
 			}
-			if(!MoveFileExW(LongPath(OwnExecutable).c_str(), LongPath(RenamedOwnExecutable).c_str(), MOVEFILE_REPLACE_EXISTING))
+			if(!MoveFileExW(LongPath(OwnExecutable).c_str(), LongPath(RenamedOwnExecutable).c_str(), MOVEFILE_WRITE_THROUGH))
 			{
 				RenamedOwnExecutable.clear();
 				g_Logger.Error("could not move the running helper out of the way: %s", FormatLastError(GetLastError()).c_str());
 				RemoveTree(StagingDir, FileError);
-				return FinishFailure(EXIT_FILE_SYSTEM);
+				return RollbackTransaction() ? FinishFailure(EXIT_FILE_SYSTEM) : EXIT_RECOVERY_FAILED;
 			}
 			g_Logger.Info("moved the running helper to '%s'", Utf8FromWide(RenamedOwnExecutable).c_str());
 			break;
@@ -2683,7 +3051,7 @@ namespace
 				ClearReadOnly(Destination);
 				for(int Retry = 0; Retry < 10; Retry++)
 				{
-					if(MoveFileExW(LongPath(Source).c_str(), LongPath(Destination).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
+					if(MoveFileExW(LongPath(Source).c_str(), LongPath(Destination).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
 					{
 						Replaced = true;
 						break;
@@ -2703,10 +3071,11 @@ namespace
 			if(Replaced)
 			{
 				InstalledCount++;
+				TransactionFaultPoint(L"installed-" + std::to_wstring(InstalledCount));
 				continue;
 			}
 
-			const bool RollbackComplete = RollbackInstalledFiles(Installed, InstalledCount, OwnExecutable, RenamedOwnExecutable);
+			const bool RollbackComplete = RollbackTransaction();
 			RemoveTree(StagingDir, FileError);
 			Archive.Close();
 			if(RollbackComplete)
@@ -2725,7 +3094,7 @@ namespace
 		const std::wstring ReadyPath = LongPath(JoinPath(TargetDir, L".tclient-update-ready-" + ReadyToken + L".tmp"));
 		DeleteFileW(LongPath(ReadyPath).c_str());
 
-		PROCESS_INFORMATION RestartProcess;
+		PROCESS_INFORMATION RestartProcess = {};
 		std::string StartError;
 		bool Started = FileExists(RestartPath) && StartProcess(RestartPath, TargetDir, &ReadyPath, &ReadyToken, RestartProcess, StartError);
 		if(!Started)
@@ -2733,7 +3102,7 @@ namespace
 			if(!FileExists(RestartPath))
 				StartError = "restart executable is missing after the update: " + Utf8FromWide(RestartPath);
 			g_Logger.Error("startup health failed: %s", StartError.c_str());
-			const bool RollbackComplete = RollbackInstalledFiles(Installed, InstalledCount, OwnExecutable, RenamedOwnExecutable);
+			const bool RollbackComplete = RollbackTransaction();
 			Archive.Close();
 			DeleteFileW(LongPath(ReadyPath).c_str());
 			if(!RollbackComplete)
@@ -2780,7 +3149,7 @@ namespace
 				return EXIT_RECOVERY_FAILED;
 			}
 
-			const bool RollbackComplete = RollbackInstalledFiles(Installed, InstalledCount, OwnExecutable, RenamedOwnExecutable);
+			const bool RollbackComplete = RollbackTransaction();
 			Archive.Close();
 			DeleteFileW(LongPath(ReadyPath).c_str());
 			if(RollbackComplete)
@@ -2795,8 +3164,22 @@ namespace
 		// The SPlannedEntry records point into the archive mapping, so close it only after every
 		// installation and rollback decision is complete. Closing it explicitly is required before
 		// deleting the consumed package on Windows.
+		Journal.m_Completed = true;
+		if(!SaveJournal(TargetDir, Journal, FileError))
+		{
+			g_Logger.Error("could not commit completed transaction: %s; journal/backups/package retained", FileError.c_str());
+			Archive.Close();
+			return EXIT_RECOVERY_FAILED;
+		}
+		TransactionFaultPoint(L"completed");
+		if(!RemoveJournal(TargetDir, FileError))
+		{
+			g_Logger.Error("completed transaction cleanup deferred: %s", FileError.c_str());
+			Archive.Close();
+			return EXIT_RECOVERY_FAILED;
+		}
 		Archive.Close();
-		RemoveStaleSelfBackups(TargetDir);
+		RemoveStaleSelfBackups(TargetDir, RenamedOwnExecutable);
 		PruneOldBackups(TargetDir, 1);
 
 		if(DeleteFileW(LongPath(ZipPath).c_str()))

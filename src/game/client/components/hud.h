@@ -135,6 +135,7 @@ public:
 	// Called after island rendering, with its occupied rectangle in HUD units.
 	void RenderFrozenHud(const CUIRect &Island);
 	static float FrozenHudRowY(const CUIRect &Row, const CUIRect &Island, float ScreenHeight);
+	static CUIRect FrozenHudCapsulePlacement(CUIRect Capsule, const CUIRect &Island, float ScreenWidth, float ScreenHeight, float OffsetX, float OffsetY);
 
 	// DDRace
 

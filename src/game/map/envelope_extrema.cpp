@@ -45,6 +45,18 @@ void CEnvelopeExtrema::CalculateEnvelope(const CMapItemEnvelope *pEnvelopeItem, 
 		if(pEnvPoint->m_aValues[2] != 0)
 			EnvExt.m_Rotating = true;
 
+		// Zero angle endpoints can still rotate between Bezier control points.
+		// Only a segment inside this envelope with both handles is evaluated as Bezier.
+		if(PointId < pEnvelopeItem->m_StartPoint + pEnvelopeItem->m_NumPoints - 1 && pEnvPoint->m_Curvetype == CURVETYPE_BEZIER)
+		{
+			const CEnvPoint *pNextPoint = m_EnvelopePoints.GetPoint(PointId + 1);
+			const CEnvPointBezier *pOutBezier = m_EnvelopePoints.GetBezier(PointId);
+			const CEnvPointBezier *pInBezier = m_EnvelopePoints.GetBezier(PointId + 1);
+			if(pNextPoint && pNextPoint->m_Time > pEnvPoint->m_Time && pOutBezier && pInBezier &&
+				(pOutBezier->m_aOutTangentDeltaY[2] != 0 || pInBezier->m_aInTangentDeltaY[2] != 0))
+				EnvExt.m_Rotating = true;
+		}
+
 		for(int Channel = 0; Channel < 2; ++Channel)
 		{
 			EnvExt.m_Minima[Channel] = std::min(pEnvPoint->m_aValues[Channel], EnvExt.m_Minima[Channel]);

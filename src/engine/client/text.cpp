@@ -1951,21 +1951,18 @@ public:
 
 					// Check if we have any color split
 					ColorRGBA Color = m_Color;
-					if(ColorOption < (int)pCursor->m_vColorSplits.size())
+					while(ColorOption < (int)pCursor->m_vColorSplits.size())
 					{
-						STextColorSplit &Split = pCursor->m_vColorSplits.at(ColorOption);
-						if(PrevCharCount >= Split.m_CharIndex && (Split.m_Length == -1 || PrevCharCount < Split.m_CharIndex + Split.m_Length))
-							Color = Split.m_Color;
-						if(Split.m_Length != -1 && PrevCharCount >= (Split.m_CharIndex + Split.m_Length - 1))
+						const STextColorSplit &Split = pCursor->m_vColorSplits.at(ColorOption);
+						// m_CharCount is cumulative UTF-8 bytes, including previous Appends.
+						if(Split.m_Length != -1 && PrevCharCount >= Split.m_CharIndex + Split.m_Length)
 						{
-							ColorOption++;
-							if(ColorOption < (int)pCursor->m_vColorSplits.size())
-							{ // Handle splits that are
-								Split = pCursor->m_vColorSplits.at(ColorOption);
-								if(PrevCharCount >= Split.m_CharIndex)
-									Color = Split.m_Color;
-							}
+							++ColorOption;
+							continue;
 						}
+						if(PrevCharCount >= Split.m_CharIndex)
+							Color = Split.m_Color;
+						break;
 					}
 
 					// don't add text that isn't drawn, the color overwrite is used for that

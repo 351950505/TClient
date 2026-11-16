@@ -26,6 +26,8 @@ struct SLyricLine
 	// empty -> whole line turns green at m_StartMs (classic LRC).
 	// non-empty -> netease karaoke: each char lights up at its own time.
 	std::vector<SWord> m_vWords;
+	std::string m_Translation;
+	bool m_IsSimplifiedChinese = false;
 };
 
 // 标准 LRC：[mm:ss.xx] 文本（多时间戳/去重/逐字时间合成）。
@@ -33,6 +35,12 @@ bool ParseSyncedLyrics(const char *pSyncedLyrics, std::vector<SLyricLine> &vOut)
 
 // 网易 yrc：[start,duration](segStart,dur,0)文本(...) 逐字格式。
 bool ParseYrcLyrics(const char *pYrc, std::vector<SLyricLine> &vOut);
+
+// Sorted original cues: merge timestamp groups once, choose the nearest <=250ms
+// cue (reject equal-distance ambiguity), and preserve already attached translations.
+// Provider Chinese may mix Latin words; this does not change original-language detection.
+void AttachTranslatedLyrics(std::vector<SLyricLine> &vLines, const char *pTranslatedLyrics);
+bool IsSimplifiedChinese(const std::string &Text);
 
 } // namespace TcLyric
 

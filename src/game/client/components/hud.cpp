@@ -744,6 +744,34 @@ float CHud::FrozenHudRowY(const CUIRect &Row, const CUIRect &Island, float Scree
 	return std::clamp(Below, 0.0f, MaxY);
 }
 
+CUIRect CHud::FrozenHudCapsulePlacement(CUIRect Capsule, const CUIRect &Island, float ScreenWidth, float ScreenHeight, float OffsetX, float OffsetY)
+{
+	if(Capsule.w <= 0.0f || Capsule.h <= 0.0f)
+		return {};
+	const bool HasIsland = Island.w > 0.0f && Island.h > 0.0f;
+	if(HasIsland)
+	{
+		Capsule.x = Island.x + Island.w + 2.0f;
+		Capsule.y = Island.y;
+	}
+	Capsule.x += OffsetX;
+	Capsule.y += OffsetY;
+	Capsule.x = std::clamp(Capsule.x, 8.0f, std::max(8.0f, ScreenWidth - 8.0f));
+	if(HasIsland)
+	{
+		const float AvailableWidth = std::max(0.0f, ScreenWidth - 8.0f - Capsule.x);
+		const float Fit = std::min(1.0f, AvailableWidth / Capsule.w);
+		if(Fit <= 0.0f)
+			return {};
+		Capsule.w *= Fit;
+		Capsule.h *= Fit;
+	}
+	else
+		Capsule.x = std::clamp(Capsule.x, 8.0f, std::max(8.0f, ScreenWidth - 8.0f - Capsule.w));
+	Capsule.y = std::clamp(Capsule.y, 0.0f, std::max(0.0f, ScreenHeight - 8.0f - Capsule.h));
+	return Capsule;
+}
+
 void CHud::RenderFrozenHud(const CUIRect &Island)
 {
 	if(!m_FrozenHudPending)
@@ -839,23 +867,21 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 		const float CapsuleH = 2.0f * Pad + ContentH;
 		// The first tee anchor stays at StartPos; the capsule wraps text and tees.
 		CUIRect Capsule = {StartPos - TeeSize / 2.0f - Pad - (ShowFrozenText ? CountW + TeeGap : 0.0f), 0.0f, CapsuleW, CapsuleH};
-		// Default placement touches the top edge to the island's right. If that
-		// space is too narrow, keep the existing island-avoidance fallback.
-		if(g_Config.m_TcFrozenTeesInlineIsland && Island.w > 0 && Island.h > 0 &&
-			Island.x + Island.w + 2.0f + Capsule.w <= m_Width - 8.0f)
+		const CUIRect PlacedCapsule = FrozenHudCapsulePlacement(Capsule, Island, m_Width, m_Height, OffsetX, OffsetY);
+		const float CapsuleScale = PlacedCapsule.w / Capsule.w;
+		if(CapsuleScale <= 0.0f)
 		{
-			Capsule.x = Island.x + Island.w + 2.0f;
-			Capsule.y = 0.0f;
+			TextRender()->TextColor(OldTextColor);
+			TextRender()->TextOutlineColor(OldTextOutlineColor);
+			TextRender()->SetRenderFlags(OldTextFlags);
+			Graphics()->MapScreen(OldScreen);
+			return;
 		}
-		else
-		{
-			// Explicit offsets still win over automatic island avoidance.
-			Capsule.y = FrozenHudRowY(Capsule, Island, m_Height);
-		}
-		Capsule.x += OffsetX;
-		Capsule.y += OffsetY;
-		Capsule.x = std::clamp(Capsule.x, 8.0f, std::max(8.0f, m_Width - 8.0f - Capsule.w));
-		Capsule.y = std::clamp(Capsule.y, 0.0f, std::max(0.0f, m_Height - 8.0f - Capsule.h));
+		// Fit the entire capsule uniformly without changing glyph metrics or
+		// moving the anchor left into the island when its right side is narrow.
+		Capsule.x = PlacedCapsule.x / CapsuleScale;
+		Capsule.y = PlacedCapsule.y / CapsuleScale;
+		Graphics()->MapScreenToSize(m_Width / CapsuleScale, m_Height / CapsuleScale);
 
 		CUIRect TeeRow = {Capsule.x + Pad + (ShowFrozenText ? CountW + TeeGap : 0.0f), Capsule.y + Pad, ContentW, ContentH};
 

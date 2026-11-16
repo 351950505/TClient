@@ -36,7 +36,7 @@ const sender = between(source, 'int CClient::SendMsg(int Conn', 'int CClient::Se
 assert(sender.indexOf('OnChatSent(') > sender.indexOf('if(!(Flags & MSGFLAG_NOSEND))'));
 assert(sender.includes('Unpacker.Reset(Pack.Data(), Pack.Size())') && sender.includes('protocol7::NETMSGTYPE_CL_SAY'));
 const config = read('src/engine/shared/config_variables_tclient.h');
-assert.match(config, /MACRO_CONFIG_INT\(TcFrozenTeesShowAll, tc_frozen_tees_showall, 1, 0, 1, CFGFLAG_CLIENT \| CFGFLAG_SAVE,/);
+assert.match(config, /MACRO_CONFIG_INT\(TcFrozenTeesShowAll, tc_frozen_tees_showall, 0, 0, 1, CFGFLAG_CLIENT \| CFGFLAG_SAVE,/);
 const menu = read('src/game/client/components/tclient/menus_tclient.cpp');
 const label = 'Request full-distance tee status (native /showall)';
 const explanation = 'With tee icons or text enabled, requests /showall 1 once per connection on DDRace. Requires native /showall server support and may increase traffic. Other visibility limits still apply; not a confirmation. Disabling does not send /showall 0.';
@@ -78,7 +78,7 @@ constexpr int CONN_MAIN=0, CONN_DUMMY=1, NUM_DUMMIES=2, MSGFLAG_VITAL=1, NETSTAT
 static int64_t Now=0; int64_t time_get() { return Now; } int64_t time_freq() { return 1000; }
 struct IClient { enum { STATE_OFFLINE=0, STATE_ONLINE=3, STATE_DEMOPLAYBACK=4 }; };
 struct CNetClient { int m_State=NETSTATE_ONLINE; int State() const { return m_State; } };
-struct Config { int m_TcFrozenTeesShowAll=1, m_TcShowFrozenHud=1, m_TcShowFrozenText=0;
+struct Config { int m_TcFrozenTeesShowAll=0, m_TcShowFrozenHud=1, m_TcShowFrozenText=0;
  int m_ClDummyDefaultEyes=0, m_ClPlayerDefaultEyes=0, m_ClEyeDuration=5; char m_ClRunOnJoin[100]=""; } g_Config;
 const char *str_find_nocase(const char *pHaystack, const char *pNeedle) {
  std::string H(pHaystack), N(pNeedle);
@@ -122,8 +122,15 @@ ${postConnect}
 ${send}
 ${update}
 void Check(bool Value, const char *pMessage) { if(!Value) { std::fprintf(stderr,"FAIL: %s\\n",pMessage); std::exit(1); } }
-void ResetConfig() { g_Config = Config(); }
+void ResetConfig() { g_Config = Config(); g_Config.m_TcFrozenTeesShowAll=1; } // Remaining cases explicitly opt in.
 int main() {
+ for(bool Sixup : {false,true}) {
+  g_Config=Config(); CClient Client; Client.m_Sixup=Sixup; Client.m_ServerCapabilities.m_ChatTimeoutCode=false; CSnapshot DDRace;
+  Now=0; Client.OnPostConnect(0); Client.OnPostConnect(1);
+  for(int Tick=0;Tick<30;++Tick){Now=Tick*1000;Client.UpdateFrozenTeesShowAll(0,&DDRace);Client.UpdateFrozenTeesShowAll(1,&DDRace);}
+  Check(Client.m_vAttempts.empty(),"default disabled must not request showall on either connection");
+ }
+ std::puts("PASS default disabled: native 0.6/0.7 and both connections send no showall");
  // Exact CGameClient applicability precedence, including truncated old objects.
  Check(TcFrozenTeesEntitiesDDRace(12,2,GAMEINFOFLAG_ENTITIES_DDRACE,false),"explicit positive entity flags");
  Check(!TcFrozenTeesEntitiesDDRace(12,2,GAMEINFOFLAG_GAMETYPE_DDRACE,true),"explicit negative entity flags override fallback");

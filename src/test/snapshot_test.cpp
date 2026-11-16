@@ -1,10 +1,28 @@
 #include <base/mem.h>
 
 #include <engine/shared/snapshot.h>
+#include <engine/client/snapshot_delta_tick.h>
+
+#include <limits>
 
 #include <generated/protocol.h>
 
 #include <gtest/gtest.h>
+
+TEST(Snapshot, DeltaTickRejectsInvalidDistanceWithoutOverflow)
+{
+	int Tick = 123;
+	EXPECT_FALSE(DecodeSnapshotDeltaTick(std::numeric_limits<int>::max(), -1, Tick));
+	EXPECT_FALSE(DecodeSnapshotDeltaTick(-1, 0, Tick));
+	EXPECT_FALSE(DecodeSnapshotDeltaTick(0, std::numeric_limits<int>::max(), Tick));
+	EXPECT_EQ(Tick, 123);
+	ASSERT_TRUE(DecodeSnapshotDeltaTick(10, 11, Tick));
+	EXPECT_EQ(Tick, -1);
+	ASSERT_TRUE(DecodeSnapshotDeltaTick(10, 4, Tick));
+	EXPECT_EQ(Tick, 6);
+	ASSERT_TRUE(DecodeSnapshotDeltaTick(std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), Tick));
+	EXPECT_EQ(Tick, 0);
+}
 
 TEST(Snapshot, CrcOneInt)
 {

@@ -2,6 +2,7 @@
 #define ENGINE_CLIENT_AUTO_SESSION_LOG_H
 
 #include <base/io.h>
+#include <base/fs.h>
 #include <base/str.h>
 
 namespace TClientAutoSessionLog
@@ -78,6 +79,19 @@ namespace TClientAutoSessionLog
 				return {File, EOpenLocation::STORAGE};
 		}
 		return {};
+	}
+
+	inline IOHANDLE OpenFileInDirectory(const char *pDirectory, const char *pFilename)
+	{
+		if(!pDirectory || !pDirectory[0] || !IsFilename(pFilename))
+			return nullptr;
+		if(fs_makedir_rec_for(pDirectory) != 0 || fs_makedir(pDirectory) != 0)
+			return nullptr;
+		char aPath[IO_MAX_PATH_LENGTH];
+		const int Length = str_format(aPath, sizeof(aPath), "%s/%s", pDirectory, pFilename);
+		if(Length < 0 || Length >= (int)sizeof(aPath) - 1)
+			return nullptr;
+		return io_open(aPath, IOFLAG_WRITE);
 	}
 
 	inline SOpenResult OpenFile(const char *pInstallPath, const char *pStoragePath, int Flags)

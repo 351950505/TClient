@@ -1032,6 +1032,9 @@ Notch style (attach to top edge)
 Show synced lyrics
 == 显示同步歌词
 
+Two-line lyrics (current + next)
+== 双行歌词（当前句＋下一句）
+
 Show game clock
 == 显示对局时间
 
@@ -1305,6 +1308,9 @@ Current version: %s
 
 Check now
 == 立即检查
+
+Get update
+== 获取更新
 
 Download
 == 下载

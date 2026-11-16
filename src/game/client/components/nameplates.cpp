@@ -393,13 +393,12 @@ protected:
 			const int Stagger = Data.m_ClientId > 0 ? Data.m_ClientId % 64 : 0;
 			m_LastPhaseBucket = (CTClientGradient::PhaseBucket(Phase) + Stagger) % 64;
 			Cursor.m_vColorSplits = CTClientGradient::BuildAnimatedTextSplits(m_aText, Data.m_ClientId, &This, Phase);
-			const unsigned OldFlags = This.TextRender()->GetRenderFlags();
-			This.TextRender()->SetRenderFlags(OldFlags | TEXT_RENDER_FLAG_ONE_TIME_USE);
+			// Phase-bucket caching reuses this container across frames. ONE_TIME_USE
+			// would let Vulkan overwrite its streamed vertices before the next update.
 			if(m_TextContainerIndex.Valid())
 				This.TextRender()->RecreateTextContainerSoft(m_TextContainerIndex, &Cursor, m_aText);
 			else
 				This.TextRender()->CreateOrAppendTextContainer(m_TextContainerIndex, &Cursor, m_aText);
-			This.TextRender()->SetRenderFlags(OldFlags);
 		}
 		else
 		{
@@ -473,13 +472,12 @@ protected:
 			const int Stagger = Data.m_ClientId > 0 ? Data.m_ClientId % 64 : 0;
 			m_LastPhaseBucket = (CTClientGradient::PhaseBucket(Phase) + Stagger) % 64;
 			Cursor.m_vColorSplits = CTClientGradient::BuildAnimatedTextSplits(m_aText, Data.m_ClientId, &This, Phase);
-			const unsigned OldFlags = This.TextRender()->GetRenderFlags();
-			This.TextRender()->SetRenderFlags(OldFlags | TEXT_RENDER_FLAG_ONE_TIME_USE);
+			// Phase-bucket caching reuses this container across frames. ONE_TIME_USE
+			// would let Vulkan overwrite its streamed vertices before the next update.
 			if(m_TextContainerIndex.Valid())
 				This.TextRender()->RecreateTextContainerSoft(m_TextContainerIndex, &Cursor, m_aText);
 			else
 				This.TextRender()->CreateOrAppendTextContainer(m_TextContainerIndex, &Cursor, m_aText);
-			This.TextRender()->SetRenderFlags(OldFlags);
 		}
 		else
 		{

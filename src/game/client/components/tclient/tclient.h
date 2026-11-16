@@ -14,10 +14,10 @@
 class CTClient : public CComponent
 {
 public:
-	// Client-side auto-update (independent release version, see TCLIENT_APP_VERSION).
+	// Client-side manual update (independent release version, see TCLIENT_APP_VERSION).
 	// Flow: Idle -> Checking -> (UpToDate | Available -> Downloading -> Downloaded) | Failed.
-	// Nothing is downloaded or installed without an explicit user click, and the
-	// client never quits on its own.
+	// Checking, downloading and installing each require an explicit user action.
+	// Startup/connection/timers never check; ordinary quit never installs.
 	enum class EUpdateState
 	{
 		IDLE,
@@ -77,12 +77,10 @@ private:
 
 	bool ServerCommandExists(const char *pCommand);
 
-	// ----- Client-side auto-update internals -----
+	// ----- Client-side manual update internals -----
 	EUpdateState m_UpdateState = EUpdateState::IDLE;
 	SUpdateRelease m_UpdateRelease;
 	char m_aUpdateStatus[256] = "";
-	int64_t m_LastUpdateCheck = 0; // unix timestamp of the last automatic check
-	bool m_UpdateCheckDone = false;
 
 	std::shared_ptr<IHttpRequest> m_pUpdateManifestTask = nullptr;
 	std::shared_ptr<IHttpRequest> m_pUpdateDownloadTask = nullptr;
@@ -104,7 +102,6 @@ private:
 	void RetryUpdateDownload(bool Helper, const char *pReason);
 	void FinishUpdateBootstrap();
 	void ResetUpdateTasks();
-	bool UpdateShouldAutoCheck() const;
 	bool VerifyUpdateManifestSignature(const unsigned char *pManifest, size_t ManifestSize, const unsigned char *pSignature, size_t SignatureSize);
 
 	// 签名链：清单 Ed25519 验签（公钥内嵌）+ 自举（从已验证包里提取新 helper 运行）
@@ -153,7 +150,7 @@ public:
 	void ResetTClientInfoTask();
 	bool NeedUpdate();
 
-	// ----- Client-side auto-update (v1.4) -----
+	// ----- Client-side manual update (v1.4) -----
 	// These are called from the menu UI and from the console command.
 	void UpdateCheck(bool Force);
 	void UpdateStartDownload();

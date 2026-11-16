@@ -45,7 +45,7 @@
 
 static constexpr const char *TCLIENT_INFO_URL = "https://update.tclient.app/info.json";
 
-// ---- v1.4 客户端自动更新 ----------------------------------------------------
+// ---- v1.4 客户端手动更新 ----------------------------------------------------
 // 只认自有仓库的 GitHub Releases：https://github.com/351950505/TClient
 // 更新资产契约（发布脚本 tclient_scripts/make_release_assets.py 生成）：
 //   TClient-update-win64.json  清单（product/channel/version/platform/asset/size/sha256）
@@ -112,9 +112,6 @@ static constexpr const char *TCLIENT_UPDATE_MANIFEST_SIG_ASSET = "TClient-update
 static constexpr const char *TCLIENT_UPDATE_HELPER_ASSET = "TClientUpdater.exe";
 static constexpr const char *TCLIENT_UPDATE_BOOTSTRAP_PATH = "update/TClientUpdater.boot.exe";
 static constexpr const char *TCLIENT_UPDATE_ZIP_PATH = "update/TClient-update-win64.zip";
-// 自动检查节奏：启动后先等 12 秒（别和首帧/地图加载抢带宽），之后每 6 小时最多一次。
-static constexpr float TCLIENT_UPDATE_FIRST_CHECK_DELAY = 12.0f;
-static constexpr int64_t TCLIENT_UPDATE_CHECK_INTERVAL = 6 * 60 * 60;
 
 // 严格三段版本号：任何一段不是纯数字就视为无效（不用 atoi 的宽松解析）。
 // 版本号：任意段数（1.7.8 / 1.7.8.1 / 1.7.8.1.2 都合法），
@@ -195,6 +192,13 @@ static int64_t JsonGetInt(const json_value &Value, int64_t Default)
 	if(Value.type == json_double)
 		return (int64_t)Value.u.dbl;
 	return Default;
+}
+
+// Signed download sizes must be exact positive int64 values. The JSON parser
+// represents overflowing integers as doubles; never cast those into a budget.
+static int64_t JsonGetUpdateSize(const json_value &Value)
+{
+	return Value.type == json_integer && Value.u.integer > 0 ? (int64_t)Value.u.integer : -1;
 }
 
 static bool IsHexSha256(const char *pStr)
@@ -299,7 +303,7 @@ void CTClient::OnInit()
 	TextRender()->SetCustomFace(g_Config.m_TcCustomFont);
 	m_pGraphics = Kernel()->RequestInterface<IEngineGraphics>();
 	QueueForcedAspectUpdate();
-	FetchTClientInfo();
+	// 版本信息只由玩家的检查更新按钮请求，启动时不拉取。
 
 	char aError[512] = "";
 	if(!Storage()->FileExists("tclient/gui_logo.png", IStorage::TYPE_ALL))
@@ -783,17 +787,9 @@ void CTClient::OnRender()
 
 	DoFinishCheck();
 
-	// 更新器状态机推进 + 启动后延迟一次自动检查。检查只查版本，
-	// 不下载、不安装、不退出——用户点了按钮才会继续。
+	// 只推进玩家主动发起的检查/下载；启动、定时和连接状态不触发更新请求。
+	// 下载完成停在 DOWNLOADED，只有安装按钮能启动 helper 并退出。
 	PollUpdateTasks();
-	if(m_UpdateState == EUpdateState::IDLE && UpdateShouldAutoCheck())
-	{
-		static float s_FirstRenderTime = -1.0f;
-		if(s_FirstRenderTime < 0.0f)
-			s_FirstRenderTime = Client()->LocalTime();
-		if(Client()->LocalTime() - s_FirstRenderTime >= TCLIENT_UPDATE_FIRST_CHECK_DELAY)
-			UpdateCheck(false);
-	}
 
 	RenderPlayerMiddleMenu();
 }
@@ -993,7 +989,7 @@ void CTClient::FinishTClientInfo()
 	json_value_free(pJson);
 }
 
-// ---- v1.4 客户端自动更新实现 ------------------------------------------------
+// ---- v1.4 客户端手动更新实现 ------------------------------------------------
 
 void CTClient::SetUpdateStatus(const char *pStatus)
 {
@@ -1059,20 +1055,12 @@ bool CTClient::VerifyUpdateManifestSignature(const unsigned char *pManifest, siz
 	return ed25519_verify(pSignature, pManifest, ManifestSize, s_aUpdateEd25519PublicKey) == 1;
 }
 
-bool CTClient::UpdateShouldAutoCheck() const
-{
-	if(m_UpdateState == EUpdateState::CHECKING || m_UpdateState == EUpdateState::DOWNLOADING || m_UpdateState == EUpdateState::DOWNLOADED)
-		return false;
-	if(m_UpdateState == EUpdateState::AVAILABLE)
-		return false;
-	const int64_t Now = time_timestamp();
-	if(m_LastUpdateCheck == 0)
-		return true;
-	return Now - m_LastUpdateCheck >= TCLIENT_UPDATE_CHECK_INTERVAL;
-}
-
 void CTClient::UpdateCheck(bool Force)
 {
+	// 仅允许显式检查（菜单按钮或玩家主动执行的控制台命令）。
+	// 旧自动调用即便残留，也不得请求最新清单。
+	if(!Force)
+		return;
 	if(m_UpdateState == EUpdateState::CHECKING || m_UpdateState == EUpdateState::DOWNLOADING)
 		return;
 	ResetUpdateTasks();
@@ -1087,7 +1075,6 @@ void CTClient::UpdateCheck(bool Force)
 	m_UpdateFoundCurrentRelease = false;
 	m_UpdateDownloadSource = 0;
 	m_UpdateDownloadAttempt = 0;
-	m_LastUpdateCheck = time_timestamp();
 	m_UpdateState = EUpdateState::CHECKING;
 	SetUpdateStatus(TCLocalize("Checking for updates..."));
 	log_info("tclient-update", "checking for update (force=%d, current=%s)", Force ? 1 : 0, TCLIENT_APP_VERSION);
@@ -1165,10 +1152,10 @@ void CTClient::FinishUpdateManifest(std::shared_ptr<IHttpRequest> pSigTask, std:
 	const char *pPlatform = JsonStr(JsonObj(*pJson, "platform"));
 	const char *pAsset = JsonStr(JsonObj(*pJson, "asset"));
 	const char *pSha256 = JsonStr(JsonObj(*pJson, "sha256"));
-	const int64_t Size = JsonGetInt(JsonObj(*pJson, "size"), -1);
+	const int64_t Size = JsonGetUpdateSize(JsonObj(*pJson, "size"));
 	const json_value &Helper = JsonObj(*pJson, "helper");
 	const char *pHelperSha = JsonStr(JsonObj(Helper, "sha256"));
-	const int64_t HelperSize = JsonGetInt(JsonObj(Helper, "size"), -1);
+	const int64_t HelperSize = JsonGetUpdateSize(JsonObj(Helper, "size"));
 	int aVersion[APP_VERSION_MAX_SEGMENTS];
 	const char *pError = nullptr;
 	if(!pProduct || str_comp(pProduct, TCLIENT_UPDATE_PRODUCT) != 0)
@@ -1494,6 +1481,7 @@ void CTClient::StartDownloadTask()
 	m_pUpdateDownloadTask = HttpGetFile(m_UpdateRelease.m_aZipUrl, Storage(), TCLIENT_UPDATE_ZIP_PATH, IStorage::TYPE_SAVE);
 	m_pUpdateDownloadTask->Timeout(CTimeout{20000, 0, 800, 60});
 	m_pUpdateDownloadTask->IpResolve(IPRESOLVE::V4);
+	m_pUpdateDownloadTask->MaxResponseSize(m_UpdateRelease.m_Size);
 	m_pUpdateDownloadTask->FailOnErrorStatus(true);
 	if(UpdateSourceIsApi(TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource]))
 		m_pUpdateDownloadTask->HeaderString("Accept", "application/octet-stream");
@@ -1560,6 +1548,7 @@ void CTClient::StartUpdateHelperTask()
 	m_pUpdateHelperTask = HttpGetFile(m_aUpdateHelperUrl, Storage(), TCLIENT_UPDATE_BOOTSTRAP_PATH, IStorage::TYPE_SAVE);
 	m_pUpdateHelperTask->Timeout(CTimeout{20000, 0, 800, 60});
 	m_pUpdateHelperTask->IpResolve(IPRESOLVE::V4);
+	m_pUpdateHelperTask->MaxResponseSize(m_UpdateRelease.m_HelperSize);
 	m_pUpdateHelperTask->FailOnErrorStatus(true);
 	if(UpdateSourceIsApi(TCLIENT_UPDATE_SOURCE_SIBLING_BASES[m_UpdateDownloadSource]))
 		m_pUpdateHelperTask->HeaderString("Accept", "application/octet-stream");

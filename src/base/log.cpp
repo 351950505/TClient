@@ -260,6 +260,11 @@ class CLoggerAsync : public ILogger
 	static constexpr unsigned MAX_QUEUED_BYTES = 1024 * 1024;
 	// Space reserved for the truncation/dropped-messages notices.
 	static constexpr unsigned NOTICE_RESERVE = 192;
+#if defined(CONF_FAMILY_WINDOWS)
+	static constexpr unsigned NEWLINE_BYTES = 2;
+#else
+	static constexpr unsigned NEWLINE_BYTES = 1;
+#endif
 
 	ASYNCIO *m_pAio;
 	bool m_AnsiTruecolor;
@@ -268,15 +273,23 @@ class CLoggerAsync : public ILogger
 	uint64_t m_BytesSubmitted;
 	unsigned m_DroppedMessages;
 	bool m_TruncationReported;
+	bool m_Finished = false; // Protected by the async queue lock.
 	const bool m_IsAutoSessionLog;
 	std::string m_RemoveOnCleanExit;
 
-	void WriteNotice(const char *pNotice)
+	bool WriteNotice(const char *pNotice, uint64_t ReserveBytes = 0)
 	{
 		const unsigned Length = str_length(pNotice);
+		const uint64_t Needed = (uint64_t)Length + NEWLINE_BYTES + ReserveBytes;
+		if(m_MaxBytes != 0 && (m_BytesSubmitted > m_MaxBytes || Needed > m_MaxBytes - m_BytesSubmitted))
+			return false;
+		const unsigned Pending = aio_pending_bytes(m_pAio);
+		if(Pending >= MAX_QUEUED_BYTES || Needed >= MAX_QUEUED_BYTES - Pending)
+			return false;
 		aio_write_unlocked(m_pAio, pNotice, Length);
 		aio_write_newline_unlocked(m_pAio);
-		m_BytesSubmitted += Length + 1;
+		m_BytesSubmitted += Length + NEWLINE_BYTES;
+		return true;
 	}
 
 public:
@@ -333,11 +346,11 @@ public:
 		}
 		const bool Ansi = m_AnsiTruecolor && pMessage->m_HaveColor;
 		// Upper bound of one complete record including ANSI prefix, reset and newline.
-		const uint64_t Needed = (uint64_t)LineLength + (Ansi ? 32 + 4 : 0) + 1;
+		const uint64_t Needed = (uint64_t)LineLength + (Ansi ? 32 + 4 : 0) + NEWLINE_BYTES;
 
 		aio_lock(m_pAio);
 
-		if(m_TruncationReported)
+		if(m_TruncationReported || m_Finished)
 		{
 			aio_unlock(m_pAio);
 			return;
@@ -346,14 +359,13 @@ public:
 		// Stop appending once the configured file size is reached. The check
 		// happens before writing, so the file cannot grow past the limit by a
 		// whole record.
-		if(m_MaxBytes != 0 && m_BytesSubmitted + Needed + NOTICE_RESERVE > m_MaxBytes)
+		if(m_MaxBytes != 0 && (m_BytesSubmitted > m_MaxBytes || Needed + NOTICE_RESERVE > m_MaxBytes - m_BytesSubmitted))
 		{
 			char aNotice[NOTICE_RESERVE];
 			str_format(aNotice, sizeof(aNotice),
 				"log file reached its %llu MiB size limit; further output is suppressed",
 				(unsigned long long)(m_MaxBytes / (1024 * 1024)));
-			if(aio_pending_bytes(m_pAio) + str_length(aNotice) + 1 < MAX_QUEUED_BYTES)
-				WriteNotice(aNotice);
+			WriteNotice(aNotice);
 			m_TruncationReported = true;
 			aio_unlock(m_pAio);
 			return;
@@ -372,11 +384,8 @@ public:
 			str_format(aNotice, sizeof(aNotice),
 				"%u log messages were dropped because the log file could not keep up",
 				m_DroppedMessages);
-			if(aio_pending_bytes(m_pAio) + str_length(aNotice) + 1 < MAX_QUEUED_BYTES)
-			{
-				WriteNotice(aNotice);
+			if(WriteNotice(aNotice, Needed))
 				m_DroppedMessages = 0;
-			}
 		}
 
 		if(Ansi)
@@ -400,28 +409,35 @@ public:
 			m_BytesSubmitted += str_length(aResetColor);
 		}
 		aio_write_newline_unlocked(m_pAio);
-		m_BytesSubmitted += 1;
+		m_BytesSubmitted += NEWLINE_BYTES;
 		aio_unlock(m_pAio);
 	}
 	~CLoggerAsync() override
 	{
 		if(!m_pAio)
 			return;
-		if(m_Close)
+		if(!m_Finished)
 		{
-			aio_close(m_pAio);
+			if(m_Close)
+				aio_close(m_pAio);
+			aio_wait(m_pAio);
 		}
-		aio_wait(m_pAio);
 		aio_free(m_pAio);
 	}
 	void GlobalFinish() override
 	{
 		if(!m_pAio)
 			return;
-		if(m_Close)
+		aio_lock(m_pAio);
+		if(m_Finished)
 		{
-			aio_close(m_pAio);
+			aio_unlock(m_pAio);
+			return;
 		}
+		m_Finished = true;
+		aio_unlock(m_pAio);
+		if(m_Close)
+			aio_close(m_pAio);
 		aio_wait(m_pAio);
 		// TClient: the global logger chain is intentionally leaked, so this —
 		// not the destructor — is what runs on a normal exit (via atexit).

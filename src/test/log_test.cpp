@@ -78,6 +78,36 @@ namespace
 	};
 }
 
+TEST(FutureLogger, StartupFailureBindingWritesPendingDiagnostics)
+{
+	CTestInfo Info;
+	char aFilename[IO_MAX_PATH_LENGTH];
+	Info.Filename(aFilename, sizeof(aFilename), "-startup-failure.log");
+	CFutureLogger Future;
+	CLogMessage Message = {};
+	Message.m_Level = LEVEL_ERROR;
+	str_copy(Message.m_aLine, "startup failed before configuration loaded");
+	Message.m_LineLength = str_length(Message.m_aLine);
+	Future.Log(&Message);
+	IOHANDLE File = io_open(aFilename, IOFLAG_WRITE);
+	ASSERT_TRUE(File);
+	Future.Set(log_logger_file_limited(File, 1024));
+	Future.GlobalFinish();
+	Future.GlobalFinish(); // Repeated finish and later destruction must not wait twice.
+	str_copy(Message.m_aLine, "late output must be ignored");
+	Message.m_LineLength = str_length(Message.m_aLine);
+	Future.Log(&Message);
+	IOHANDLE Output = io_open(aFilename, IOFLAG_READ);
+	ASSERT_TRUE(Output);
+	char *pText = io_read_all_str(Output);
+	io_close(Output);
+	ASSERT_TRUE(pText);
+	EXPECT_NE(str_find(pText, "startup failed before configuration loaded"), nullptr);
+	EXPECT_EQ(str_find(pText, "late output must be ignored"), nullptr);
+	free(pText);
+	EXPECT_FALSE(fs_remove(aFilename));
+}
+
 TEST(FutureLogger, ConcurrentPublicationDeliversEachMessageOnce)
 {
 	CFutureLogger Future;
@@ -113,6 +143,52 @@ TEST(FutureLogger, ConcurrentPublicationDeliversEachMessageOnce)
 	EXPECT_EQ(pLogger->m_Invalid.load(), 0);
 	Future.GlobalFinish();
 	EXPECT_TRUE(pLogger->m_Finished.load());
+}
+
+TEST(LoggerAsync, LimitedFileCountsActualNewlines)
+{
+	CTestInfo Info;
+	char aFilename[IO_MAX_PATH_LENGTH];
+	Info.Filename(aFilename, sizeof(aFilename), "-newline-budget.log");
+	IOHANDLE File = io_open(aFilename, IOFLAG_WRITE);
+	ASSERT_TRUE(File);
+	static constexpr uint64_t LIMIT = 64 * 1024;
+	CLogMessage Message = {};
+	Message.m_Level = LEVEL_INFO;
+	str_copy(Message.m_aLine, "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv");
+	Message.m_LineLength = str_length(Message.m_aLine);
+	{
+		auto pLogger = log_logger_file_limited(File, LIMIT);
+		for(int i = 0; i < 1000; ++i)
+			pLogger->Log(&Message);
+	}
+	IOHANDLE Output = io_open(aFilename, IOFLAG_READ);
+	ASSERT_TRUE(Output);
+	EXPECT_LE(io_length(Output), LIMIT);
+	io_close(Output);
+	EXPECT_FALSE(fs_remove(aFilename));
+}
+
+TEST(LoggerAsync, TinyLimitDoesNotOverflowWithNotice)
+{
+	CTestInfo Info;
+	char aFilename[IO_MAX_PATH_LENGTH];
+	Info.Filename(aFilename, sizeof(aFilename), "-tiny-budget.log");
+	IOHANDLE File = io_open(aFilename, IOFLAG_WRITE);
+	ASSERT_TRUE(File);
+	CLogMessage Message = {};
+	Message.m_Level = LEVEL_INFO;
+	str_copy(Message.m_aLine, "record");
+	Message.m_LineLength = str_length(Message.m_aLine);
+	{
+		auto pLogger = log_logger_file_limited(File, 1);
+		pLogger->Log(&Message);
+	}
+	IOHANDLE Output = io_open(aFilename, IOFLAG_READ);
+	ASSERT_TRUE(Output);
+	EXPECT_LE(io_length(Output), 1);
+	io_close(Output);
+	EXPECT_FALSE(fs_remove(aFilename));
 }
 
 TEST(LoggerAsync, AutoSessionTranslationDoesNotDependOnCleanupPath)

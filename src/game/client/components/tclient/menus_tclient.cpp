@@ -1457,7 +1457,9 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	if(g_Config.m_TcIslandEnable)
 	{
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandNotch, TCLocalize("Notch style (attach to top edge)"), &g_Config.m_TcIslandNotch, &Column, LineSize);
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowLyrics, TCLocalize("Show synced lyrics"), &g_Config.m_TcIslandShowLyrics, &Column, LineSize);
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowLyrics, TCLocalize("Show synced lyrics"), &g_Config.m_TcIslandShowLyrics, &Column, LineSize);
+			if(g_Config.m_TcIslandShowLyrics)
+				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandDoubleLyrics, TCLocalize("Two-line lyrics (current + next)"), &g_Config.m_TcIslandDoubleLyrics, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowProgress, TCLocalize("Show game clock"), &g_Config.m_TcIslandShowProgress, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowSongProgress, TCLocalize("Show song progress bar"), &g_Config.m_TcIslandShowSongProgress, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandLocalClock, TCLocalize("Show local computer time (HH:MM)"), &g_Config.m_TcIslandLocalClock, &Column, LineSize);
@@ -1591,7 +1593,6 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowFrozenHud, TCLocalize("Show frozen tee display"), &g_Config.m_TcShowFrozenHud, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowFrozenHudSkins, TCLocalize("Use skins instead of ninja tees"), &g_Config.m_TcShowFrozenHudSkins, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenHudTeamOnly, TCLocalize("Only show after joining a team"), &g_Config.m_TcFrozenHudTeamOnly, &Column, LineSize);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesInlineIsland, TCLocalize("Same line as the dynamic island"), &g_Config.m_TcFrozenTeesInlineIsland, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesAliveOnly, TCLocalize("Show only alive teammates"), &g_Config.m_TcFrozenTeesAliveOnly, &Column, LineSize);
 
 	Column.HSplitTop(LineSize, &Button, &Column);
@@ -4208,8 +4209,8 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 			Ui()->RenderProgressBar(Button, std::clamp(TC.UpdateDownloadPercent() / 100.0f, 0.0f, 1.0f));
 		}
 
-		// 三个动作：检查 / 下载 / 安装并重启。每一步都要用户点，客户端从不自己
-		// 下载或退出，避免在对局里被打断。
+		// 三步完全手动：获取更新清单 / 下载 / 安装并重启。每一步都要玩家点；
+		// 下载完成只显示待安装状态，普通退出不弹出安装提示也不启动 helper。
 		static CButtonContainer s_CheckButton, s_DownloadButton, s_InstallButton;
 		CUIRect CheckRect, DownloadRect, InstallRect;
 		if(RightView.w >= 400.0f + 2.0f * MarginSmall)
@@ -4231,7 +4232,7 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 			RightView.HSplitTop(LineSize + MarginExtraSmall, &InstallRect, &RightView);
 		}
 
-		if(DoButton_Menu(&s_CheckButton, TCLocalize("Check now"), 0, &CheckRect) && State != CTClient::EUpdateState::CHECKING && State != CTClient::EUpdateState::DOWNLOADING)
+		if(DoButton_Menu(&s_CheckButton, TCLocalize("Get update"), 0, &CheckRect) && State != CTClient::EUpdateState::CHECKING && State != CTClient::EUpdateState::DOWNLOADING)
 			TC.UpdateCheck(true);
 		if(DoButton_Menu(&s_DownloadButton, TCLocalize("Download"), 0, &DownloadRect) && State == CTClient::EUpdateState::AVAILABLE)
 			TC.UpdateStartDownload();

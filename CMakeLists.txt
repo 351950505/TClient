@@ -2775,6 +2775,7 @@ if(CLIENT)
     serverbrowser_ping_cache.h
     sixup_translate_system.cpp
     jitter_buffer.h
+    snapshot_delta_tick.h
     smooth_time.cpp
     smooth_time.h
     sound.cpp

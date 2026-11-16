@@ -58,7 +58,7 @@ public:
 	virtual ~IHttpRequest();
 
 	void Timeout(CTimeout Timeout) { m_Timeout = Timeout; }
-	// Skip the download if the local file is newer or as new as the remote file.
+	// Maximum complete download size, including any resumed file prefix. -1 is unlimited.
 	void MaxResponseSize(int64_t MaxResponseSize) { m_MaxResponseSize = MaxResponseSize; }
 	void LogProgress(HTTPLOG LogProgress) { m_LogProgress = LogProgress; }
 	void SkipByFileTime(bool SkipByFileTime) { m_SkipByFileTime = SkipByFileTime; }

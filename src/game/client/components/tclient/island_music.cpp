@@ -94,12 +94,15 @@ public:
 	// 掉帧)。同一行文字不变 —— 按文本+字号缓存字宽/整行宽/适配结果,换行、
 	// 换曲、字号变化才重算,稳态下每帧 0 次 TextWidth。
 	std::string m_KaraokeKey;          // 当前字宽缓存对应的行文本
-	float m_KaraokeSize = -1.0f;       // 字号
+		float m_KaraokeSize = -1.0f;       // 字号
+	std::string m_KaraokeFace;
 	float m_KaraokeFullW = -1.0f;      // 整行宽度
 	std::vector<float> m_KaraokeWordW; // 与 m_vWords 对齐(非法词记 -1)
-	std::string m_TitleFitKey;         // 标题 FitText 缓存键(文本)
-	float m_TitleFitMaxW = -1.0f;
-	std::string m_TitleFitText;
+	std::string m_NextLyricKey;
+	std::string m_NextLyricFace;
+	float m_NextLyricSize = -1.0f;
+	float m_NextLyricMaxW = -1.0f;
+	std::string m_NextLyricText;
 	std::string m_SongFitKey;          // 无词态歌名 FitText 缓存键
 	float m_SongFitMaxW = -1.0f;
 	std::string m_SongFitText;
@@ -1349,6 +1352,45 @@ public:
 		}
 	};
 
+	// Canonical source identity: SMTC CloudMusic and the NetEase title monitor
+	// share a bucket; switching to another known provider changes it immediately.
+	static int TcDetectSourceService(const std::string &ServiceId)
+	{
+		std::string Lower;
+		Lower.reserve(ServiceId.size());
+		for(char c : ServiceId)
+			Lower.push_back((char)tolower((unsigned char)c));
+		if(Lower.find("cloudmusic") != std::string::npos || Lower.find("netease") != std::string::npos)
+			return 1;
+		if(Lower.find("qqmusic") != std::string::npos || Lower.find("qq.com") != std::string::npos)
+			return 2;
+		if(Lower.find("kuwo") != std::string::npos || Lower.find("kwmusic") != std::string::npos)
+			return 3;
+		if(Lower.find("kugou") != std::string::npos || Lower.find("kgmusic") != std::string::npos)
+			return 4;
+		return 0;
+	}
+
+	STrack m_LyricsIdentity;
+
+	void UpdateLyricsIdentity(const STrack &Track)
+	{
+		STrack Stable = Track;
+		const bool SameSong = m_LyricsIdentity.m_Valid && Track.m_Title == m_LyricsIdentity.m_Title && Track.m_Artist == m_LyricsIdentity.m_Artist;
+		// A temporarily missing ServiceId is not evidence of a provider switch.
+		// Inherit only for the same metadata; a new song must not inherit it.
+		if(SameSong && Stable.m_ServiceId.empty())
+			Stable.m_ServiceId = m_LyricsIdentity.m_ServiceId;
+		const int Service = TcDetectSourceService(Stable.m_ServiceId);
+		if(SameSong && Service == TcDetectSourceService(m_LyricsIdentity.m_ServiceId) &&
+			(Service == 1 || Stable.m_Album.empty() || m_LyricsIdentity.m_Album.empty()))
+			Stable.m_Album = m_LyricsIdentity.m_Album;
+		// Album is absent on the title-monitor path. Freeze the same NetEase
+		// song's initial identity, not its clock, so SMTC/monitor alternation and
+		// 0 -> real duration never abort/restart a request every render frame.
+		m_LyricsIdentity = std::move(Stable);
+	}
+
 	static std::string BuildCacheKey(const STrack &Track)
 	{
 		// NOTE: duration is intentionally NOT part of the key. SMTC reports a
@@ -1358,7 +1400,9 @@ public:
 		// used to rank the search result, not to identify the track.
 		std::string Key;
 		Key.reserve(128);
-		Key += "v2|";
+		Key += "v3|";
+		Key += std::to_string(TcDetectSourceService(Track.m_ServiceId));
+		Key += '|';
 		Key += Track.m_Artist;
 		Key += '|';
 		Key += Track.m_Title;
@@ -1572,6 +1616,7 @@ public:
 		AbortNetease();
 #endif
 		m_ActiveKey.clear();
+		m_LyricsIdentity = STrack{};
 		m_LyricsState = ELyricsState::IDLE;
 		m_vLines.clear();
 		// Invalidate the copy cache too: with the key left behind, the same song
@@ -1708,12 +1753,13 @@ public:
 			ResetLyrics();
 			return;
 		}
+		UpdateLyricsIdentity(Track);
 
 #if defined(CONF_FAMILY_WINDOWS)
 		// SMTC and the title monitor share one identity through every fallback.
 		UpdateNetease(Track);
 #else
-		const std::string Key = BuildCacheKey(Track);
+		const std::string Key = BuildCacheKey(m_LyricsIdentity);
 		if(Key != m_ActiveKey)
 		{
 			AbortRequest();
@@ -1895,7 +1941,9 @@ public:
 	{
 		std::string Key;
 		Key.reserve(160);
-		Key += "n163|";
+		Key += "n163-v2|";
+		Key += std::to_string(TcDetectSourceService(Track.m_ServiceId));
+		Key += '|';
 		Key += Track.m_Artist;
 		Key += '|';
 		Key += Track.m_Title;
@@ -1951,7 +1999,7 @@ public:
 
 	void UpdateNetease(const STrack &Track)
 	{
-		const std::string Key = NeteaseCacheKey(Track);
+		const std::string Key = NeteaseCacheKey(m_LyricsIdentity);
 		const bool NewTrack = Key != m_ActiveKey;
 		if(NewTrack)
 		{
@@ -1990,7 +2038,9 @@ public:
 		}
 		Meta.m_Title = Track.m_Title;
 		Meta.m_Artist = Track.m_Artist;
-		Meta.m_Album = Track.m_Album;
+		// Keep search/ranking metadata even when the title-monitor identity has
+		// no album. Filling it is not a reason to invalidate an in-flight key.
+		if(!Track.m_Album.empty()) Meta.m_Album = Track.m_Album;
 		// v6: 单字段原子回传曲长给 monitor（seek 重锚把 Fraction 换算成秒用）。
 		// 必须只写这一个字段——整结构回写会与 monitor 50ms 一次的 SHM 刷新竞争、覆盖它的数据。
 		if(m_pIslandView && Meta.m_DurationMs > 0)
@@ -2015,7 +2065,7 @@ public:
 		}
 		else if(m_pHttp != nullptr && m_pEngine != nullptr)
 		{
-			if(!m_pNeteaseRequest && !Meta.m_TriedLyric && TcDetectSourceService(Track.m_ServiceId) <= 1)
+			if(!m_pNeteaseRequest && !Meta.m_TriedLyric && TcDetectSourceService(m_LyricsIdentity.m_ServiceId) <= 1)
 			{
 				char aUrl[1400];
 				if(Meta.m_Resolved)
@@ -2037,7 +2087,7 @@ public:
 			}
 
 			// 播放器是 QQ/酷我/酷狗时，先向它自己的平台要歌词，不拿网易云的搜索凑数。
-			const int SourceService = TcDetectSourceService(Track.m_ServiceId);
+			const int SourceService = TcDetectSourceService(m_LyricsIdentity.m_ServiceId);
 			if(SourceService > 1 && !Meta.m_TriedLyric)
 			{
 				Meta.m_TriedLyric = true;
@@ -2046,7 +2096,7 @@ public:
 			if(Meta.m_TriedLyric && Meta.m_vLines.empty())
 			{
 				// 播放器是酷狗就先用酷狗，否则 QQ 优先；两个都失败才走 lrclib。
-				const bool KugouFirst = TcDetectSourceService(Track.m_ServiceId) == 4;
+				const bool KugouFirst = SourceService == 4;
 				bool Started = false;
 				for(int Pass = 0; Pass < 2 && !Started; ++Pass)
 				{
@@ -2271,24 +2321,6 @@ public:
 		Tags.m_Cover = TcContainsTag(Name, s_apCoverTags, sizeof(s_apCoverTags) / sizeof(s_apCoverTags[0]));
 	}
 
-	// 当前播放的是哪个客户端：决定优先问哪个平台的歌词，而不是每次都从网易云搜起。
-	static int TcDetectSourceService(const std::string &ServiceId)
-	{
-		std::string Lower;
-		Lower.reserve(ServiceId.size());
-		for(char c : ServiceId)
-			Lower.push_back((char)tolower((unsigned char)c));
-		if(Lower.find("cloudmusic") != std::string::npos || Lower.find("netease") != std::string::npos)
-			return 1;
-		if(Lower.find("qqmusic") != std::string::npos || Lower.find("qq.com") != std::string::npos)
-			return 2;
-		if(Lower.find("kuwo") != std::string::npos || Lower.find("kwmusic") != std::string::npos)
-			return 3;
-		if(Lower.find("kugou") != std::string::npos || Lower.find("kgmusic") != std::string::npos)
-			return 4;
-		return 0;
-	}
-
 	static constexpr int TC_MATCH_ACCEPT_SCORE = 700;
 
 	// 返回分数；低于 TC_MATCH_ACCEPT_SCORE 视为"这不是同一首"，继续问下一个平台。
@@ -2501,6 +2533,19 @@ public:
 							Ok = true;
 						}
 
+					if(Ok)
+					{
+						for(const char *pKey : {"ytlrc", "tlyric"})
+						{
+							const json_value *pTranslated = json_object_get(pRoot, pKey);
+							const json_value *pText = pTranslated ? json_object_get(pTranslated, "lyric") : nullptr;
+							if(pText && pText->type == json_string)
+							{
+								TcLyric::AttachTranslatedLyrics(Meta.m_vLines, pText->u.string.ptr);
+								TcLyric::AttachTranslatedLyrics(Meta.m_vFallbackLines, pText->u.string.ptr);
+							}
+						}
+					}
 					Meta.m_LyricState = Ok ? ELyricsState::READY : ELyricsState::NOTFOUND;
 				}
 			}
@@ -2636,6 +2681,9 @@ public:
 					std::vector<SLyricLine> vLines;
 					if(pLyric->type == json_string && ParseSyncedLyrics(pLyric->u.string.ptr, vLines))
 					{
+						const json_value *pTranslated = json_object_get(pRoot, "trans");
+						if(pTranslated && pTranslated->type == json_string)
+							TcLyric::AttachTranslatedLyrics(vLines, pTranslated->u.string.ptr);
 						Meta.m_vLines = std::move(vLines);
 						++Meta.m_LinesRevision;
 						Meta.m_vFallbackLines.clear();
@@ -2878,8 +2926,27 @@ public:
 				Hi = Mid - 1;
 			}
 		}
-		return Best;
+			return Best;
+		}
+
+	int FindNextLineIndex(int CurrentIndex) const
+	{
+		if(CurrentIndex < 0 || CurrentIndex >= (int)m_vLines.size())
+			return -1;
+		const int64_t CurrentStart = m_vLines[CurrentIndex].m_StartMs;
+		for(int i = CurrentIndex + 1; i < (int)m_vLines.size(); ++i)
+		{
+			if(m_vLines[i].m_StartMs <= CurrentStart)
+				continue;
+			// Match the cue that FindLineIndex will display at this timestamp.
+			while(i + 1 < (int)m_vLines.size() && m_vLines[i + 1].m_StartMs == m_vLines[i].m_StartMs)
+				++i;
+			if(!m_vLines[i].m_Text.empty())
+				return i;
+		}
+		return -1;
 	}
+
 
 	// ---------------- track collection ----------------
 	// 失联抑制：标题抖动的播放器（酷狗等 SMTC 实现差的）会让 Track 瞬时变空 →
@@ -2955,9 +3022,12 @@ public:
 	static void FitText(ITextRender *pTextRender, float Size, char (&aBuf)[512], float MaxWidth)
 	{
 		if(MaxWidth <= 0)
+		{
+			aBuf[0] = '\0';
 			return;
+		}
 		while(aBuf[0] != '\0' && pTextRender->TextWidth(Size, aBuf) > MaxWidth)
-			aBuf[strlen(aBuf) - 1] = '\0';
+			aBuf[str_utf8_rewind(aBuf, str_length(aBuf))] = '\0';
 	}
 
 	// 缓存 TextWidth 的结果(2026-11-09)：TextWidth 内部走 TextEx →
@@ -3093,7 +3163,10 @@ public:
 				}
 				else
 				{
-					pPixels = stbi_load_from_memory(Png.data(), InputSize, &IW, &IH, &IChannels, 4);
+					// PNG inflate output includes up to 8 bytes/pixel (16-bit RGBA),
+					// plus filter bytes and packed-row padding in all seven Adam7 passes.
+					constexpr int PngOutputLimit = (int)(COVER_MAX_PIXELS * 8u + COVER_MAX_DIMENSION * 14u);
+					pPixels = stbi_load_from_memory_png_bounded(Png.data(), InputSize, &IW, &IH, &IChannels, 4, PngOutputLimit);
 					if(!pPixels || !ValidDimensions(IW, IH))
 					{
 						Failed = true;
@@ -3371,9 +3444,13 @@ public:
 		// sizes: real pixel values at the 72 px reference height, so on a 1080p
 		// screen the text renderer gets exactly integer font sizes and the glyphs
 		// stay crisp. Anything derived from Height*0.x lands on half pixels.
-		const float TitleSize = 12.0f * Scale;
-		const float LyricSize = 18.0f * Scale;
-		const float TimerSize = 16.0f * Scale;
+			const float LyricFontScale = std::clamp(g_Config.m_TcFontSize / 100.0f, 0.5f, 2.0f);
+			const bool DoubleLyrics = g_Config.m_TcIslandDoubleLyrics != 0;
+			const float LyricGlyphSize = 18.0f * Scale;
+			const float NextLyricGlyphSize = (DoubleLyrics ? 14.0f : 12.0f) * Scale;
+		const float LyricSize = LyricGlyphSize / LyricFontScale;
+		const float NextLyricSize = NextLyricGlyphSize / LyricFontScale;
+			const float TimerSize = 16.0f * Scale;
 
 		const int64_t LyricPosMs = CurrentPositionMs() - (int64_t)g_Config.m_TcIslandLyricOffset;
 		const int LyricIndex = g_Config.m_TcIslandShowLyrics ? FindLineIndex(LyricPosMs) : -1;
@@ -3873,8 +3950,20 @@ public:
 
 		if(UseLyric)
 		{
-			// two rows: song title above, the karaoke line below
-			const float MaxTextW = TextRight - TextX;
+				// Optional current/next cues; otherwise keep the title above one cue.
+				const float MaxTextW = std::max(0.0f, TextRight - TextX);
+				const int NextLyricIndex = DoubleLyrics ? FindNextLineIndex(LyricIndex) : -1;
+				const SLyricLine &CurrentLyric = m_vLines[LyricIndex];
+				const bool UseTranslation = DoubleLyrics && !CurrentLyric.m_IsSimplifiedChinese && !CurrentLyric.m_Translation.empty();
+				const char *pNextLyric = !DoubleLyrics ? aSong : UseTranslation ? CurrentLyric.m_Translation.c_str() :
+					(NextLyricIndex >= 0 ? m_vLines[NextLyricIndex].m_Text.c_str() : "");
+			const char *pLyricFace = g_Config.m_TcIslandFont[0] ? g_Config.m_TcIslandFont : g_Config.m_TcCustomFont;
+			if(!pLyricFace[0])
+			{
+				const auto *pFaces = m_pTextRender->GetCustomFaces();
+				if(pFaces && !pFaces->empty())
+					pLyricFace = pFaces->front().c_str();
+			}
 			str_copy(aLyricBuf, m_vLines[LyricIndex].m_Text.c_str());
 			const SLyricLine &Line = m_vLines[LyricIndex];
 			const bool HasWords = !Line.m_vWords.empty();
@@ -3883,11 +3972,12 @@ public:
 			// 做 substr 堆分配 + TextWidth 测量,是灵动岛掉帧主因(实测 DDNet 167%
 			// CPU)。同一行文字不变 —— 按文本+字号缓存整行宽与逐字宽,换行/换曲/
 			// 字号变化才重算,稳态每帧 0 次 TextWidth。
-			if(m_KaraokeKey != Line.m_Text || m_KaraokeSize != LyricSize || (int)m_KaraokeWordW.size() != (int)Line.m_vWords.size() || m_KaraokeFullW < 0.0f)
+			if(m_KaraokeKey != Line.m_Text || m_KaraokeSize != LyricSize || m_KaraokeFace != pLyricFace || (int)m_KaraokeWordW.size() != (int)Line.m_vWords.size() || m_KaraokeFullW < 0.0f)
 			{
 				m_KaraokeKey = Line.m_Text;
 				m_KaraokeSize = LyricSize;
-				m_KaraokeFullW = m_pTextRender->TextWidth(LyricSize, aLyricBuf);
+				m_KaraokeFace = pLyricFace;
+m_KaraokeFullW = m_pTextRender->TextWidth(LyricSize, aLyricBuf);
 				m_KaraokeWordW.assign(Line.m_vWords.size(), -1.0f);
 				for(size_t wi = 0; wi < Line.m_vWords.size(); ++wi)
 				{
@@ -3898,26 +3988,27 @@ public:
 				}
 			}
 			const float FullW = m_KaraokeFullW;
-			const float TitleGap = 6.0f * Scale;
-			// centre the two-row block vertically instead of pinning it to a
-			// fraction of the height, which left a big gap under the lyric.
-			const float BlockH = TitleSize + TitleGap + LyricSize;
-			const float TitleY = PillY + (Height - BlockH) * 0.5f;
-			const float LyricY = TitleY + TitleSize + TitleGap;
+			const float LyricGap = 6.0f * Scale;
+			const float BlockH = LyricGlyphSize + LyricGap + NextLyricGlyphSize;
+				const float BlockY = PillY + (Height - BlockH) * 0.5f;
+				const float LyricY = DoubleLyrics ? BlockY : BlockY + NextLyricGlyphSize + LyricGap;
+				const float NextLyricY = DoubleLyrics ? BlockY + LyricGlyphSize + LyricGap : BlockY;
 
-			// small, dim title keeps the lyric as the loud element
+if(m_NextLyricKey != pNextLyric || m_NextLyricSize != NextLyricSize || m_NextLyricMaxW != MaxTextW || m_NextLyricFace != pLyricFace)
 			{
-				if(m_TitleFitKey != aSong || m_TitleFitMaxW != MaxTextW || m_TitleFitText.empty())
-				{
-					char aTitleFit[512];
-					str_copy(aTitleFit, aSong);
-					FitText(m_pTextRender, TitleSize, aTitleFit, MaxTextW);
-					m_TitleFitKey = aSong;
-					m_TitleFitMaxW = MaxTextW;
-					m_TitleFitText = aTitleFit;
-				}
-				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.55f * Dim);
-				m_pTextRender->Text(TextX, TitleY, TitleSize, m_TitleFitText.c_str());
+				char aNextLyric[512];
+				str_copy(aNextLyric, pNextLyric);
+				FitText(m_pTextRender, NextLyricSize, aNextLyric, MaxTextW);
+m_NextLyricKey = pNextLyric;
+m_NextLyricSize = NextLyricSize;
+m_NextLyricMaxW = MaxTextW;
+m_NextLyricFace = pLyricFace;
+m_NextLyricText = aNextLyric;
+			}
+			if(!m_NextLyricText.empty() && MaxTextW > 0.0f)
+			{
+				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, (DoubleLyrics ? 0.50f : 0.55f) * Dim);
+				m_pTextRender->Text(TextX, NextLyricY, NextLyricSize, m_NextLyricText.c_str());
 			}
 
 			const ColorRGBA ColorUnsung(1.0f, 1.0f, 1.0f, 0.95f * Dim);  // not yet sung -> white
@@ -3967,6 +4058,8 @@ public:
 			// WinLeft/WinRight bound the visible window (marquee); pass the line's
 			// own span for the static case so nothing is clipped.
 			auto DrawLine = [&](float DrawX, float WinLeft, float WinRight) {
+				if(MaxTextW <= 0.0f || WinRight <= WinLeft)
+					return;
 				auto FillRect = [&](float L, float R, const ColorRGBA &Col) {
 					if(R <= L + 0.5f)
 						return false;
@@ -4059,7 +4152,7 @@ public:
 				m_SongFitText = aFitSong;
 			}
 			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 0.96f * Dim);
-			m_pTextRender->Text(TextX, PillY + (Height - LyricSize) * 0.5f, LyricSize, m_SongFitText.c_str());
+			m_pTextRender->Text(TextX, PillY + (Height - LyricGlyphSize) * 0.5f, LyricSize, m_SongFitText.c_str());
 		}
 		m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 		if(TransparentMode)

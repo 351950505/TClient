@@ -3503,6 +3503,14 @@ void CGameClient::CClientData::UpdateSkinInfo()
 
 void CGameClient::CClientData::UpdateRenderInfo()
 {
+	if(m_pSkinInfo == nullptr)
+	{
+		// 切服/重连或玩家离开时 Reset() 会先清空 skin info，渐变等路径仍可能在本帧请求刷新。
+		// 没有 skin info 时不能解引用，否则会在拷贝 m_RenderInfo 处空指针崩溃。
+		m_RenderInfo.Reset();
+		return;
+	}
+
 	m_RenderInfo = m_pSkinInfo->TeeRenderInfo();
 
 	// force team colors

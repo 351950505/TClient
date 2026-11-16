@@ -206,8 +206,6 @@ public:
 	void GetReason(char *pReason, int ClientId);
 	const CWarDataCache &GetWarData(int ClientId) const;
 
-	void SortWarEntries();
-
 	CWarType *FindWarType(const char *pType);
 	CWarEntry *FindWarEntry(const char *pName, const char *pClan, const char *pType);
 };

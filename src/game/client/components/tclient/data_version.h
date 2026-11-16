@@ -2,50 +2,59 @@
 #define GAME_CLIENT_COMPONENTS_TCLIENT_DATA_VERSION_H
 
 #include <base/io.h>
+#include <base/str.h>
 
-// Check validity of data/data_version.txt
-// This is extracted to this file for ease of editing
-// TODO: this is a stub
-
-// #include <format>
-// #include <string>
+// Validates data/tclient/data_version.txt against the running executable so a
+// half-updated install (new DDNet.exe over an old data/tclient) warns instead
+// of failing in obscure ways later on. The packaging writes the file on every
+// release and it travels inside data/tclient with every update package.
+//
+// Only the TClient domain is checked: upstream DDNet data files do not travel
+// with our update packages, so a DDNet line would false-positive on every
+// installing client that updated in place.
 
 #include <engine/shared/linereader.h>
 
 #include <game/localization.h>
 #include <game/version.h>
 
-#define DATA_VERSION_PATH "data_version.txt"
-
-// static std::string VersionNumberToString(int Version)
-// {
-// 	return std::format("{}.{}.{}", Version / 1000, (Version / 100) % 10, Version % 10);
-// }
-
-// static const std::pair<std::string, std::string> DOMAINS[] = {
-// 	{"DDNet", VersionNumberToString(DDNET_VERSION_NUMBER)},
-// 	{"TClient", TCLIENT_VERSION},
-// };
+#define DATA_VERSION_PATH "tclient/data_version.txt"
 
 inline void CheckDataVersion(char *pError, int Length, IOHANDLE File)
 {
 	if(!File)
 	{
-		// str_format(pError, Length, TCLocalize("%s could not be read", DATA_VERSION_PATH), DATA_VERSION_PATH);
+		str_format(pError, Length, TCLocalize("%s not found", DATA_VERSION_PATH), DATA_VERSION_PATH);
 		return;
 	}
 
-	// CLineReader LineReader;
-	// LineReader.OpenFile(File);
+	CLineReader LineReader;
+	LineReader.OpenFile(File);
 
-	// const char *pLine;
-	// while((pLine = LineReader.Get()))
-	// {
-	// 	char aDomain[32];
-	// 	const char *pVersion = str_next_token(pLine, " ", aDomain, sizeof(aDomain));
-	// }
-
+	bool FoundTClient = false;
+	bool VersionOk = false;
+	const char *pLine;
+	while((pLine = LineReader.Get()))
+	{
+		char aDomain[16];
+		const char *pRest = str_next_token(pLine, " ", aDomain, sizeof(aDomain));
+		if(!pRest || str_comp(aDomain, "TClient") != 0)
+			continue;
+		char aVersion[24];
+		str_next_token(pRest, " ", aVersion, sizeof(aVersion));
+		FoundTClient = true;
+		VersionOk = aVersion[0] != 0 && str_comp(aVersion, TCLIENT_APP_VERSION) == 0;
+		break;
+	}
 	io_close(File);
+
+	if(!FoundTClient)
+	{
+		str_format(pError, Length, TCLocalize("%s not found", DATA_VERSION_PATH), DATA_VERSION_PATH);
+		return;
+	}
+	if(!VersionOk)
+		str_format(pError, Length, TCLocalize("%s version mismatch", DATA_VERSION_PATH), DATA_VERSION_PATH);
 }
 
 #endif

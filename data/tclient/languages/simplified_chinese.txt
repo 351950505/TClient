@@ -2054,6 +2054,9 @@ Off
 5:2
 == 5:2
 
-[data_version.txt]
+[tclient/data_version.txt]
 %s not found
 == %s 未找到
+
+%s version mismatch
+== %s 版本不匹配

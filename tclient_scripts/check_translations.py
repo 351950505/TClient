@@ -29,7 +29,7 @@ BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//[^\n]*")
 
 # 宏形式的 context 参数（如 DATA_VERSION_PATH）；按源码里的字面值展开。
-CONTEXT_MACROS = {"DATA_VERSION_PATH": "data_version.txt"}
+CONTEXT_MACROS = {"DATA_VERSION_PATH": "tclient/data_version.txt"}
 
 
 def strip_comments(text):

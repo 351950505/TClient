@@ -988,3 +988,10 @@ Install and restart
 
 Two-line lyrics (current + next)
 == 雙行歌詞（目前句＋下一句）
+
+[tclient/data_version.txt]
+%s not found
+== %s 未找到
+
+%s version mismatch
+== %s 版本不符

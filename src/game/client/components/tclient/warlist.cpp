@@ -421,11 +421,6 @@ const CWarDataCache &CWarList::GetWarData(int ClientId) const
 	return m_WarPlayers[ClientId];
 }
 
-void CWarList::SortWarEntries()
-{
-	// TODO
-}
-
 void CWarList::UpdateWarPlayers()
 {
 	bool Changed = m_ProcessedRevision != m_WarListRevision;

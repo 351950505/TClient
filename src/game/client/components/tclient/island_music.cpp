@@ -1161,11 +1161,14 @@ public:
 				memcpy(&Out, m_pIslandView, sizeof(Out));
 				return true;
 			}
-			const LONG64 Before = InterlockedCompareExchange64(m_pIslandSeq, 0, 0);
+			// 不能用 InterlockedCompareExchange64 当原子读：lock cmpxchg 会写回
+			// 目标地址，而序号映射是 FILE_MAP_READ 只读映射，会直接触发访问冲突。
+			// 对齐的 64 位 volatile 读在 x64 上本身就是原子的，读方只观察不修改。
+			const LONG64 Before = *m_pIslandSeq;
 			if(Before & 1)
 				continue;
 			memcpy(&Out, m_pIslandView, sizeof(Out));
-			const LONG64 After = InterlockedCompareExchange64(m_pIslandSeq, 0, 0);
+			const LONG64 After = *m_pIslandSeq;
 			if(Before == After && !(After & 1))
 				return true;
 		}

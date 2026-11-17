@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.89",
+  "version": "1.7.8.90",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17409022,
-  "sha256": "52422244dcbc83300e91721ced1b21a771af62dbf7fbd2236fd1276770734c9c",
-  "notes": "TClient v1.7.8.89\n\n修复\n- Light 快速输入模式（Mode 12）钩链检测按 BestClient-Light 原版补全：此前复用 Snow 的简化检测；现在被钩/钩人/钩链关联玩家的前移量按原版公式独立计算（8 条件钩状态检测、HookLinked 链、HookTickOffset），接入预测量/偏移/其他玩家量/快照上限/预测数组填充/渲染门控全部路径\n\n说明\n- 其余快速输入模式（Tater/Meow/Snow/Next/Salatik/Ancient/F/Best/Saiko/Delta/Cloud）本版无改动\n- 音乐监控 exe 随包更新（与 .88 相同源码，重编译绑定本版提交）",
+  "size": 17409757,
+  "sha256": "a10423d5407b84fe4661b6b7afbf47c17be88ec5415d0599af850271cecaf098",
+  "notes": "TClient v1.7.8.90\n\n修复\n- Mode 14（BestClient-Light Ancient）位置管线按原版 CAncientInput::SamplePos 逐行对齐：\n  单源位置计算（基准插值 → SplitAmount 拆 tick/intra → 严格门控读取预测数组 → SafeGuard 状态变化回退 + MaxAdvance 安全帽），本地/他人渲染路径统一走单源，\n  修复该模式下的抖动（此前散装的宽松门控偏移+二次叠加导致）\n\n说明\n- Mode 12 的钩链检测修复已随 .89 发布，本版是其位置管线的同类对齐\n- 音乐监控 exe 随包更新（重编译绑定本版提交）",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 451584,

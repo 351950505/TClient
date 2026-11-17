@@ -881,7 +881,9 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 				const float NameLineWidth = std::max(NameLength - (NameTextOffset - NameOffset), 0.0f);
 				if(!HasWarNameColor && pInfo->m_ClientId >= 0 && g_Config.m_TcGradientName && CTClientGradient::AppliesTo(pInfo->m_ClientId, GameClient()))
 				{
-					const float Phase = CTClientGradient::AnimatePhase(Client()->GlobalTime());
+					// 计分板打开时冻结渐变相位：每帧相位桶变化会重建文本容器，
+					// 在 144Hz 下表现为名字持续闪烁。关闭计分板后恢复动画。
+					const float Phase = CTClientGradient::AnimatePhase(IsActive() ? 0.0 : Client()->GlobalTime());
 					std::vector<STextColorSplit> vGradientSplits;
 					if(ClientData.m_AuthLevel)
 					{
@@ -929,7 +931,9 @@ void CScoreboard::RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart,
 				GameClient()->StreamerClan(pInfo->m_ClientId, aClanBuf, sizeof(aClanBuf));
 				if(!HasWarClanColor && pInfo->m_ClientId >= 0 && g_Config.m_TcGradientClan && CTClientGradient::AppliesTo(pInfo->m_ClientId, GameClient()))
 				{
-					const float Phase = CTClientGradient::AnimatePhase(Client()->GlobalTime());
+					// 计分板打开时冻结渐变相位：每帧相位桶变化会重建文本容器，
+					// 在 144Hz 下表现为名字持续闪烁。关闭计分板后恢复动画。
+					const float Phase = CTClientGradient::AnimatePhase(IsActive() ? 0.0 : Client()->GlobalTime());
 					std::vector<STextColorSplit> vGradientSplits;
 					if(SameClanColor)
 					{
@@ -1239,12 +1243,18 @@ void CScoreboard::OnRender()
 		// 高 80 = 内边距7 + 3×按钮20 + 2×间距3 + 内边距7
 		const float PanelW = 34.0f;
 		const float PanelH = 80.0f;
-		CUIRect MediaPanel;
-		MediaPanel.x = std::max(10.0f, Scoreboard.x - PanelW - 10.0f);
-		MediaPanel.y = Scoreboard.y;
-		MediaPanel.w = PanelW;
-		MediaPanel.h = PanelH;
-		RenderMediaPanel(MediaPanel);
+		const float PanelX = Scoreboard.x - PanelW - 10.0f;
+		// 窄窗口或高 UI 缩放时 Scoreboard.x 可能小于面板宽度；以前 clamp 到
+		// x=10，结果面板压进计分板左列。空间不足时宁可不画，也不覆盖名单。
+		if(PanelX >= 10.0f)
+		{
+			CUIRect MediaPanel;
+			MediaPanel.x = PanelX;
+			MediaPanel.y = Scoreboard.y;
+			MediaPanel.w = PanelW;
+			MediaPanel.h = PanelH;
+			RenderMediaPanel(MediaPanel);
+		}
 	}
 
 	CUIRect Spectators = {(Screen.w - ScoreboardSmallWidth) / 2.0f, Scoreboard.y + Scoreboard.h + 5.0f, ScoreboardSmallWidth, 100.0f};

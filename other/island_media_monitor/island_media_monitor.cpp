@@ -621,20 +621,97 @@ static DWORD WINAPI LoopThread(void *pParam)
 }
 
 // 依据根进程（父进程不是 cloudmusic 的）建流；网易云重启换 PID 时自动重建
+// 环回激活连续失败的退避（2026-11-18）：某些机器上进程环回不可用（实测 Initialize
+// 返回 E_INVALIDARG），失败流每 50ms 主循环立刻重生 → 每秒 20 次完整激活尝试
+// （线程创建销毁 + COM/ActivateAudioInterfaceAsync + 日志写盘），纯烧 CPU —— 玩家报
+// "比其他客户端卡"的元凶之一。连续 3 次失败后该 PID 退避 60s，之后每 60s 探一次；
+// 网易云换 PID 会清记录，流存活时失败计数清零。
+struct SPidBackoff
+{
+	uint32_t m_Pid = 0;
+	int m_Fails = 0;
+	double m_NextTryAt = 0.0; // NowEpochQpc 秒
+};
+static std::vector<SPidBackoff> g_vPidBackoff;
+
+static int FindPidBackoff(uint32_t Pid)
+{
+	for(size_t i = 0; i < g_vPidBackoff.size(); ++i)
+		if(g_vPidBackoff[i].m_Pid == Pid)
+			return (int)i;
+	return -1;
+}
+
+static bool PidBackedOff(uint32_t Pid, double NowEp)
+{
+	const int i = FindPidBackoff(Pid);
+	return i >= 0 && NowEp < g_vPidBackoff[i].m_NextTryAt;
+}
+
+static void ResetPidBackoff(uint32_t Pid)
+{
+	const int i = FindPidBackoff(Pid);
+	if(i >= 0)
+		g_vPidBackoff[i].m_Fails = 0;
+}
+
+static void BumpPidBackoff(uint32_t Pid, double NowEp)
+{
+	int i = FindPidBackoff(Pid);
+	if(i < 0)
+	{
+		SPidBackoff B;
+		B.m_Pid = Pid;
+		g_vPidBackoff.push_back(B);
+		i = (int)g_vPidBackoff.size() - 1;
+	}
+	SPidBackoff &B = g_vPidBackoff[i];
+	++B.m_Fails;
+	if(B.m_Fails >= 3)
+	{
+		B.m_NextTryAt = NowEp + 60.0;
+		B.m_Fails = 0;
+		char aMsg[128];
+		_snprintf(aMsg, sizeof(aMsg) - 1, "[loopback] pid=%lu failing; back off 60s", (unsigned long)Pid);
+		LsDbgLog("lb-backoff", aMsg);
+	}
+}
+
+// 依据根进程（父进程不是 cloudmusic 的）建流；网易云重启换 PID 时自动重建
 static void ManageLoopStreams()
 {
 	if(!g_LoopCSReady)
 		return;
+	const double NowEp = NowEpochQpc();
 	EnterCriticalSection(&g_LoopCS);
 	for(size_t i = 0; i < g_LoopStreams.size();)
 	{
 		if(g_LoopStreams[i]->Dead)
 		{
+			BumpPidBackoff(g_LoopStreams[i]->Pid, NowEp);
 			if(g_LoopStreams[i]->hThread)
 				CloseHandle(g_LoopStreams[i]->hThread);
 			delete g_LoopStreams[i];
 			g_LoopStreams.erase(g_LoopStreams.begin() + i);
 		}
+		else
+		{
+			ResetPidBackoff(g_LoopStreams[i]->Pid);
+			++i;
+		}
+	}
+	// 网易云已退出的 PID：退避记录一并清掉
+	for(size_t i = 0; i < g_vPidBackoff.size();)
+	{
+		bool Exists = false;
+		for(int k = 0; k < g_NumPids; ++k)
+			if(g_aPids[k] == g_vPidBackoff[i].m_Pid)
+			{
+				Exists = true;
+				break;
+			}
+		if(!Exists)
+			g_vPidBackoff.erase(g_vPidBackoff.begin() + i);
 		else
 			++i;
 	}
@@ -651,6 +728,8 @@ static void ManageLoopStreams()
 			}
 		if(!IsRoot)
 			continue;
+		if(PidBackedOff(Pid, NowEp))
+			continue; // 激活连续失败，退避中
 		bool Exists = false;
 		for(SLoopStream *pS : g_LoopStreams)
 			if(pS->Pid == Pid)
@@ -1638,11 +1717,15 @@ static DWORD WINAPI CdpThread(LPVOID)
 // ---------- netease-watcher（HTTP 127.0.0.1:3574）：精确播放秒 ----------
 // YUCLing/netease-watcher（Rust，hook 网易云内部状态）：GET / 返回
 // {"music":{...,"duration":ms,...},"time":41.535} —— time 即精确播放秒，seek 立即反映。
-// monitor 作为其宿主：3574 不通时自动拉起同目录 netease-watcher.exe；每秒轮询喂重锚。
+// monitor 作为其宿主：3574 不通时自动拉起同目录 netease-watcher.exe；约 300ms 轮询喂重锚。
+// （原 1s：watcher 采样间隔就是 seek 后位置收敛的延迟上限——2026-11-18 用户报"拖动进度
+// 歌词有时不对"，把轮询加密到 300ms，收敛从最长 1s 降到最长 300ms。值本身仍是 hook 实时读，
+// 加密轮询只会更新鲜，不会更旧。）
 static std::atomic<double> g_WatcherTimeMs{-1.0};
 static std::atomic<double> g_WatcherDurMs{-1.0};
 static std::atomic<double> g_WatcherAt{0.0};
 static std::atomic<uint32_t> g_WatcherStale{0};   // time 冻结+有声 = hook 失效（重锚停用） // 最近成功轮询（epoch 秒）
+static std::atomic<uint32_t> g_WatcherFrozen{0};  // watcher 采样连续 ~3s 不前进 = 暂停（环回/LS 都不可用时的兜底，2026-11-18）
 static std::atomic<uint32_t> g_dwWatcherPid{0};   // 本 monitor 亲手拉起的 netease-watcher PID（0=没有）
 
 // 取某进程的可执行文件全路径。失败返回 false。
@@ -1806,7 +1889,7 @@ static DWORD WINAPI WatcherThread(LPVOID)
 			g_WatcherTimeMs = -1.0;
 			LsDbgLog("nw-fail", "[nw] poll failed (http/parse)");
 		}
-		Sleep(1000);
+		Sleep(300); // 轮询间隔 = seek 后位置收敛延迟上限（2026-11-18 由 1s 加密到 300ms）
 	}
 }
 
@@ -1972,6 +2055,36 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 			g_LsCapturedAt = (double)time(NULL); // 刷新新鲜度，客户端才会用 100% 锚点
 		}
 
+		// 4) watcher 冻结判暂停（2026-11-18 新增）：环回激活失败的机器（本机实测
+		//    FAILED hr=0x80004005）+ 新版网易云 LS playPostion 加密不可读时，上面
+		//    三层全部没有信号 —— 外部点暂停后 monitor 永远报"播放中"，歌词一路走
+		//    到曲尾（用户复现）。watcher 的 time 暂停时冻结、播放时每个采样都在
+		//    前进：连续 ~3s 采样差都在 ±150ms 内判暂停，t 重新前进（播放/seek）
+		//    立即清零。轮询 300ms 一次，正常播放每次采样差 ≈300ms > 150，不会误判。
+		{
+			static double s_LastWT = -1.0;
+			static int s_FrozenStreak = 0;
+			const double WTnow = g_WatcherTimeMs.load();
+			const double WAge = NowEpochQpc() - g_WatcherAt.load();
+			if(WTnow > 0.0 && WAge < 5.0) // 只在最近有成功轮询时累计，watcher 失联不算冻结
+			{
+				if(s_LastWT > 0.0)
+				{
+					const double D = WTnow - s_LastWT;
+					if(D > -150.0 && D < 150.0)
+						++s_FrozenStreak;
+					else
+						s_FrozenStreak = 0;
+				}
+				s_LastWT = WTnow;
+			}
+			else
+			{
+				s_LastWT = -1.0;
+				s_FrozenStreak = 0;
+			}
+			g_WatcherFrozen = s_FrozenStreak >= 10 ? 1u : 0u; // 300ms 轮询 × 10 ≈ 3s
+		}
 		// 播放判定，三层优先：
 		// 1) WASAPI 进程环回（最权威）：最近 300ms 有音频帧 = 在播。帧流断 = 暂停（亚秒级、零误判，
 		//    静音片段的 SILENT 帧也推进位置）。AudioMs 即精确"播到哪一秒"。
@@ -2005,6 +2118,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 			if(g_LsHave && g_LsPaused)
 				Playing = false;
 			if(g_LsHave && g_LsLastProgressAt > 0.0 && (double)time(NULL) - g_LsLastProgressAt > 15.0)
+				Playing = false;
+			// 2026-11-18：环回/LS 都没有的机器上，watcher 冻结是唯一可用的暂停信号；
+			// 不加这条，外部暂停永远不被发现（见上面第 4) 层的注释）。
+			if(g_WatcherFrozen)
 				Playing = false;
 		}
 		if(Playing && g_NumMeters > 0)

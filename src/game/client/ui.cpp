@@ -1705,14 +1705,15 @@ void CCachedText::UpdateColored(ITextRender *pTextRender, const char *pText, flo
 	Cursor.m_vColorSplits = vColorSplits;
 
 	const ColorRGBA OldColor = pTextRender->GetTextColor();
-	const unsigned OldFlags = pTextRender->GetRenderFlags();
 	pTextRender->TextColor(pTextRender->DefaultTextColor());
-	pTextRender->SetRenderFlags(OldFlags | TEXT_RENDER_FLAG_ONE_TIME_USE);
+	// Phase-bucket caching reuses this container across frames. ONE_TIME_USE
+	// would let Vulkan overwrite its streamed vertices before the next update,
+	// so the cached text renders stale garbage (e.g. scoreboard names vanish
+	// after the menu draws over the one-frame buffer).
 	if(ReuseContainer)
 		pTextRender->RecreateTextContainerSoft(m_TextContainerIndex, &Cursor, m_Text.c_str());
 	else
 		pTextRender->RecreateTextContainer(m_TextContainerIndex, &Cursor, m_Text.c_str());
-	pTextRender->SetRenderFlags(OldFlags);
 	pTextRender->TextColor(OldColor);
 
 	m_BoundingBox = Cursor.BoundingBox();

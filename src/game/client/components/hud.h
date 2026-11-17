@@ -12,6 +12,8 @@
 #include <game/client/components/tclient/frozen_hud_logic.h>
 #include <game/client/ui.h>
 
+#include <map>
+
 struct SScoreInfo
 {
 	SScoreInfo()
@@ -92,7 +94,33 @@ class CHud : public CComponent
 	void RenderPlayerState(int ClientId);
 
 	int m_LastSpectatorCountTick;
+	// 本帧右下角观战名字框是否绘制了（供落水榜贴在其上方）
+	bool m_SpectatorCountBoxShown = false;
+	float m_SpectatorCountBoxHeight = 0.0f;
 	void RenderSpectatorCount();
+
+	// 冻结胶囊预烘焙（学灵动岛 EnsureShapeTexture）：面板/高光各烤一张 alpha 遮罩
+	// 纹理按 (宽,高,圆角,变体) 缓存，每帧只是一次带色 blit，省掉 DrawRectExt 的
+	// 72 次三角函数与 48 个自由三角形。遮罩是白 RGB + 覆盖率 alpha，顶点色直接相乘。
+	struct SCapsuleMaskKey
+	{
+		int m_W;
+		int m_H;
+		int m_Rounding;
+		bool m_Sheen;
+		bool operator<(const SCapsuleMaskKey &Other) const
+		{
+			if(m_W != Other.m_W)
+				return m_W < Other.m_W;
+			if(m_H != Other.m_H)
+				return m_H < Other.m_H;
+			if(m_Rounding != Other.m_Rounding)
+				return m_Rounding < Other.m_Rounding;
+			return m_Sheen < Other.m_Sheen;
+		}
+	};
+	std::map<SCapsuleMaskKey, IGraphics::CTextureHandle> m_aCapsuleMaskCache;
+	IGraphics::CTextureHandle EnsureCapsuleMask(int W, int H, float Rounding, bool Sheen);
 	void RenderDummyActions();
 	void RenderMovementInformation();
 
@@ -145,6 +173,8 @@ public:
 private:
 	void RenderRecord();
 	void RenderDDRaceEffects();
+	// Gores 组队落水榜（QmClient 移植，默认关闭）
+	void RenderDrownBoard();
 	float m_TimeCpDiff;
 	float m_aPlayerRecord[NUM_DUMMIES];
 	float m_FinishTimeDiff;

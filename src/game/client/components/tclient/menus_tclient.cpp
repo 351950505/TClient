@@ -4137,6 +4137,24 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("TClient identity is always broadcast so other TClient users can recognise you; this option only controls whether you see the penguin."), EditBoxFontSize, TEXTALIGN_TL);
 
+	// 落水榜（QmClient Gores 组队落水榜移植，默认关闭）
+	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Drown board"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoard, TCLocalize("Show the team drown board on Gores maps"), &g_Config.m_TcDrownBoard, &LeftView, LineSize);
+	if(g_Config.m_TcDrownBoard)
+	{
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoardIncludeTeam0, TCLocalize("Include Team 0"), &g_Config.m_TcDrownBoardIncludeTeam0, &LeftView, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoardShowTee, TCLocalize("Show player Tee"), &g_Config.m_TcDrownBoardShowTee, &LeftView, LineSize);
+		LeftView.HSplitTop(LineSize, &Button, &LeftView);
+		Ui()->DoScrollbarOption(&g_Config.m_TcDrownBoardMaxPlayers, &g_Config.m_TcDrownBoardMaxPlayers, &Button, TCLocalize("Players shown"), 1, 16, &CUi::ms_LinearScrollbarScale, 0, "");
+		LeftView.HSplitTop(LineSize, &Button, &LeftView);
+		Ui()->DoScrollbarOption(&g_Config.m_TcDrownBoardOpacity, &g_Config.m_TcDrownBoardOpacity, &Button, TCLocalize("Board opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+	}
+	LeftView.HSplitTop(LineSize, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Counts drown deaths for players in your DDRace team. Only shown on Gores maps."), EditBoxFontSize, TEXTALIGN_TL);
+
 	// [STEAM-HIDE] Steam 隐藏：不连 Steam，好友列表不再显示"正在玩"
 	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
 	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);

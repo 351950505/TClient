@@ -3775,6 +3775,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     swap_endian_test.cpp
     tclient_auto_session_log_test.cpp
     tclient_console_filter_test.cpp
+    tclient_drown_board_test.cpp
     tclient_fastinput_test.cpp
     tclient_gradient_test.cpp
     tclient_jitter_buffer_test.cpp

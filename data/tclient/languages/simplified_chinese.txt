@@ -2063,3 +2063,30 @@ Off
 
 Players
 == 玩家
+Drown board
+== 落水榜
+
+Show the team drown board on Gores maps
+== 在 Gores 地图显示同队落水榜
+
+Include Team 0
+== 包括 0 队
+
+Show player Tee
+== 显示玩家 Tee
+
+Players shown
+== 显示人数
+
+Board opacity
+== 榜单不透明度
+
+Drown deaths
+== 落水次数
+
+More teammates...
+== 更多队友…
+
+Counts drown deaths for players in your DDRace team. Only shown on Gores maps.
+== 统计同队玩家的落水（冻结）次数，仅在 Gores 地图显示。
+

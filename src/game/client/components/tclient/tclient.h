@@ -9,6 +9,8 @@
 
 #include <game/client/component.h>
 
+#include "drown_board.h"
+
 #include <deque>
 
 class CTClient : public CComponent
@@ -127,6 +129,13 @@ private:
 	vec2 m_PlayerMenuPos = vec2(0.0f, 0.0f);
 	void RenderPlayerMiddleMenu();
 
+	// 落水榜（QmClient Gores 组队落水榜移植，默认关闭）：只统计同队玩家冻结次数。
+	CTClientDrownBoard m_DrownBoard;
+	bool m_DrownBoardModeActive = false;
+	char m_aDrownBoardMap[128] = "";
+	void UpdateDrownBoard();
+	void ResetDrownBoard();
+
 public:
 	CTClient();
 	int Sizeof() const override { return sizeof(*this); }
@@ -166,6 +175,11 @@ public:
 	void RenderMiniVoteHud();
 	void RenderCenterLines();
 	void RenderCtfFlag(vec2 Pos, float Alpha);
+
+	// 落水榜：服务器声明的 Gores 模式才生效，Team 0 是否计入由配置决定。
+	bool IsGoresGameMode() const;
+	bool IsDrownBoardMode() const { return IsGoresGameMode(); }
+	int GetDrownCount(int ClientId) const { return m_DrownBoard.Count(ClientId); }
 
 	bool ChatDoSpecId(const char *pInput);
 	bool InfoTaskDone() { return m_pTClientInfoTask && m_pTClientInfoTask->State() == EHttpState::DONE; }

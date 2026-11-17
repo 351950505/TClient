@@ -27,6 +27,8 @@
 #include <game/localization.h>
 
 #include <cmath>
+#include <algorithm>
+#include <vector>
 
 CHud::CHud()
 {
@@ -772,6 +774,131 @@ CUIRect CHud::FrozenHudCapsulePlacement(CUIRect Capsule, const CUIRect &Island, 
 	return Capsule;
 }
 
+namespace
+{
+	// 与灵动岛 EnsureShapeTexture 同款剪影判定：按掩码逐角匹配、圆心跟着角走
+	// （W==R 的退化几何会让"Left&&Top 抢先"把另一端判成直角）。
+	bool CapsuleShapeCovers(float Px, float Py, float W, float H, float R, int Corners)
+	{
+		if(Px < 0.0f || Py < 0.0f || Px > W || Py > H)
+			return false;
+		if(R <= 0.0f)
+			return true;
+		const bool Left = Px < R;
+		const bool Right = Px > W - R;
+		const bool Top = Py < R;
+		const bool Bottom = Py > H - R;
+		float CX, CY;
+		if(Left && Top && (Corners & IGraphics::CORNER_TL))
+		{
+			CX = R;
+			CY = R;
+		}
+		else if(Right && Top && (Corners & IGraphics::CORNER_TR))
+		{
+			CX = W - R;
+			CY = R;
+		}
+		else if(Left && Bottom && (Corners & IGraphics::CORNER_BL))
+		{
+			CX = R;
+			CY = H - R;
+		}
+		else if(Right && Bottom && (Corners & IGraphics::CORNER_BR))
+		{
+			CX = W - R;
+			CY = H - R;
+		}
+		else
+			return true; // 直角区/直边区：矩形范围内即覆盖
+		const float DX = Px - CX;
+		const float DY = Py - CY;
+		return DX * DX + DY * DY <= R * R;
+	}
+}
+
+// 白 RGB + 覆盖率 alpha 的圆角遮罩，2x 烘焙 1:1 显示（调用方传入已是 2 倍尺寸）。
+// Sheen 变体把顶部高光的纵向渐变（alpha 0.05→0）烤进 alpha 通道，顶点色恒为白。
+IGraphics::CTextureHandle CHud::EnsureCapsuleMask(int W, int H, float Rounding, bool Sheen)
+{
+	if(W <= 0 || H <= 0)
+		return IGraphics::CTextureHandle();
+	const float R = std::clamp(Rounding, 0.0f, (float)std::min(W, H));
+	const SCapsuleMaskKey Key{W, H, (int)std::lround(R * 100.0f), Sheen};
+	auto It = m_aCapsuleMaskCache.find(Key);
+	if(It != m_aCapsuleMaskCache.end())
+		return It->second;
+
+	// 长会话防积累：冲掉重来，代价只是下一帧重烤一次
+	if(m_aCapsuleMaskCache.size() > 64)
+	{
+		for(auto &Entry : m_aCapsuleMaskCache)
+		{
+			if(Entry.second.IsValid())
+				Graphics()->UnloadTexture(&Entry.second);
+		}
+		m_aCapsuleMaskCache.clear();
+	}
+
+	CImageInfo Image;
+	Image.m_Width = (size_t)W;
+	Image.m_Height = (size_t)H;
+	Image.m_Format = CImageInfo::FORMAT_RGBA;
+	Image.Allocate();
+	if(!Image.m_pData)
+		return IGraphics::CTextureHandle();
+
+	// 边缘 8x8 超采样（灰度 64 级），内部/外部像素走快路径
+	const int Samples = 8;
+	const float Step = 1.0f / (float)Samples;
+	for(int y = 0; y < H; y++)
+	{
+		for(int x = 0; x < W; x++)
+		{
+			uint8_t *p = Image.m_pData + ((size_t)y * (size_t)W + (size_t)x) * 4;
+			const float Cx = (float)x + 0.5f;
+			const float Cy = (float)y + 0.5f;
+			const bool OuterIn = CapsuleShapeCovers(Cx - 1.0f, Cy - 1.0f, (float)W, (float)H, R, IGraphics::CORNER_ALL) &&
+					     CapsuleShapeCovers(Cx + 1.0f, Cy - 1.0f, (float)W, (float)H, R, IGraphics::CORNER_ALL) &&
+					     CapsuleShapeCovers(Cx - 1.0f, Cy + 1.0f, (float)W, (float)H, R, IGraphics::CORNER_ALL) &&
+					     CapsuleShapeCovers(Cx + 1.0f, Cy + 1.0f, (float)W, (float)H, R, IGraphics::CORNER_ALL);
+			if(OuterIn)
+			{
+				p[0] = p[1] = p[2] = 255;
+				p[3] = Sheen ? (uint8_t)std::lround(0.05f * (1.0f - Cy / (float)H) * 255.0f) : 255;
+				continue;
+			}
+			const bool AnyOuter = CapsuleShapeCovers(Cx - 0.5f, Cy - 0.5f, (float)W, (float)H, R, IGraphics::CORNER_ALL) ||
+					      CapsuleShapeCovers(Cx + 0.5f, Cy - 0.5f, (float)W, (float)H, R, IGraphics::CORNER_ALL) ||
+					      CapsuleShapeCovers(Cx - 0.5f, Cy + 0.5f, (float)W, (float)H, R, IGraphics::CORNER_ALL) ||
+					      CapsuleShapeCovers(Cx + 0.5f, Cy + 0.5f, (float)W, (float)H, R, IGraphics::CORNER_ALL);
+			if(!AnyOuter)
+			{
+				p[0] = p[1] = p[2] = p[3] = 0;
+				continue;
+			}
+			int Hits = 0;
+			for(int sy = 0; sy < Samples; sy++)
+			{
+				for(int sx = 0; sx < Samples; sx++)
+				{
+					const float Px = (float)x + ((float)sx + 0.5f) * Step;
+					const float Py = (float)y + ((float)sy + 0.5f) * Step;
+					if(CapsuleShapeCovers(Px, Py, (float)W, (float)H, R, IGraphics::CORNER_ALL))
+						Hits++;
+				}
+			}
+			p[0] = p[1] = p[2] = 255;
+			p[3] = (uint8_t)std::lround((float)Hits / (float)(Samples * Samples) * (Sheen ? 0.05f * (1.0f - Cy / (float)H) : 1.0f) * 255.0f);
+		}
+	}
+
+	const IGraphics::CTextureHandle Tex = Graphics()->LoadTextureRawMove(Image, 0, "capsule-shape");
+	if(Tex.IsValid())
+		m_aCapsuleMaskCache[Key] = Tex;
+	return Tex;
+}
+
 void CHud::RenderFrozenHud(const CUIRect &Island)
 {
 	if(!m_FrozenHudPending)
@@ -803,7 +930,11 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 
 	const bool CapsuleShown = ShowFrozenHud && !GameClient()->m_Scoreboard.IsActive() && !(LocalTeamID == 0 && g_Config.m_TcFrozenHudTeamOnly);
 
-	if(ShowFrozenText && !CapsuleShown)
+	// Text-only mode is for users who disabled the tee capsule. Do not fall
+	// back to the plain count when the capsule is merely suppressed (scoreboard
+	// open, team-only without a team): the floating "alive / total" text would
+	// linger over the scoreboard even though the HUD is supposed to be hidden.
+	if(ShowFrozenText && !ShowFrozenHud && !GameClient()->m_Scoreboard.IsActive())
 	{
 		// Text-only mode keeps the plain centered float (no capsule to merge into).
 		float TextHeight = 0.0f;
@@ -890,16 +1021,41 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 		CUIRect TeeRow = {Capsule.x + Pad + (ShowFrozenText ? CountW + CountTeeGap : 0.0f), Capsule.y + Pad, ContentW, ContentH};
 
 		// Capsule: translucent rounded plate with a subtle top sheen.
-		Graphics()->TextureClear();
-		Graphics()->QuadsBegin();
-		Graphics()->SetColor(0.0f, 0.0f, 0.0f, 0.30f);
+		// 预烘焙（学灵动岛 EnsureShapeTexture）：面板/高光各烤一张 alpha 遮罩纹理
+		// 按 (宽,高,圆角) 缓存，每帧只是一次带色 blit —— 省掉 DrawRectExt 的
+		// 72 次三角函数与 48 个自由三角形；烘焙 2x + 1:1 显示，边缘 AA 与岛一致。
 		const float Rounding = std::min(Capsule.h / 2.0f, 6.0f * Scale);
-		Graphics()->DrawRectExt(Capsule.x, Capsule.y, Capsule.w, Capsule.h, Rounding, IGraphics::CORNER_ALL);
-		Graphics()->DrawRectExt4(Capsule.x, Capsule.y, Capsule.w, Capsule.h,
-			ColorRGBA(1.0f, 1.0f, 1.0f, 0.05f), ColorRGBA(1.0f, 1.0f, 1.0f, 0.05f),
-			ColorRGBA(1.0f, 1.0f, 1.0f, 0.0f), ColorRGBA(1.0f, 1.0f, 1.0f, 0.0f),
-			Rounding, IGraphics::CORNER_ALL);
-		Graphics()->QuadsEnd();
+		const int MaskW = std::max(1, (int)std::lround(Capsule.w));
+		const int MaskH = std::max(1, (int)std::lround(Capsule.h));
+		const IGraphics::CTextureHandle PlateTex = EnsureCapsuleMask(MaskW * 2, MaskH * 2, Rounding * 2.0f, false);
+		const IGraphics::CTextureHandle SheenTex = EnsureCapsuleMask(MaskW * 2, MaskH * 2, Rounding * 2.0f, true);
+		if(PlateTex.IsValid() && SheenTex.IsValid())
+		{
+			Graphics()->TextureSet(PlateTex);
+			Graphics()->QuadsBegin();
+			Graphics()->SetColor(0.0f, 0.0f, 0.0f, 0.30f);
+			Graphics()->QuadsSetSubset(0.0f, 0.0f, 1.0f, 1.0f);
+			const IGraphics::CQuadItem PlateQuad(Capsule.x, Capsule.y, Capsule.w, Capsule.h);
+			Graphics()->QuadsDrawTL(&PlateQuad, 1);
+			Graphics()->TextureSet(SheenTex);
+			Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+			Graphics()->QuadsDrawTL(&PlateQuad, 1);
+			Graphics()->QuadsEnd();
+			Graphics()->TextureClear();
+		}
+		else
+		{
+			// 烘焙失败（显存压力等）回退到逐帧细分路径
+			Graphics()->TextureClear();
+			Graphics()->QuadsBegin();
+			Graphics()->SetColor(0.0f, 0.0f, 0.0f, 0.30f);
+			Graphics()->DrawRectExt(Capsule.x, Capsule.y, Capsule.w, Capsule.h, Rounding, IGraphics::CORNER_ALL);
+			Graphics()->DrawRectExt4(Capsule.x, Capsule.y, Capsule.w, Capsule.h,
+				ColorRGBA(1.0f, 1.0f, 1.0f, 0.05f), ColorRGBA(1.0f, 1.0f, 1.0f, 0.05f),
+				ColorRGBA(1.0f, 1.0f, 1.0f, 0.0f), ColorRGBA(1.0f, 1.0f, 1.0f, 0.0f),
+				Rounding, IGraphics::CORNER_ALL);
+			Graphics()->QuadsEnd();
+		}
 
 		if(ShowFrozenText)
 		{
@@ -1836,6 +1992,8 @@ void CHud::RenderSpectatorCount()
 		StartY = StartY - 29.0f - 4; // dummy actions height and padding
 	}
 
+	m_SpectatorCountBoxShown = true;
+	m_SpectatorCountBoxHeight = BoxHeight;
 	Graphics()->DrawRect(StartX, StartY, BoxWidth, BoxHeight, ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f), IGraphics::CORNER_L, 5.0f);
 
 	float y = StartY + 4.0f;
@@ -2308,6 +2466,7 @@ void CHud::OnNewSnapshot()
 void CHud::OnRender()
 {
 	m_FrozenHudPending = false;
+	m_SpectatorCountBoxShown = false;
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return;
 
@@ -2377,6 +2536,7 @@ void CHud::OnRender()
 		GameClient()->m_Voting.Render();
 		if(g_Config.m_ClShowRecord)
 			RenderRecord();
+		RenderDrownBoard();
 	}
 	RenderCursor();
 }
@@ -2564,3 +2724,174 @@ void CHud::RenderRecord()
 		}
 	}
 }
+
+void CHud::RenderDrownBoard()
+{
+	if(!g_Config.m_TcDrownBoard || !GameClient()->m_TClient.IsDrownBoardMode())
+		return;
+	const float BoardAlpha = std::clamp(g_Config.m_TcDrownBoardOpacity / 100.0f, 0.0f, 1.0f);
+	if(BoardAlpha <= 0.0f)
+		return;
+
+	const int LocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy] >= 0 ? GameClient()->m_aLocalIds[g_Config.m_ClDummy] : GameClient()->m_Snap.m_LocalClientId;
+	const bool HasLocalClient = LocalId >= 0 && LocalId < MAX_CLIENTS && GameClient()->m_aClients[LocalId].m_Active && GameClient()->m_Snap.m_apPlayerInfos[LocalId] != nullptr;
+	const int LocalTeam = HasLocalClient ? GameClient()->m_Teams.Team(LocalId) : -1;
+	const bool IncludeTeamZero = g_Config.m_TcDrownBoardIncludeTeam0 != 0;
+	if(!CTClientDrownBoard::IsBoardVisible(GameClient()->m_TClient.IsDrownBoardMode(), HasLocalClient, LocalTeam, IncludeTeamZero))
+		return;
+
+	struct SEntry
+	{
+		int m_ClientId;
+		int m_Count;
+	};
+	std::vector<SEntry> vEntries;
+	for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
+	{
+		if(!GameClient()->m_aClients[ClientId].m_Active ||
+			GameClient()->m_Snap.m_apPlayerInfos[ClientId] == nullptr ||
+			!CTClientDrownBoard::IsSameTrackedTeam(LocalTeam, GameClient()->m_Teams.Team(ClientId), IncludeTeamZero))
+			continue;
+		vEntries.push_back({ClientId, GameClient()->m_TClient.GetDrownCount(ClientId)});
+	}
+	if(vEntries.empty())
+		return;
+
+	std::stable_sort(vEntries.begin(), vEntries.end(), [](const SEntry &Left, const SEntry &Right) {
+		if(Left.m_Count != Right.m_Count)
+			return Left.m_Count > Right.m_Count;
+		return Left.m_ClientId < Right.m_ClientId;
+	});
+
+	const int MaxRows = std::clamp(g_Config.m_TcDrownBoardMaxPlayers, 1, 16);
+	const int RowCount = std::min((int)vEntries.size(), MaxRows);
+	const bool HasMoreRows = (int)vEntries.size() > RowCount;
+	const bool ShowTee = g_Config.m_TcDrownBoardShowTee != 0;
+	const char *pTitle = Localize("Drown deaths");
+	const int MaxCount = vEntries.front().m_Count;
+
+	// 设计：深水面板 + 全场最大的次数列（唯一醒目元素）。落水最多的人次数用
+	// aqua 水色，其余按是否 >0 分灰度；标题下一条渐隐"水面线"，仅此一处装饰。
+	// 右缘贴边 + 左圆角，与下方观战名字框同款语言，右列读成一个整体。
+	constexpr float TitleFontSize = 5.0f;
+	constexpr float RowFontSize = 6.0f;
+	constexpr float CountFontSize = 7.6f;
+	constexpr float MoreFontSize = 5.5f;
+	constexpr float PaddingX = 4.5f;
+	constexpr float PaddingY = 3.5f;
+	constexpr float TitleHeight = TitleFontSize + 3.5f;
+	constexpr float RowHeight = 9.0f;
+	constexpr float MoreHeight = MoreFontSize + 2.0f;
+	constexpr float TeeSize = 6.5f;
+	constexpr float TeeGap = 2.5f;
+	constexpr float CountGap = 4.0f;
+	constexpr float WaterlineWidth = 14.0f;
+	const ColorRGBA WaterlineColor(0.247f, 0.776f, 0.831f, 1.0f);
+	const float TeeColumnWidth = ShowTee ? TeeSize + TeeGap : 0.0f;
+
+	float CountWidthMax = 0.0f;
+	float NameWidthMax = 0.0f;
+	for(int Index = 0; Index < RowCount; ++Index)
+	{
+		char aCount[16];
+		const char *pName = GameClient()->m_aClients[vEntries[Index].m_ClientId].m_aName;
+		str_format(aCount, sizeof(aCount), "%d", vEntries[Index].m_Count);
+		CountWidthMax = std::max(CountWidthMax, TextRender()->TextWidth(CountFontSize, aCount));
+		NameWidthMax = std::max(NameWidthMax, TextRender()->TextWidth(RowFontSize, pName));
+	}
+
+	float BoardWidth = PaddingX * 2.0f + TeeColumnWidth + NameWidthMax + CountGap + CountWidthMax;
+	BoardWidth = std::max(BoardWidth, PaddingX * 2.0f + TextRender()->TextWidth(TitleFontSize, pTitle));
+	BoardWidth = std::clamp(BoardWidth, 60.0f, m_Width * 0.5f);
+	const float BoardHeight = PaddingY * 2.0f + TitleHeight + RowCount * RowHeight + (HasMoreRows ? MoreHeight : 0.0f);
+
+	// 与 RenderSpectatorCount 的右下角堆叠链保持一致，落在观战名字框上方
+	float Anchor = 285.0f - 4.0f;
+	if(g_Config.m_ClShowhudPlayerPosition || g_Config.m_ClShowhudPlayerSpeed || g_Config.m_ClShowhudPlayerAngle)
+		Anchor -= 4.0f;
+	Anchor -= GetMovementInformationBoxHeight();
+	if(g_Config.m_ClShowhudScore)
+		Anchor -= 56.0f;
+	if(g_Config.m_ClShowhudDummyActions && !(GameClient()->m_Snap.m_pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_GAMEOVER) && Client()->DummyConnected())
+		Anchor -= 29.0f + 4.0f;
+	float BoardBottom = Anchor - 6.0f;
+	if(m_SpectatorCountBoxShown)
+		BoardBottom -= m_SpectatorCountBoxHeight + 4.0f;
+	const float BoardX = m_Width - BoardWidth;
+	const float BoardY = std::max(BoardBottom - BoardHeight, 32.0f);
+
+	const ColorRGBA PreviousColor = TextRender()->GetTextColor();
+	const ColorRGBA PreviousOutline = TextRender()->GetTextOutlineColor();
+
+	Graphics()->TextureClear();
+	Graphics()->QuadsBegin();
+	Graphics()->DrawRectExt4(BoardX, BoardY, BoardWidth, BoardHeight,
+		ColorRGBA(0.047f, 0.157f, 0.188f, 0.72f * BoardAlpha),
+		ColorRGBA(0.047f, 0.157f, 0.188f, 0.72f * BoardAlpha),
+		ColorRGBA(0.020f, 0.059f, 0.082f, 0.80f * BoardAlpha),
+		ColorRGBA(0.020f, 0.059f, 0.082f, 0.80f * BoardAlpha),
+		5.0f, IGraphics::CORNER_L);
+	const float WaterY = BoardY + PaddingY + TitleFontSize + 1.0f;
+	Graphics()->DrawRectExt4(BoardX + PaddingX, WaterY, WaterlineWidth, 1.2f,
+		ColorRGBA(WaterlineColor.r, WaterlineColor.g, WaterlineColor.b, 0.85f * BoardAlpha),
+		ColorRGBA(WaterlineColor.r, WaterlineColor.g, WaterlineColor.b, 0.0f),
+		ColorRGBA(WaterlineColor.r, WaterlineColor.g, WaterlineColor.b, 0.85f * BoardAlpha),
+		ColorRGBA(WaterlineColor.r, WaterlineColor.g, WaterlineColor.b, 0.0f),
+		0.6f, IGraphics::CORNER_ALL);
+	Graphics()->QuadsEnd();
+
+	TextRender()->TextColor(TextRender()->DefaultTextColor());
+	TextRender()->TextOutlineColor(TextRender()->DefaultTextOutlineColor());
+
+	const float RowLeft = BoardX + PaddingX;
+	const float CountX = BoardX + BoardWidth - PaddingX - CountWidthMax;
+	TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.62f);
+	TextRender()->Text(RowLeft, BoardY + PaddingY, TitleFontSize, pTitle);
+	for(int Index = 0; Index < RowCount; ++Index)
+	{
+		char aCount[16];
+		const int ClientId = vEntries[Index].m_ClientId;
+		const char *pName = GameClient()->m_aClients[ClientId].m_aName;
+		str_format(aCount, sizeof(aCount), "%d", vEntries[Index].m_Count);
+		const int Count = vEntries[Index].m_Count;
+		const bool IsLeader = Index == 0 && MaxCount > 0;
+		const float Y = BoardY + PaddingY + TitleHeight + Index * RowHeight;
+		const float NameWidth = std::max(0.0f, CountX - CountGap - RowLeft - TeeColumnWidth);
+
+		if(ShowTee)
+		{
+			CTeeRenderInfo TeeInfo = GameClient()->m_aClients[ClientId].m_RenderInfo;
+			TeeInfo.m_Size = TeeSize;
+			vec2 OffsetToMid;
+			CRenderTools::GetRenderTeeOffsetToRenderedTee(CAnimState::GetIdle(), &TeeInfo, OffsetToMid);
+			RenderTools()->RenderTee(CAnimState::GetIdle(), &TeeInfo, EMOTE_NORMAL, vec2(1.0f, 0.0f), vec2(RowLeft + TeeSize / 2.0f, Y + RowHeight / 2.0f + OffsetToMid.y), BoardAlpha);
+		}
+
+		if(IsLeader)
+			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.95f);
+		else if(Count > 0)
+			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.85f);
+		else
+			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.55f);
+		TextRender()->Text(RowLeft + TeeColumnWidth, Y + (RowHeight - RowFontSize) / 2.0f, RowFontSize, pName, NameWidth);
+
+		if(IsLeader)
+			TextRender()->TextColor(WaterlineColor.r, WaterlineColor.g, WaterlineColor.b, 0.95f);
+		else if(Count > 0)
+			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
+		else
+			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.45f);
+		TextRender()->Text(CountX, Y + RowHeight / 2.0f - CountFontSize / 2.0f, CountFontSize, aCount);
+	}
+	if(HasMoreRows)
+	{
+		char aMore[16];
+		str_format(aMore, sizeof(aMore), "+%d", (int)vEntries.size() - RowCount);
+		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.55f);
+		TextRender()->Text(RowLeft, BoardY + PaddingY + TitleHeight + RowCount * RowHeight + (MoreHeight - MoreFontSize) / 2.0f, MoreFontSize, aMore);
+	}
+
+	TextRender()->TextColor(PreviousColor);
+	TextRender()->TextOutlineColor(PreviousOutline);
+}
+

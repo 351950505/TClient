@@ -457,6 +457,12 @@ MACRO_CONFIG_INT(TcJitterBufferMax, tc_jitter_buffer_max, 30, 0, 100, CFGFLAG_CL
 // ME page: TClient 企鹅徽标（ddnet-custom-clients 皮肤颜色法）
 // 广播是客户端身份的一部分，始终发送；本开关只控制自己是否显示徽标。
 MACRO_CONFIG_INT(MeClientBadge, me_client_badge, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: show the TClient penguin next to TClient players on the scoreboard (TClient identity is always broadcast)")
+// ME page: Gores 组队落水榜（QmClient 移植）——统计同队玩家冻结次数，默认关闭。
+MACRO_CONFIG_INT(TcDrownBoard, tc_drown_board, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: show the team drown board on Gores maps")
+MACRO_CONFIG_INT(TcDrownBoardIncludeTeam0, tc_drown_board_include_team0, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: include Team 0")
+MACRO_CONFIG_INT(TcDrownBoardMaxPlayers, tc_drown_board_max_players, 8, 1, 16, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: maximum players shown")
+MACRO_CONFIG_INT(TcDrownBoardOpacity, tc_drown_board_opacity, 80, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: background opacity")
+MACRO_CONFIG_INT(TcDrownBoardShowTee, tc_drown_board_show_tee, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: show player Tee")
 MACRO_CONFIG_INT(TcIslandOffsetX, tc_island_offset_x, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island horizontal offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandOffsetY, tc_island_offset_y, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island vertical offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandTransparent, tc_island_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode (no black capsule, outlined text)")

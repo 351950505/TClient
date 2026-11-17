@@ -20,8 +20,10 @@
 
 #include <chrono>
 #include <cstddef>
+#include <memory>
 #include <limits>
 #include <tuple>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -392,16 +394,48 @@ private:
 		log_debug("textrender", "Increasing atlas dimension to %" PRIzu " (%" PRIzu " MB used for textures)", NewTextureDimension, (NewTextureDimension / 1024) * (NewTextureDimension / 1024) * NUM_FONT_TEXTURES);
 		UnloadTextures();
 
-		for(auto &pTextureData : m_apTextureData)
+		// TClient: 行复制分块并行。CJK 长会话把图集一路翻到 8192/16384，单线程
+		// memcpy 一次要搬 128-512MB，是玩家实测的毫秒级帧尖峰（2026-11-18）。纯
+		// 内存带宽活，分块多线程把主线程停顿压到 ~1/4。
 		{
-			uint8_t *pTmpTexBuffer = new uint8_t[NewTextureDimension * NewTextureDimension];
-			mem_zero(pTmpTexBuffer, NewTextureDimension * NewTextureDimension * sizeof(uint8_t));
-			for(size_t y = 0; y < m_TextureDimension; ++y)
+			const size_t NumRows = m_TextureDimension;
+			unsigned NumThreads = std::min<unsigned>(4u, std::thread::hardware_concurrency());
+			std::vector<std::unique_ptr<uint8_t[]>> aNewBuffers;
+			for(auto &pTextureData : m_apTextureData)
+				aNewBuffers.push_back(std::unique_ptr<uint8_t[]>(new uint8_t[NewTextureDimension * NewTextureDimension]));
+			auto FillChunkRows = [&](uint8_t *pNew, const uint8_t *pOld, size_t yBegin, size_t yEnd) {
+				for(size_t y = yBegin; y < yEnd && y < NewTextureDimension; ++y)
+				{
+					uint8_t *pRow = &pNew[y * NewTextureDimension];
+					if(y < NumRows)
+					{
+						memcpy(pRow, &pOld[y * NumRows], NumRows);
+						mem_zero(pRow + NumRows, NewTextureDimension - NumRows);
+					}
+					else
+					{
+						mem_zero(pRow, NewTextureDimension);
+					}
+				}
+			};
+			const size_t RowsPerChunk = (NewTextureDimension + NumThreads - 1) / NumThreads;
+			std::vector<std::thread> vThreads;
+			for(unsigned Chunk = 1; Chunk < NumThreads; ++Chunk)
 			{
-				mem_copy(&pTmpTexBuffer[y * NewTextureDimension], &pTextureData[y * m_TextureDimension], m_TextureDimension);
+				vThreads.emplace_back([&, Chunk]() {
+					for(size_t Tex = 0; Tex < NUM_FONT_TEXTURES; ++Tex)
+						FillChunkRows(aNewBuffers[Tex].get(), m_apTextureData[Tex], Chunk * RowsPerChunk, (Chunk + 1) * RowsPerChunk);
+				});
 			}
-			delete[] pTextureData;
-			pTextureData = pTmpTexBuffer;
+			for(size_t Tex = 0; Tex < NUM_FONT_TEXTURES; ++Tex)
+				FillChunkRows(aNewBuffers[Tex].get(), m_apTextureData[Tex], 0, RowsPerChunk);
+			for(auto &CopyThread : vThreads)
+				CopyThread.join();
+			for(size_t Tex = 0; Tex < NUM_FONT_TEXTURES; ++Tex)
+			{
+				delete[] m_apTextureData[Tex];
+				m_apTextureData[Tex] = aNewBuffers[Tex].release();
+			}
 		}
 
 		m_TextureAtlas.IncreaseDimension(NewTextureDimension);
@@ -624,6 +658,49 @@ public:
 
 		m_TextureAtlas.Clear(m_TextureDimension);
 		UploadTextures();
+	}
+
+	// TClient: CJK 文本（中文歌词/名字/聊天，长会话不断出现新字形）会把图集从 1MB
+	// 一路翻倍到 256MB，每次翻倍都是主线程整段复制 + 整图上传的毫秒级尖峰（2026-11-18
+	// 玩家报"比其他客户端卡"，这是唯一已知的尖峰源）。启动时探测已加载字体是否覆盖
+	// CJK，是则在加载期一次性预扩到 8192（2×64MB），把游戏内的多次翻倍尖峰挪到加载画面。
+	bool FaceCoversCJK(FT_Face Face) const
+	{
+		if(!Face || !Face->charmap)
+			return false;
+		for(const FT_ULong Chr : {0x4E2DUL /*中*/, 0x6587UL /*文*/, 0x3072UL /*ひ*/, 0xD55CUL /*한*/})
+		{
+			if(FT_Get_Char_Index(Face, Chr) != 0)
+				return true;
+		}
+		return false;
+	}
+
+	static constexpr size_t CJK_TARGET_ATLAS_DIMENSION = 8 * 1024;
+
+	public:
+	void PreGrowForCJK()
+	{
+		bool Cjk = FaceCoversCJK(m_DefaultFace) || FaceCoversCJK(m_SelectedFace) || FaceCoversCJK(m_VariantFace);
+		if(!Cjk)
+		{
+			for(const auto &FallbackFace : m_vFallbackFaces)
+			{
+				if(FaceCoversCJK(FallbackFace))
+				{
+					Cjk = true;
+					break;
+				}
+			}
+		}
+		if(!Cjk || m_TextureDimension >= CJK_TARGET_ATLAS_DIMENSION)
+			return;
+		log_info("textrender", "CJK-capable fonts detected; pre-growing glyph atlas to %" PRIzu " to avoid mid-game resize spikes", CJK_TARGET_ATLAS_DIMENSION);
+		while(m_TextureDimension < CJK_TARGET_ATLAS_DIMENSION)
+		{
+			if(!IncreaseGlyphMapSize())
+				break;
+		}
 	}
 
 	~CGlyphMap()
@@ -1387,6 +1464,8 @@ public:
 		// TClient
 		LoadCustomFonts();
 		m_pGlyphMap->AddFallbackFaceByName("DejaVu Sans");
+		// TClient: CJK 字体探测 + 启动期预扩图集（详见 CGlyphMap::PreGrowForCJK）
+		m_pGlyphMap->PreGrowForCJK();
 
 		// extract language variant family names
 		const json_value &Variants = (*pJsonData)["language variants"];

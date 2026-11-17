@@ -13,6 +13,7 @@
 
 #include <engine/client.h>
 #include <engine/client/enums.h>
+#include <engine/map.h>
 #include <engine/external/regex.h>
 #include <engine/external/tinyexpr.h>
 #include <engine/graphics.h>
@@ -1974,6 +1975,7 @@ void CTClient::OnUpdate()
 void CTClient::OnStateChange(int OldState, int NewState)
 {
 	QueueForcedAspectUpdate();
+	ResetDrownBoard();
 	for(auto &AirRescuePositions : m_aAirRescuePositions)
 		AirRescuePositions = {};
 }
@@ -2022,6 +2024,70 @@ void CTClient::OnNewSnapshot()
 				m_aAirRescuePositions[Dummy].pop_back();
 			m_aAirRescuePositions[Dummy].push_front(NewPos);
 		}
+	}
+	UpdateDrownBoard();
+}
+
+bool CTClient::IsGoresGameMode() const
+{
+	const char *pGameType = GameClient()->m_GameInfo.m_aGameType;
+	return pGameType != nullptr && pGameType[0] != '\0' && str_find_nocase(pGameType, "gores") != nullptr;
+}
+
+void CTClient::ResetDrownBoard()
+{
+	m_DrownBoard.Reset();
+	m_DrownBoardModeActive = false;
+	m_aDrownBoardMap[0] = '\0';
+}
+
+void CTClient::UpdateDrownBoard()
+{
+	if(Client()->State() != IClient::STATE_ONLINE)
+		return;
+	// 关闭时彻底清空，重新开启后从当前状态重新建立基线，不补算关闭期间的落水。
+	if(!g_Config.m_TcDrownBoard)
+	{
+		if(m_DrownBoardModeActive || m_aDrownBoardMap[0] != '\0')
+			ResetDrownBoard();
+		return;
+	}
+
+	const IMap *pMap = GameClient()->Map();
+	const char *pMapName = pMap != nullptr ? pMap->BaseName() : "";
+	if(pMapName[0] != '\0' && str_comp(m_aDrownBoardMap, pMapName) != 0)
+	{
+		ResetDrownBoard();
+		str_copy(m_aDrownBoardMap, pMapName);
+	}
+
+	const bool IsGores = IsDrownBoardMode();
+	if(IsGores != m_DrownBoardModeActive)
+	{
+		ResetDrownBoard();
+		m_DrownBoardModeActive = IsGores;
+		if(pMapName[0] != '\0')
+			str_copy(m_aDrownBoardMap, pMapName);
+	}
+	if(!IsGores)
+		return;
+
+	const CCollision *pCollision = GameClient()->Collision();
+	const bool IncludeTeamZero = g_Config.m_TcDrownBoardIncludeTeam0 != 0;
+	for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
+	{
+		const auto &Player = GameClient()->m_aClients[ClientId];
+		const auto &Character = GameClient()->m_Snap.m_aCharacters[ClientId];
+		const bool Active = Player.m_Active && GameClient()->m_Snap.m_apPlayerInfos[ClientId] != nullptr;
+		const bool Hooking = Character.m_Active && (Character.m_Cur.m_HookState == HOOK_FLYING || Character.m_Cur.m_HookState == HOOK_GRABBED);
+		bool OnStart = false;
+		if(Active && Character.m_Active && pCollision != nullptr)
+		{
+			const int Index = pCollision->GetPureMapIndex(vec2((float)Character.m_Cur.m_X, (float)Character.m_Cur.m_Y));
+			OnStart = pCollision->GetTileIndex(Index) == TILE_START || pCollision->GetFrontTileIndex(Index) == TILE_START;
+		}
+		m_DrownBoard.Observe(ClientId, Active, Player.m_aName, Player.m_aClan, GameClient()->m_Teams.Team(ClientId),
+			Character.m_Active, Player.m_FreezeEnd != 0, Hooking, OnStart, IncludeTeamZero);
 	}
 }
 

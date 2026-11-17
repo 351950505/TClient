@@ -88,7 +88,11 @@ public:
 	// lyric marquee scroll state
 	std::string m_LastScrollText;
 	std::string m_CurScrollText;
-	int64_t m_ScrollStartTick = 0;
+	// Wall-clock scroll time is accumulated only while playback is running, so
+	// a paused track freezes the marquee instead of letting the text keep
+	// drifting past the lyric line.
+	float m_ScrollElapsedSec = 0.0f;
+	int64_t m_ScrollLastTick = 0;
 
 	// 卡拉OK/标题逐帧文本缓存(2026-11-01):yrc 逐字歌词挂上后,GreenEndX 每帧对
 	// 每个字做 substr 堆分配 + TextWidth 测量(实测 DDNet 冲到 167% CPU,灵动岛
@@ -1614,7 +1618,10 @@ public:
 			// 快照值没变(源冻结)则维持旧锚点让墙钟自由跑,与原行为一致。
 			const int64_t Interp = CurrentPositionMs();
 			const int64_t Drift = Snapshot > Interp ? Snapshot - Interp : Interp - Snapshot;
-			if(FirstSync || StateChanged || (SnapshotChanged && Drift > 300))
+			// 暂停期间不追快照漂移：有的源暂停后位置快照仍在前移（或回跳），
+			// 追上去会让歌词在暂停时继续走/倒退。暂停态锚定后冻结，恢复播放
+			// 时经 StateChanged 重新锚定。
+			if(FirstSync || StateChanged || (m_ClockPlaying && SnapshotChanged && Drift > 300))
 			{
 				m_ClockPositionMs = Snapshot;
 				m_ClockTick = Now;
@@ -3121,13 +3128,19 @@ public:
 			else
 				Track = SmTc;
 			// 播放/暂停状态的权威归属：
-			//  - 网易云标题路径（service=netease-title）：monitor 权威 —— 它用音频帧/LS 活性判暂停，
+			//  - 网易云（标题监控或 SMTC，service 桶=1）：monitor 权威 —— 它用音频帧/LS 活性判暂停，
 			//    是实测唯一可靠的信号（网易云暂停时 SMTC 仍报 Playing，见 §175）。
+			//    2026-11-18 用户复现"外部音乐软件点暂停歌词还在走"：此前只覆盖 netease-title
+			//    路径，SMTC 位置可信时走的仍是 SMTC 的假 Playing，暂停信号被丢弃。
 			//  - 其它播放器（QQ 音乐等，Track 来自 SMTC）：它们的 SMTC 状态是正常的，**不能**被
 			//    monitor 盖掉 —— monitor 只认网易云，QQ 音乐在播时它报"没播"，会误杀播放动画
 			//    （用户实测：QQ 音乐五线谱不跳）。仅当 monitor 检测到网易云且有数据时才覆盖。
-			if(Monitor.m_Valid && Track.m_ServiceId == "netease-title")
+			if(Monitor.m_Valid && TcDetectSourceService(Track.m_ServiceId) == 1)
+			{
 				Track.m_Playing = Monitor.m_Playing;
+				if(!Track.m_Playing)
+					Track.m_Paused = true; // monitor 判停即"有歌没在播"，不要当成停止把岛收起
+			}
 			return Track;
 		}
 #endif
@@ -4218,8 +4231,18 @@ m_NextLyricText = aNextLyric;
 					if(m_LastScrollText != m_CurScrollText)
 					{
 						m_LastScrollText = m_CurScrollText;
-						m_ScrollStartTick = NowTick;
+						m_ScrollElapsedSec = 0.0f;
+						m_ScrollLastTick = NowTick;
 					}
+					if(m_ScrollLastTick == 0)
+						m_ScrollLastTick = NowTick;
+					const double ScrollDeltaSec = (double)(NowTick - m_ScrollLastTick) / (double)time_freq();
+					m_ScrollLastTick = NowTick;
+					// Pause must freeze the marquee: only advance the elapsed time
+					// while the media clock is playing.
+					if(m_ClockPlaying)
+						m_ScrollElapsedSec += (float)std::max(0.0, ScrollDeltaSec);
+					const float ElapsedSec = m_ScrollElapsedSec;
 					const float Overflow = FullW - MaxTextW;
 					// 滚动速度按"这句歌词的实际时长"自适应：几何固定速度会让长句在行内
 					// 反复回卷（结尾只停 1 秒就跳回开头，2026-10-29 用户实测）。
@@ -4243,7 +4266,6 @@ m_NextLyricText = aNextLyric;
 					const float AvailSec = std::max(1.5f, LineDurSec - HoldTotal);
 					const float PxPerSec = std::clamp(Overflow / AvailSec, std::max(28.0f, 40.0f * Scale), 140.0f);
 					const float LeadDelaySec = 1.2f;  // hold at the start before scrolling
-					const float ElapsedSec = (float)((NowTick - m_ScrollStartTick) / (double)time_freq());
 					// 不回卷：滚到行尾就停住（歌词不是跑马灯——滚回开头再看一遍没有意义，
 					// 用户反馈的"回跳"即旧版 fmod 循环）。行结束时直接切下一行。
 					float Offset;

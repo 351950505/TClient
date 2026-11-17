@@ -116,7 +116,6 @@ MACRO_CONFIG_INT(TcFastInput, tc_fast_input, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_S
 MACRO_CONFIG_INT(TcFastInputAmount, tc_fast_input_amount, 20, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How many milliseconds fast input will apply")
 MACRO_CONFIG_INT(TcFastInputOthers, tc_fast_input_others, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Apply fast input to other tees")
 MACRO_CONFIG_INT(TcFastInputRepredictHook, tc_fast_input_repredict_hook, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Repredict fast input hook when the direction changes (requires Sub-Tick aiming disabled)")
-MACRO_CONFIG_INT(TcEventDrivenInput, tc_event_driven_input, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "事件驱动输入（实验）：输入变化立即重预测（与快速输入互斥，UI 开一个自动关另一个）")
 // 快速输入模式：0=Tater(原版) 1=Meow 2=Snow 3=Next 5=Salatik 6=Ancient 7=F（对齐 MeowClient-Next alpha）
 // 8=Best 9=Saiko 10=Delta 11=Cloud（2026-10-29 自 BestClient 移植，见 交接摘要 §172）
 MACRO_CONFIG_INT(TcFastInputMode, tc_fast_input_mode, 0, 0, 14, CFGFLAG_CLIENT | CFGFLAG_SAVE, "快速输入模式：0=Tater 1=Meow 2=Snow 3=Next 5=Salatik 6=Ancient 7=F 8=Best 9=Saiko 10=Delta 11=Cloud 12=Light 13=Azure 14=BestClient-Light Ancient")

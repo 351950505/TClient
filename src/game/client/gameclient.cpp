@@ -81,6 +81,7 @@
 
 #include <game/client/projectile_data.h>
 #include <game/localization.h>
+
 #include <game/mapitems.h>
 #include <game/teamscore.h>
 #include <game/version.h>
@@ -6378,11 +6379,6 @@ void CGameClient::StoreSave(const char *pTeamMembers, const char *pGeneratedCode
 bool CGameClient::CheckNewInput()
 {
 	return m_Controls.CheckNewInput();
-}
-
-bool CGameClient::CheckEventDrivenInput()
-{
-	return m_Controls.CheckEventDrivenInput();
 }
 
 void CGameClient::SetConnectInfo(const NETADDR *pAddress)

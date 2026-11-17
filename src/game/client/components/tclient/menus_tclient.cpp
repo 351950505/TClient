@@ -850,22 +850,11 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	Ui()->DoLabel(&Label, TCLocalize("Input"), HeadlineFontSize, TEXTALIGN_ML);
 	Column.HSplitTop(MarginSmall, nullptr, &Column);
 
-	if(DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFastInput, TCLocalize("Fast Input (reduced visual delay)"), &g_Config.m_TcFastInput, &Column, LineSize))
-	{
-		if(g_Config.m_TcFastInput)
-			g_Config.m_TcEventDrivenInput = 0; // 两个模式互斥
-	}
-	if(DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcEventDrivenInput, TCLocalize("Event-driven input (experimental: re-predict on input changes)"), &g_Config.m_TcEventDrivenInput, &Column, LineSize))
-	{
-		if(g_Config.m_TcEventDrivenInput)
-			g_Config.m_TcFastInput = 0; // 两个模式互斥
-	}
-	Column.HSplitTop(LineSize, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Mutually exclusive with Fast Input; input changes re-predict immediately"), EditBoxFontSize, TEXTALIGN_TL);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFastInput, TCLocalize("Fast Input (reduced visual delay)"), &g_Config.m_TcFastInput, &Column, LineSize);
+
 
 	// 快速输入模式选择（照 alpha 客户端顺序：Tater/Ancient/Next/Meow/Snow/Salatik/F，对应 mode 0/6/3/1/2/5/7；
 	// 8~11 = BestClient 四模式 Best/Saiko/Delta/Cloud，接在 F 后）
-	if(!g_Config.m_TcEventDrivenInput)
 	{
 		static const std::vector<int> s_vModeValues = {0, 6, 3, 1, 2, 5, 7, 8, 9, 10, 11, 12, 13, 14};
 		static std::vector<const char *> s_vModeNames;

@@ -1065,6 +1065,12 @@ public:
 	bool HasSnowHookInteraction(int ClientId) const;
 	bool IsSnowHookActive() const;
 	bool IsSnowHookAffected(int ClientId) const;
+	// TClient: Light(mode 12) 专属钩链检测（忠实 BestClient-Light CLightInput）
+	int TcLightHookAmountMs() const;
+	int TcLightHookTickOffset() const;
+	bool TcLightUseHookLogic() const;
+	bool TcLightIsHookClient(int ClientId) const;
+	bool TcLightIsHookLinkedClient(int ClientId) const;
 	int GetSnowHookTicks() const;
 
 	int m_MultiViewTeam;

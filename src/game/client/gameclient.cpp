@@ -2996,7 +2996,7 @@ void CGameClient::OnPredict()
 			if(CCharacter *pChar = m_PredictedWorld.GetCharacterById(i))
 			{
 					if(SnapshotInputMode && Tick > FinalTickOthers && !IsFastInputLocal(i) &&
-						!(FastInputMode() == 12 && IsSnowHookAffected(i)))
+						!(FastInputMode() == 12 && TcLightIsHookLinkedClient(i)))
 					continue;
 				m_aClients[i].m_aPredPos[Tick % 200] = pChar->Core()->m_Pos;
 				m_aClients[i].m_aPredTick[Tick % 200] = Tick;
@@ -4614,7 +4614,7 @@ vec2 CGameClient::GetSmoothPos(int ClientId)
 	const bool Local = IsFastInputLocal(ClientId);
 	const bool SnapshotInputMode = IsSnapshotInputMode();
 	const int OtherTicks = GetFastInputOtherTicks();
-	if(Active && SnapshotInputMode && (Local || OtherTicks > 0 || (Mode == 12 && IsSnowHookAffected(ClientId))))
+	if(Active && SnapshotInputMode && (Local || OtherTicks > 0 || (Mode == 12 && TcLightIsHookLinkedClient(ClientId))))
 		return GetFastInputPos(ClientId);
 	if(Active && !Local && ((Mode == 3 && OtherTicks > 0) || FastInputImmediateOthers()))
 		return GetFastInputPos(ClientId);
@@ -4729,7 +4729,7 @@ vec2 CGameClient::GetFreezePos(int ClientId)
 	const bool Local = IsFastInputLocal(ClientId);
 	if((IsSnapshotInputMode() && Active) || (Mode == 3 && Active && !Local))
 	{
-		if(Mode >= 12 && Mode <= 14 && !Local && (FastInputActive(ClientId, true) || (Mode == 12 && IsSnowHookAffected(ClientId))))
+		if(Mode >= 12 && Mode <= 14 && !Local && (FastInputActive(ClientId, true) || (Mode == 12 && TcLightIsHookLinkedClient(ClientId))))
 			return GetFastInputPos(ClientId);
 
 		vec2 Pos = mix(m_aClients[ClientId].m_PrevPredicted.m_Pos, m_aClients[ClientId].m_Predicted.m_Pos, Client()->PredIntraGameTick(g_Config.m_ClDummy));
@@ -4986,6 +4986,87 @@ bool CGameClient::IsSnowHookAffected(int ClientId) const
 	return false;
 }
 
+// TClient: Light(mode 12) 钩链检测——忠实移植 BestClient-Light CLightInput（c56daba94）。
+// 之前复用 Snow 的 IsSnowHookActive/GetSnowHookTicks 属于移植简化，与原版语义不同：
+// 原版有 8 条件钩状态检测（core/snap/双向 HookedPlayer 搜索）与独立的 HookTickOffset 公式。
+int CGameClient::TcLightHookAmountMs() const
+{
+	if(g_Config.m_TcLightInputHook)
+		return g_Config.m_TcLightInputHookAmount;
+	return (g_Config.m_TcLightInput + 2) / 5;
+}
+
+int CGameClient::TcLightHookTickOffset() const
+{
+	return (TcLightHookAmountMs() + 19) / 20;
+}
+
+bool CGameClient::TcLightUseHookLogic() const
+{
+	if(!IsSnapshotInputMode() || FastInputMode() != 12)
+		return false;
+	if(TcLightIsHookClient(m_Snap.m_LocalClientId))
+		return true;
+	if(PredictDummy())
+		return TcLightIsHookClient(m_aLocalIds[!g_Config.m_ClDummy]);
+	return false;
+}
+
+bool CGameClient::TcLightIsHookClient(int ClientId) const
+{
+	if(FastInputMode() != 12 || ClientId < 0 || ClientId >= MAX_CLIENTS || !m_Snap.m_aCharacters[ClientId].m_Active)
+		return false;
+	const auto HasCoreHook = [](const CCharacterCore &Core) {
+		return Core.m_HookState != HOOK_IDLE && Core.m_HookState != HOOK_RETRACTED;
+	};
+	const auto HasSnapHook = [](const CNetObj_Character &Char) {
+		return Char.m_HookState != HOOK_IDLE && Char.m_HookState != HOOK_RETRACTED;
+	};
+	if(HasCoreHook(m_aClients[ClientId].m_Predicted) ||
+		HasCoreHook(m_aClients[ClientId].m_PrevPredicted) ||
+		HasSnapHook(m_Snap.m_aCharacters[ClientId].m_Cur) ||
+		HasSnapHook(m_Snap.m_aCharacters[ClientId].m_Prev) ||
+		m_aClients[ClientId].m_Predicted.HookedPlayer() >= 0 ||
+		m_aClients[ClientId].m_PrevPredicted.HookedPlayer() >= 0 ||
+		m_Snap.m_aCharacters[ClientId].m_Cur.m_HookedPlayer >= 0 ||
+		m_Snap.m_aCharacters[ClientId].m_Prev.m_HookedPlayer >= 0)
+		return true;
+	for(int i = 0; i < MAX_CLIENTS; i++)
+	{
+		if(i == ClientId || !m_Snap.m_aCharacters[i].m_Active)
+			continue;
+		if(m_aClients[i].m_Predicted.HookedPlayer() == ClientId ||
+			m_aClients[i].m_PrevPredicted.HookedPlayer() == ClientId ||
+			m_Snap.m_aCharacters[i].m_Cur.m_HookedPlayer == ClientId ||
+			m_Snap.m_aCharacters[i].m_Prev.m_HookedPlayer == ClientId)
+			return true;
+	}
+	return false;
+}
+
+bool CGameClient::TcLightIsHookLinkedClient(int ClientId) const
+{
+	if(!TcLightUseHookLogic() || ClientId < 0 || ClientId >= MAX_CLIENTS || !m_Snap.m_aCharacters[ClientId].m_Active)
+		return false;
+	if(IsFastInputLocal(ClientId))
+		return true;
+	const auto HooksPlayer = [&](int From, int To) {
+		if(From < 0 || From >= MAX_CLIENTS || To < 0 || To >= MAX_CLIENTS || !m_Snap.m_aCharacters[From].m_Active)
+			return false;
+		return m_aClients[From].m_Predicted.HookedPlayer() == To ||
+		       m_aClients[From].m_PrevPredicted.HookedPlayer() == To ||
+		       m_Snap.m_aCharacters[From].m_Cur.m_HookedPlayer == To ||
+		       m_Snap.m_aCharacters[From].m_Prev.m_HookedPlayer == To;
+	};
+	const int aLocalIds[] = {m_Snap.m_LocalClientId, PredictDummy() ? m_aLocalIds[!g_Config.m_ClDummy] : -1};
+	for(const int LocalId : aLocalIds)
+	{
+		if(LocalId >= 0 && LocalId < MAX_CLIENTS && m_Snap.m_aCharacters[LocalId].m_Active &&
+			(HooksPlayer(LocalId, ClientId) || HooksPlayer(ClientId, LocalId)))
+			return true;
+	}
+	return false;
+}
 int CGameClient::GetSnowHookTicks() const
 {
 	// Snow 钩子交互：X = hook_amount(毫秒) 或 (snow_input+2)/5；tick = (X+19)/20 = ceil(X/20)
@@ -5055,7 +5136,7 @@ int CGameClient::SnapshotInputMaxTick(int ClientId) const
 	if(!IsSnapshotInputMode())
 		return BaseTick;
 	if(FastInputMode() == 12)
-		return BaseTick + GetFastInputPredictionTicks();
+		return BaseTick + (TcLightUseHookLogic() ? TcLightHookTickOffset() : static_cast<int>(std::ceil(g_Config.m_TcLightInput / 100.0f)));
 	return BaseTick + (IsFastInputLocal(ClientId) ? GetFastInputPredictionTicks() : GetFastInputOtherTicks());
 }
 
@@ -5099,7 +5180,8 @@ int CGameClient::GetFastInputPredictionTicks() const
 	case 11:
 		return FastInput::PredictionTicks(g_Config.m_TcCloudInput / 100.0f);
 	case 12:
-		return IsSnowHookActive() ? GetSnowHookTicks() : static_cast<int>(std::ceil(g_Config.m_TcLightInput / 100.0f));
+		// TClient: 忠实 CLightInput::PredictionTickOffset——钩拉偏移单独处理
+		return static_cast<int>(std::ceil(g_Config.m_TcLightInput / 100.0f));
 	case 13:
 		return static_cast<int>(std::ceil(g_Config.m_TcAzureInput / 100.0f + 1.0f));
 	case 14:
@@ -5113,6 +5195,8 @@ int CGameClient::GetFastInputOtherTicks() const
 {
 	if(!FastInputActive(m_Snap.m_LocalClientId, true))
 		return 0;
+	if(FastInputMode() == 12)
+		return TcLightUseHookLogic() ? TcLightHookTickOffset() : static_cast<int>(std::ceil(g_Config.m_TcLightInput / 100.0f));
 	if(FastInputMode() == 6)
 		return FastInput::AncientTicks(static_cast<float>(std::min(std::clamp(g_Config.m_TcAncientInput, 0, 100), std::clamp(g_Config.m_TcAncientInputOthersAmount, 0, 100))));
 	if(FastInputMode() == 14)
@@ -5135,8 +5219,9 @@ bool CGameClient::IsFastInputLocal(int ClientId) const
 void CGameClient::ApplyFastInputOffset(int ClientId, int &Tick, float &Intra)
 {
 	const bool Local = IsFastInputLocal(ClientId);
-	const bool SnowAffected = (FastInputMode() == 2 || FastInputMode() == 12) && IsSnowHookAffected(ClientId);
-	if(!FastInputActive(ClientId, !Local) && !SnowAffected)
+	const bool SnowAffected = FastInputMode() == 2 && IsSnowHookAffected(ClientId);
+	const bool LightHookLinked = FastInputMode() == 12 && TcLightUseHookLogic() && TcLightIsHookLinkedClient(ClientId);
+	if(!FastInputActive(ClientId, !Local) && !SnowAffected && !LightHookLinked)
 		return;
 	switch(FastInputMode())
 	{
@@ -5176,13 +5261,18 @@ void CGameClient::ApplyFastInputOffset(int ClientId, int &Tick, float &Intra)
 		FastInput::OffsetTicks(g_Config.m_TcDeltaInput / 100.0f, Tick, Intra);
 		break;
 	case 12:
-		if(IsSnowHookActive() && (SnowAffected || FastInputActive(ClientId, true)))
-			FastInput::OffsetMillis(g_Config.m_TcLightInputHook ? g_Config.m_TcLightInputHookAmount : (g_Config.m_TcLightInput + 2) / 5, Tick, Intra);
+	{
+		// TClient: 忠实移植 CLightInput::ApplySampleOffset
+		const bool HookLogic = TcLightUseHookLogic();
+		const bool HookLinked = TcLightIsHookLinkedClient(ClientId);
+		if(HookLogic && (HookLinked || g_Config.m_TcLightInputOthers))
+			FastInput::OffsetTicks(TcLightHookTickOffset(), Tick, Intra);
 		else if(Local)
 			FastInput::OffsetTicks(g_Config.m_TcLightInput / 100.0f, Tick, Intra);
-		else
-			Tick += GetFastInputOtherTicks();
+		else if(g_Config.m_TcLightInputOthers)
+			Tick += HookLogic ? TcLightHookTickOffset() : static_cast<int>(std::ceil(g_Config.m_TcLightInput / 100.0f));
 		break;
+	}
 	case 13:
 		FastInput::OffsetTicks(g_Config.m_TcAzureInput / 100.0f, Tick, Intra);
 		break;

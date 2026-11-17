@@ -995,3 +995,6 @@ Two-line lyrics (current + next)
 
 %s version mismatch
 == %s 版本不符
+
+Players
+== 玩家

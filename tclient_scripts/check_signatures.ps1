@@ -1,4 +1,7 @@
-param([Parameter(Mandatory=$true)][string]$Directory)
+param(
+    [Parameter(Mandatory=$true)][string]$Directory,
+    [ValidateSet('unsigned','signed')][string]$Expected = 'unsigned'
+)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $root = Get-Item -LiteralPath $Directory -Force
@@ -9,7 +12,9 @@ foreach($name in @('DDNet.exe','TClientUpdater.exe','island_media_monitor.exe','
     $item = Get-Item -LiteralPath $path -Force
     if($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -eq 0) { throw "Not a nonempty regular file: $name" }
     $sig = Get-AuthenticodeSignature -LiteralPath $path
-    $expected = if($name.EndsWith('.dll')) {'Valid'} else {'NotSigned'}
+    # unsigned 阶段：一方 EXE 必须 NotSigned；signed 阶段：必须带 Authenticode Valid。
+    # 三方 DLL 两个阶段都必须是 Valid。
+    $expected = if($name.EndsWith('.dll')) {'Valid'} elseif($Expected -eq 'signed') {'Valid'} else {'NotSigned'}
     if([string]$sig.Status -ne $expected) { throw "Unexpected signature status: $name $($sig.Status)" }
     $result += [PSCustomObject]@{name=$name;status=[string]$sig.Status;signer=$(if($sig.SignerCertificate){$sig.SignerCertificate.Subject}else{$null});sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()}
 }

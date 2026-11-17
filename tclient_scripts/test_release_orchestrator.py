@@ -83,9 +83,25 @@ class SpecValidationTests(unittest.TestCase):
 
     def test_version_step_policy_helper(self):
         # 发行版只 +0.0.1：.59 的后继必须是 .60（orchestrator 的 previous 推导用）
-        version = "1.7.8.59"
-        previous = "1.7.8." + str(int(version.rsplit(".", 1)[1]) - 1)
-        self.assertEqual(previous, "1.7.8.58")
+        self.assertEqual(release_orchestrator.previous_version("1.7.8.59"), "1.7.8.58")
+        self.assertEqual(release_orchestrator.previous_version("2.0.10.3"), "2.0.10.2")
+        with self.assertRaises(RuntimeError):
+            release_orchestrator.previous_version("1.7.9.0")
+        with self.assertRaises(RuntimeError):
+            release_orchestrator.previous_version("1.7.8.x")
+
+
+class SignatureEvidenceTests(unittest.TestCase):
+    def test_signatures_passes_expected_status_to_script(self):
+        root = Path(release_orchestrator.__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = mock.Mock(returncode=0, stdout="[]", stderr="")
+            with mock.patch.object(release_orchestrator.subprocess, "run", return_value=fake) as run:
+                self.assertEqual(release_orchestrator.signatures(root, Path(tmp), "signed"), [])
+            command = run.call_args[0][0]
+        self.assertIn("-Expected", command)
+        self.assertEqual(command[command.index("-Expected") + 1], "signed")
+        self.assertEqual(command[command.index("-Directory") + 1], str(Path(tmp)))
 
 
 class MirrorEvidenceTests(unittest.TestCase):

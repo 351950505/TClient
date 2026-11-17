@@ -2060,3 +2060,6 @@ Off
 
 %s version mismatch
 == %s 版本不匹配
+
+Players
+== 玩家

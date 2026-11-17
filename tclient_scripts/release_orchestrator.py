@@ -52,6 +52,8 @@ OPTIONAL_SPEC_DEFAULTS = {
     "hook_dll_path": str(DEFAULT_WORK_ROOT / "tools" / "netease-watcher" / "wndhok.dll"),
     "resources_dir": "",  # required: previous version stage directory
     "signed_expected": False,
+    # RFC 3161 timestamp authority used by the Authenticode Sign phase.
+    "timestamp_url": "https://timestamp.digicert.com",
     "publish": False,
     "expected_master": "",  # optional: assert master at this SHA before the sync push
 }
@@ -79,6 +81,13 @@ def sha256_of(path):
 
 def git(repo, *args):
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, timeout=120).stdout.decode().strip()
+
+
+def previous_version(version):
+    """Return the version one patch step below ``version``, keeping its prefix."""
+    parts = version.rsplit(".", 1)
+    require(len(parts) == 2 and parts[1].isdigit() and int(parts[1]) >= 1, "cannot derive the previous version from " + version)
+    return parts[0] + "." + str(int(parts[1]) - 1)
 
 
 def check_helper_lock(spec):
@@ -253,17 +262,19 @@ def phase_package(spec, paths, state):
     verify_client_phase(state, "stage", client_path)
     client = client_path.read_bytes()
     mirrors = verify_mirror_inputs(spec, paths, state, client=client, fresh=True)
-    previous = "1.7.8." + str(int(version.rsplit(".", 1)[1]) - 1)
+    # 版本串绑定：previous 从 version 自身推导（不再写死 1.7.8. 前缀），
+    # 段号耗尽（如 1.7.9.0）时显式失败，而不是静默跳过残留检查。
+    previous = previous_version(version)
     require(f"{version}\0".encode() in client and f"{previous}\0".encode() not in client, "stage client version is wrong")
     require(git(repo, "rev-parse", "--short", spec["target_commit"]).encode() in client, "stage client lacks the release commit")
 
-    before = signatures(Path(spec["repo"]), stage)
+    before = signatures(Path(spec["repo"]), stage, "unsigned")
     if spec.get("signed_expected"):
         thumbprint = os.environ.get("TCLIENT_CERT_THUMBPRINT", "")
         require(thumbprint, "TCLIENT_CERT_THUMBPRINT required for signed releases")
-        sign = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(repo / "tclient_scripts" / "windows_sign_release.ps1"), "-Directory", str(stage), "-Mode", "Sign", "-CertificateThumbprint", thumbprint, "-CertificateStoreLocation", "CurrentUser"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        sign = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(repo / "tclient_scripts" / "windows_sign_release.ps1"), "-Directory", str(stage), "-Mode", "Sign", "-CertificateThumbprint", thumbprint, "-CertificateStoreLocation", "CurrentUser", "-TimestampUrl", spec["timestamp_url"]], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         require(sign.returncode == 0, "Authenticode signing failed: " + sign.stderr)
-    after = signatures(Path(spec["repo"]), stage)
+    after = signatures(Path(spec["repo"]), stage, "signed" if spec.get("signed_expected") else "unsigned")
 
     private_key = assets.load_signing_key(Path(spec["private_key"]))
     metadata = {"product": "TClient", "channel": "stable", "version": version, "platform": "win64"}
@@ -291,7 +302,9 @@ def phase_package(spec, paths, state):
     require(pair == (manifest_bytes, signature), "manifest pair mismatch")
     assets.verify_zip_contents(output / assets.ASSET_NAME, update_files)
     assets.verify_zip_contents(full, full_files)
-    helper.validate_stage(stage, paths["stage_inventory"])
+    # 签名版 stage 的一方 EXE 字节已被 Authenticode 改写；只在该阶段放行 first-party
+    # 差异（build origin 校验已在 package 开头完成）。
+    helper.validate_stage(stage, paths["stage_inventory"], allow_first_party_changes=bool(spec.get("signed_expected")))
     for path, expected in ((output / assets.ASSET_NAME, update_files), (full, full_files)):
         with zipfile.ZipFile(path) as archive:
             entries = assets.archive_entries(archive)
@@ -318,10 +331,10 @@ def phase_package(spec, paths, state):
     return {"assets": record["assets"]}
 
 
-def signatures(root, directory):
+def signatures(root, directory, expected="unsigned"):
     script = Path(root) / "tclient_scripts" / "check_signatures.ps1"  # root here = repo
     require(script.is_file(), f"missing {script}")
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(script), "-Directory", str(directory)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-File", str(script), "-Directory", str(directory), "-Expected", expected], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     require(result.returncode == 0, "Authenticode evidence failed: " + result.stderr)
     return json.loads(result.stdout)
 
@@ -389,13 +402,22 @@ def phase_publish(spec, paths, state):
         "body": release_body(paths["root"], spec["notes_path"]),
     })
     release_id = release["id"]
+    frozen = {record["name"]: record for record in assets_record["assets"]}
     for name, path in asset_paths.items():
         digest = sha256_of(path)
+        # 上传前必须与 package 阶段冻结的逐资产记录一致，拒绝被替换/过期的本地文件
+        record = frozen.get(name)
+        require(record is not None, f"asset missing from the frozen package record: {name}")
+        require(digest == record["sha256"] and path.stat().st_size == record["size"], f"packaged asset differs from the frozen package record: {name}")
         upload = subprocess.run([str(GH_EXE), "release", "upload", f'v{spec["version"]}', "--repo", GITHUB_REPO, "--clobber", str(path)], env=dict(os.environ, GH_TOKEN=token, GH_HOST="github.com"), capture_output=True, text=True, encoding="utf-8", timeout=1800)
         require(upload.returncode == 0, f"asset upload failed: {name}: " + upload.stderr)
         remote = json.loads(gh(paths["root"], "api", f"repos/{GITHUB_REPO}/releases/{release_id}/assets?per_page=100", token=token))
         match = [a for a in remote if a["name"] == name]
         require(match and match[0]["size"] == path.stat().st_size, f"remote asset size differs: {name}")
+        # GitHub 返回 digest 时按同一口径复核（与 master sync 的校验方式一致）
+        remote_digest = match[0].get("digest")
+        if isinstance(remote_digest, str) and remote_digest:
+            require(remote_digest == "sha256:" + digest, f"remote asset digest differs: {name}")
         state.setdefault("remote_digests", {})[name] = digest
     publish = subprocess.run([str(GH_EXE), "release", "edit", f'v{spec["version"]}', "--repo", GITHUB_REPO, "--draft=false", "--latest"], env=dict(os.environ, GH_TOKEN=token), capture_output=True, text=True, encoding="utf-8", timeout=300)
     require(publish.returncode == 0, "publishing the release failed: " + publish.stderr)

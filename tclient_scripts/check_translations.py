@@ -20,7 +20,9 @@ from collections import Counter
 from pathlib import Path
 
 LANG_RELPATH = Path("data/tclient/languages/simplified_chinese.txt")
-SCAN_RELDIRS = ("src/game/client/components/tclient", "src/game/localization.cpp")
+# 审计修复（2026-11-17）：TCLocalize 调用散布在 chat/console/menus/scoreboard/spectator
+# 等组件文件，原范围只扫 tclient/ 会漏掉 .62 同类事故；整目录递归扫描覆盖全部调用点。
+SCAN_RELDIRS = ("src/game/client/components", "src/game/localization.cpp")
 
 # TCLocalize("...") / TCLocalize("...", "...")，与 scripts/languages/tclient 保持同一形态
 KEY_RE = re.compile(r'TCLocalize\s*\(\s*"((?:(?:\\")|[^"])*)"\s*(?:,\s*"((?:(?:\\")|[^"])*)"\s*)?\)')
@@ -55,7 +57,7 @@ def collect_keys(repo):
         if target.is_file():
             paths = [target]
         elif target.is_dir():
-            paths = sorted(list(target.glob("*.cpp")) + list(target.glob("*.h")))
+            paths = sorted(list(target.rglob("*.cpp")) + list(target.rglob("*.h")))
         else:
             continue
         for path in paths:

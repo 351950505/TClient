@@ -634,3 +634,36 @@ bool CControls::CheckNewInput()
 	}
 	return NewInput;
 }
+
+// TClient: 事件驱动输入（实验）——与快速输入互斥。检测 m_aInputData 相对上次
+// 快照的变化（方向/跳/钩/开火/换武器），变化即视为一次输入事件：记录 time_get()
+// 时间戳并立即让主循环重预测（client.cpp 触发点每帧合并）。目标角度是连续量，
+// 不作为事件（subtick aiming 已单独覆盖）。
+bool CControls::CheckEventDrivenInput()
+{
+	if(!g_Config.m_TcEventDrivenInput)
+		return false;
+	bool Changed = false;
+	if(!m_EventDrivenInitialized)
+	{
+		for(int Dummy = 0; Dummy < NUM_DUMMIES; Dummy++)
+			m_aEventDrivenSnapshot[Dummy] = m_aInputData[Dummy];
+		m_EventDrivenInitialized = true;
+		return false;
+	}
+	for(int Dummy = 0; Dummy < NUM_DUMMIES; Dummy++)
+	{
+		const CNetObj_PlayerInput &Cur = m_aInputData[Dummy];
+		CNetObj_PlayerInput &Prev = m_aEventDrivenSnapshot[Dummy];
+		if(Cur.m_Direction != Prev.m_Direction || Cur.m_Jump != Prev.m_Jump || Cur.m_Hook != Prev.m_Hook ||
+			Cur.m_Fire != Prev.m_Fire || Cur.m_WantedWeapon != Prev.m_WantedWeapon ||
+			Cur.m_NextWeapon != Prev.m_NextWeapon || Cur.m_PrevWeapon != Prev.m_PrevWeapon)
+		{
+			Prev = Cur;
+			Changed = true;
+			m_EventDrivenLastEventTime = time_get();
+			m_EventDrivenEventCount++;
+		}
+	}
+	return Changed;
+}

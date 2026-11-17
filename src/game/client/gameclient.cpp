@@ -6380,6 +6380,11 @@ bool CGameClient::CheckNewInput()
 	return m_Controls.CheckNewInput();
 }
 
+bool CGameClient::CheckEventDrivenInput()
+{
+	return m_Controls.CheckEventDrivenInput();
+}
+
 void CGameClient::SetConnectInfo(const NETADDR *pAddress)
 {
 	m_ConnectServerInfo = std::nullopt;

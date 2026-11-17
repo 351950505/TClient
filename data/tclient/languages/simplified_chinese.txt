@@ -2090,3 +2090,8 @@ More teammates...
 Counts drown deaths for players in your DDRace team. Only shown on Gores maps.
 == 统计同队玩家的落水（冻结）次数，仅在 Gores 地图显示。
 
+Event-driven input (experimental: re-predict on input changes)
+== 事件驱动输入（实验：输入变化立即重预测）
+
+Mutually exclusive with Fast Input; input changes re-predict immediately
+== 与快速输入互斥；输入变化立即重预测（实验）

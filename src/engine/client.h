@@ -419,6 +419,8 @@ protected:
 public:
 	// TClient
 	virtual bool CheckNewInput() = 0;
+	// TClient: 事件驱动输入（实验）——输入变化立即重预测；默认实现返回 false
+	virtual bool CheckEventDrivenInput() { return false; }
 	virtual void SetConnectInfo(const NETADDR *pAddress) = 0;
 
 	virtual void OnConsoleInit() = 0;

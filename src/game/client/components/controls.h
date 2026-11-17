@@ -53,6 +53,12 @@ public:
 	bool m_aModeFastInputFireAction[NUM_FAST_INPUT_MODES][NUM_DUMMIES] = {};
 	int m_ActiveFastInputMode = 0;
 
+	// 事件驱动输入（实验）：最近一次输入事件快照与时间戳（time_get）
+	CNetObj_PlayerInput m_aEventDrivenSnapshot[NUM_DUMMIES] = {};
+	bool m_EventDrivenInitialized = false;
+	int64_t m_EventDrivenLastEventTime = 0;
+	int m_EventDrivenEventCount = 0;
+
 	CControls();
 	int Sizeof() const override { return sizeof(*this); }
 
@@ -68,6 +74,7 @@ public:
 	void ResetInput(int Dummy);
 	void ResetFastInput(int Dummy);
 	bool CheckNewInput();
+	bool CheckEventDrivenInput();
 	CNetObj_PlayerInput &GetFastInput(int Dummy) { return m_ActiveFastInputMode == 0 ? m_aFastInput[Dummy] : m_aaModeFastInput[m_ActiveFastInputMode][Dummy]; }
 	const CNetObj_PlayerInput &GetFastInput(int Dummy) const { return m_ActiveFastInputMode == 0 ? m_aFastInput[Dummy] : m_aaModeFastInput[m_ActiveFastInputMode][Dummy]; }
 

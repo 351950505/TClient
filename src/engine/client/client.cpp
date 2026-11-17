@@ -3566,7 +3566,13 @@ void CClient::Update()
 					SendInput();
 				}
 
-				if(g_Config.m_TcFastInput && GameClient()->CheckNewInput())
+				// TClient: 事件驱动输入与快速输入互斥（同设时事件驱动优先）
+				if(g_Config.m_TcEventDrivenInput)
+				{
+					if(GameClient()->CheckEventDrivenInput())
+						Repredict = true;
+				}
+				else if(g_Config.m_TcFastInput && GameClient()->CheckNewInput())
 				{
 					Repredict = true;
 				}

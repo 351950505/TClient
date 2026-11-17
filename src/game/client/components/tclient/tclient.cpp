@@ -752,7 +752,11 @@ void CTClient::DoFinishCheck()
 		GameClient()->m_aCheckInfo[Conn] = Client()->GameTickSpeed(); // 1 second
 	};
 	int Dummy = g_Config.m_ClDummy;
-	const auto &Player = GameClient()->m_aClients[GameClient()->m_aLocalIds[Dummy]];
+	// [TClient] 审计修复：纯观战/连接早期本地 id 为 -1，必须先守卫再索引
+	const int LocalId = GameClient()->m_aLocalIds[Dummy];
+	if(LocalId < 0 || LocalId >= MAX_CLIENTS)
+		return;
+	const auto &Player = GameClient()->m_aClients[LocalId];
 	if(!Player.m_Active)
 		return;
 	const char *NewName = g_Config.m_TcFinishName;

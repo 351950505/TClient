@@ -1221,7 +1221,8 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker, int Conn, bool Dumm
 	{
 		const CNetMsg_Sv_PreInput *pMsg = static_cast<const CNetMsg_Sv_PreInput *>(pRawMsg);
 		m_WaterHammerIndicator.OnPreInput(Conn, *pMsg);
-		if(Conn >= 0 && Conn < NUM_DUMMIES && pMsg->m_Owner >= 0 && pMsg->m_Owner < MAX_CLIENTS)
+		// [TClient] 审计修复：m_IntendedTick 来自网络且为有符号，负值会得到负下标
+		if(Conn >= 0 && Conn < NUM_DUMMIES && pMsg->m_Owner >= 0 && pMsg->m_Owner < MAX_CLIENTS && pMsg->m_IntendedTick >= 0)
 		{
 			m_aReceivedPreInput[Conn] = true;
 			m_aClients[pMsg->m_Owner].m_aaPreInputs[Conn][pMsg->m_IntendedTick % 200] = *pMsg;

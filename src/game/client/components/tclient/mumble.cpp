@@ -57,6 +57,9 @@ void CMumble::OnRender()
 			return;
 	}
 	const int ClientId = GameClient()->m_Snap.m_LocalClientId;
+	// [TClient] 审计修复：纯观战/连接早期本地 id 为 -1，m_aClients[-1]/m_Teams.Team(-1) 均越界
+	if(ClientId < 0 || ClientId >= MAX_CLIENTS)
+		return;
 	const int Team = GameClient()->IsTeamPlay() ? GameClient()->m_aClients[ClientId].m_Team : GameClient()->m_Teams.Team(ClientId);
 	const NETADDR &NetAddr = Client()->ServerAddress();
 	if(Team != m_LastTeam || NetAddr != m_LastAddr)

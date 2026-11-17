@@ -815,7 +815,7 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 		TextRender()->Text(CountRow.x, CountRow.y, 10.0f, aBuf);
 	}
 
-	if(CapsuleShown && NumDrawn > 0)
+	if(CapsuleShown && (NumDrawn > 0 || ShowFrozenText))
 	{
 		CTeeRenderInfo FreezeInfo;
 		const CSkin *pSkin = GameClient()->m_Skins.Find("x_ninja");
@@ -848,8 +848,10 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 		int TotalRows = std::min(MaxRows, (MaxDisplayed + MaxTees - 1) / MaxTees);
 		const int TeesInRow = std::min(MaxDisplayed, MaxTees);
 		// Feet hang below the body: the old +3 px bottom margin, scaled.
-		const float ContentW = TeesInRow * TeeSize + (TeesInRow - 1) * TeeGap;
-		const float ContentH = TotalRows * TeeSize + (TotalRows - 1) * TeeGap + 3.0f * Scale;
+		// [TClient] 审计修复：alive-only 且全队冻结时 NumDrawn==0（TeesInRow==0），胶囊只画计数
+		const bool HasTees = TeesInRow > 0;
+		const float ContentW = HasTees ? (TeesInRow * TeeSize + (TeesInRow - 1) * TeeGap) : 0.0f;
+		const float ContentH = HasTees ? (TotalRows * TeeSize + (TotalRows - 1) * TeeGap + 3.0f * Scale) : TeeSize;
 
 		// Count text merges into the capsule's left side; the "? K" part only
 		// appears while unknown teammates are present and renders dimmer.
@@ -863,10 +865,12 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 		const float CountUnknownW = ShowFrozenText && Counts.m_Unknown > 0 ? TextRender()->TextWidth(CountFontSize, aUnknownBuf, -1, -1.0f) : 0.0f;
 		const float CountW = CountMainW + CountUnknownW;
 
-		const float CapsuleW = 2.0f * Pad + (ShowFrozenText ? CountW + TeeGap : 0.0f) + ContentW;
+		// 计数胶囊宽度：没有 tee 时不再预留 tee 前的间隙
+		const float CountTeeGap = ShowFrozenText && HasTees ? TeeGap : 0.0f;
+		const float CapsuleW = 2.0f * Pad + (ShowFrozenText ? CountW + CountTeeGap : 0.0f) + ContentW;
 		const float CapsuleH = 2.0f * Pad + ContentH;
 		// The first tee anchor stays at StartPos; the capsule wraps text and tees.
-		CUIRect Capsule = {StartPos - TeeSize / 2.0f - Pad - (ShowFrozenText ? CountW + TeeGap : 0.0f), 0.0f, CapsuleW, CapsuleH};
+		CUIRect Capsule = {StartPos - TeeSize / 2.0f - Pad - (ShowFrozenText ? CountW + CountTeeGap : 0.0f), 0.0f, CapsuleW, CapsuleH};
 		const CUIRect PlacedCapsule = FrozenHudCapsulePlacement(Capsule, Island, m_Width, m_Height, OffsetX, OffsetY);
 		const float CapsuleScale = PlacedCapsule.w / Capsule.w;
 		if(CapsuleScale <= 0.0f)
@@ -883,7 +887,7 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 		Capsule.y = PlacedCapsule.y / CapsuleScale;
 		Graphics()->MapScreenToSize(m_Width / CapsuleScale, m_Height / CapsuleScale);
 
-		CUIRect TeeRow = {Capsule.x + Pad + (ShowFrozenText ? CountW + TeeGap : 0.0f), Capsule.y + Pad, ContentW, ContentH};
+		CUIRect TeeRow = {Capsule.x + Pad + (ShowFrozenText ? CountW + CountTeeGap : 0.0f), Capsule.y + Pad, ContentW, ContentH};
 
 		// Capsule: translucent rounded plate with a subtle top sheen.
 		Graphics()->TextureClear();
@@ -906,7 +910,7 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 			TextSizeProps.m_pHeight = &TextHeight;
 			TextRender()->TextWidth(CountFontSize, aCountBuf, -1, -1.0f, 0, TextSizeProps);
 			const float TextY = Capsule.y + (Capsule.h - TextHeight) / 2.0f;
-			const float CountX = TeeRow.x - TeeGap - CountW;
+			const float CountX = Capsule.x + Pad;
 			TextRender()->Text(CountX, TextY, CountFontSize, aCountBuf);
 			if(Counts.m_Unknown > 0)
 			{

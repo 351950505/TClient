@@ -185,7 +185,11 @@ void CMod::OnFire(bool Pressed)
 		return;
 	if(!Client()->RconAuthed())
 		return;
-	const auto &Player = GameClient()->m_aClients[GameClient()->m_Snap.m_LocalClientId];
+	// [TClient] 审计修复：本地 id 可能为 -1（纯观战/连接早期），先守卫再索引
+	const int LocalId = GameClient()->m_Snap.m_LocalClientId;
+	if(LocalId < 0 || LocalId >= MAX_CLIENTS)
+		return;
+	const auto &Player = GameClient()->m_aClients[LocalId];
 	if(!Player.m_Active)
 		return;
 	// Find person who we have shot

@@ -116,13 +116,15 @@ void CCamera::ResetAutoSpecCamera()
 void CCamera::UpdateCamera()
 {
 	// 旧版 cl_default_zoom 为 int 十分位(100 表示 10.0)的一次性迁移:
-	// cfg 加载完成后首帧执行,读到超过新上限(20)的值就 ÷10
+	// 注册上限刻意保留在 200，让旧值在 cfg 加载钳制后仍原样到达这里；
+	// 首帧把 >20 的值 ÷10 再钳回新量程 [0,20]，随退出写回后即落定。
 	static bool s_ZoomMigrated = false;
 	if(!s_ZoomMigrated)
 	{
 		s_ZoomMigrated = true;
 		if(g_Config.m_ClDefaultZoom > 20.0f)
 			g_Config.m_ClDefaultZoom /= 10.0f;
+		g_Config.m_ClDefaultZoom = std::clamp(g_Config.m_ClDefaultZoom, 0.0f, 20.0f);
 	}
 	// use hardcoded smooth camera for spectating unless player explicitly turn it off
 	bool CanUseCameraInfo = !GameClient()->m_MultiViewActivated;

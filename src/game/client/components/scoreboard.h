@@ -5,6 +5,7 @@
 
 #include <engine/console.h>
 #include <engine/graphics.h>
+#include <engine/shared/protocol.h>
 
 #include <game/client/component.h>
 #include <game/client/ui.h>
@@ -33,7 +34,10 @@ class CScoreboard : public CComponent
 	static void ConKeyScoreboard(IConsole::IResult *pResult, void *pUserData);
 	static void ConToggleScoreboardCursor(IConsole::IResult *pResult, void *pUserData);
 
-	const char *GetTeamName(int Team) const;
+	const char *GetTeamName(int Team);
+
+	// [TClient] 审计修复：clan 缓冲必须是成员，GetTeamName 原来返回循环内局部数组的悬垂指针
+	char m_aTeamName[2][MAX_CLAN_LENGTH] = {};
 
 	bool m_Active;
 

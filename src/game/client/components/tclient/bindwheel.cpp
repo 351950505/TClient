@@ -322,7 +322,8 @@ void CBindWheel::ExecuteBind(int Bind)
 }
 void CBindWheel::ExecuteHoveredBind()
 {
-	if(m_SelectedBind >= 0)
+	// [TClient] 审计修复：m_SelectedBind 可能来自上一帧，vector 缩水后下标失效
+	if(m_SelectedBind >= 0 && m_SelectedBind < (int)m_vBinds.size())
 		Console()->ExecuteLine(m_vBinds[m_SelectedBind].m_aCommand, IConsole::CLIENT_ID_UNSPECIFIED);
 }
 

@@ -1441,9 +1441,18 @@ void CTranslate::Translate(const char *pName, bool ShowProgress)
 				continue;
 			if(pLine->m_ClientId == CChat::CLIENT_MSG)
 				continue;
-			for(int Id : GameClient()->m_aLocalIds)
-				if(pLine->m_ClientId == Id)
-					continue;
+			// [TClient] 审计修复：原 continue 作用于内层 range-for，本地玩家消息实际没被跳过
+			bool IsLocalPlayer = false;
+			for(const int Id : GameClient()->m_aLocalIds)
+			{
+				if(Id >= 0 && pLine->m_ClientId == Id)
+				{
+					IsLocalPlayer = true;
+					break;
+				}
+			}
+			if(IsLocalPlayer)
+				continue;
 			int Score = 0;
 			if(pName)
 			{
@@ -1482,14 +1491,15 @@ void CTranslate::Translate(CChat::CLine &Line, bool ShowProgress)
 	CTranslateJob Job;
 	Job.m_pLine = &Line;
 	Job.m_pTranslateResponse = std::make_shared<CTranslateResponse>();
-	Job.m_pLine->m_pTranslateResponse = Job.m_pTranslateResponse;
 
 	Job.m_pBackend = CreateTranslateBackend(*Http(), Job.m_pLine->m_aText, g_Config.m_TcTranslateTarget);
 	if(!Job.m_pBackend)
 	{
+		// [TClient] 审计修复：backend 创建失败时不要先在聊天行上挂空 response（否则该行永远无法再翻译）
 		GameClient()->m_Chat.Echo(TCLocalize("Invalid translate backend"));
 		return;
 	}
+	Job.m_pLine->m_pTranslateResponse = Job.m_pTranslateResponse;
 
 	if(ShowProgress)
 	{

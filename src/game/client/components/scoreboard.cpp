@@ -1295,7 +1295,7 @@ bool CScoreboard::IsActive() const
 	return false;
 }
 
-const char *CScoreboard::GetTeamName(int Team) const
+const char *CScoreboard::GetTeamName(int Team)
 {
 	dbg_assert(Team == TEAM_RED || Team == TEAM_BLUE, "Team invalid");
 
@@ -1308,14 +1308,16 @@ const char *CScoreboard::GetTeamName(int Team) const
 
 		if(!pClanName)
 		{
-			char aClanBuf2[MAX_CLAN_LENGTH];
-			GameClient()->StreamerClan(pInfo->m_ClientId, aClanBuf2, sizeof(aClanBuf2));
-			pClanName = aClanBuf2;
+			// [TClient] 审计修复：缓冲改为成员，原实现返回循环内局部数组的悬垂指针
+			GameClient()->StreamerClan(pInfo->m_ClientId, m_aTeamName[Team], sizeof(m_aTeamName[Team]));
+			pClanName = m_aTeamName[Team];
 			ClanPlayers++;
 		}
 		else
 		{
-			if(str_comp(GameClient()->m_aClients[pInfo->m_ClientId].m_aClan, pClanName) == 0)
+			char aClan[MAX_CLAN_LENGTH];
+			GameClient()->StreamerClan(pInfo->m_ClientId, aClan, sizeof(aClan));
+			if(str_comp(aClan, pClanName) == 0)
 				ClanPlayers++;
 			else
 				return nullptr;

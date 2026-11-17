@@ -89,7 +89,7 @@ try {
   assert(draw.includes('i < MAX_CLIENTS && NumDisplayed < MaxDisplayed;') && !draw.includes('NumDisplayed < MaxTees * MaxRows'), 'additional rows cannot multiply the total icon limit');
   assert(!draw.includes('Island.x + Island.w + 2.0f + Capsule.w <='), 'narrow right-hand space must not send the capsule back to the old position');
   assert(draw.includes('const bool AliveOnly = g_Config.m_TcFrozenTeesAliveOnly != 0;') && draw.includes('const int NumDrawn = AliveOnly ? m_FrozenHudFrame.m_Counts.m_KnownUnfrozen : NumInTeam;'), 'alive-only count defined from the captured frame');
-  assert(draw.includes('if(CapsuleShown && NumDrawn > 0)') && draw.includes('int TotalRows = std::min(MaxRows, (MaxDisplayed + MaxTees - 1) / MaxTees);') && draw.includes('const int TeesInRow = std::min(MaxDisplayed, MaxTees);') && draw.includes('bool Overflow = NumDrawn > MaxDisplayed;'), 'capped icon count drives the layout while the full count drives overflow priority');
+  assert(draw.includes('if(CapsuleShown && (NumDrawn > 0 || ShowFrozenText))') && draw.includes('int TotalRows = std::min(MaxRows, (MaxDisplayed + MaxTees - 1) / MaxTees);') && draw.includes('const int TeesInRow = std::min(MaxDisplayed, MaxTees);') && draw.includes('bool Overflow = NumDrawn > MaxDisplayed;'), 'capped icon count drives the layout while the full count drives overflow priority');
   {
     const classifyIdx = draw.indexOf('const bool Unknown = State == ETcFrozenHudState::UNKNOWN;');
     const aliveSkipIdx = draw.indexOf('if(AliveOnly && State != ETcFrozenHudState::UNFROZEN)');
@@ -107,8 +107,8 @@ try {
   const scaleBlock = between(draw, 'const float Scale = std::clamp(g_Config.m_TcFrozenTeesScale / 100.0f', 'const ColorRGBA AccentColor');
   const sizeBlock = between(draw, 'float TeeSize = g_Config.m_TcFrozenHudTeeSize * Scale;', '// The display limit');
   const startPosBlock = between(draw, 'float StartPos =', 'int TotalRows =');
-  const contentBlock = between(draw, 'const float ContentW =', 'char aCountBuf');
-  const capsuleBlock = between(draw, 'const float CapsuleW =', 'if(CapsuleScale <= 0.0f)');
+  const contentBlock = between(draw, 'const bool HasTees =', 'char aCountBuf');
+  const capsuleBlock = between(draw, 'const float CountTeeGap =', 'if(CapsuleScale <= 0.0f)');
   const dotBlock = between(draw, 'const float DotR =', 'const ColorRGBA DotColor =');
   const metrics = between(island, 'const float UiScale =', 'const int PillCorners =');
   const x = between(island, 'const float X = std::clamp((ScreenW - Width)', '// ---- draw the capsule body');
@@ -157,14 +157,14 @@ vec2 CHud::FrozenDot(bool ShowFrozenText, float CountW, int TeesInRow, int Total
  if(CapsuleScale<=0.0f) return {};
  Capsule.x=PlacedCapsule.x/CapsuleScale;
  Capsule.y=PlacedCapsule.y/CapsuleScale;
- const CUIRect TeeRow{Capsule.x + Pad + (ShowFrozenText ? CountW + TeeGap : 0.0f), Capsule.y + Pad, ContentW, ContentH};
+ const CUIRect TeeRow{Capsule.x + Pad + (ShowFrozenText ? CountW + CountTeeGap : 0.0f), Capsule.y + Pad, ContentW, ContentH};
  vec2 TeeRenderPos(TeeRow.x + TeeSize / 2.0f + TeeInRow * (TeeSize + TeeGap), TeeRow.y + TeeSize * (0.7f) + Row * (TeeSize + TeeGap));
  const int CurrentRow = Row;
  ${dotBlock}
  return vec2(DotX * CapsuleScale, DotY * CapsuleScale);
 }
 // Alive-only count model: production NumDrawn/row/overflow expressions verbatim.
-void AliveLayout(bool AliveOnly, int NumInTeam, int KnownUnfrozen, bool CapsuleShown, int DisplayLimit, int RowLimit, int *pTotalRows, int *pTeesInRow, bool *pOverflow, bool *pVisible, int *pDisplayed = nullptr) {
+void AliveLayout(bool AliveOnly, int NumInTeam, int KnownUnfrozen, bool CapsuleShown, bool ShowFrozenText, int DisplayLimit, int RowLimit, int *pTotalRows, int *pTeesInRow, bool *pOverflow, bool *pVisible, int *pDisplayed = nullptr) {
  struct { struct { int m_KnownUnfrozen; } m_Counts; } m_FrozenHudFrame;
  m_FrozenHudFrame.m_Counts.m_KnownUnfrozen = KnownUnfrozen;
  g_Config.m_TcFrozenTeesMaxDisplay = DisplayLimit;
@@ -336,22 +336,25 @@ try {
  // Alive-only counts: production NumDrawn/row/overflow expressions verbatim.
  int AliveCases=0;
  int AliveTotalRows, AliveTeesInRow; bool AliveOverflow, AliveVisible;
- AliveLayout(true, 8, 3, true, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
+ AliveLayout(true, 8, 3, true, true, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
  Check(AliveTotalRows==1 && AliveTeesInRow==3 && !AliveOverflow && AliveVisible, "alive-only layout sizes to the unfrozen count");
  ++AliveCases;
- AliveLayout(false, 8, 3, true, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
+ AliveLayout(false, 8, 3, true, true, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
  Check(AliveTotalRows==1 && AliveTeesInRow==8 && !AliveOverflow && AliveVisible, "option off keeps the whole-team layout");
  ++AliveCases;
- AliveLayout(true, 8, 0, true, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
- Check(AliveTotalRows==0 && AliveTeesInRow==0 && !AliveOverflow && !AliveVisible, "empty alive-only capsule is skipped");
+ AliveLayout(true, 8, 0, true, true, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
+ Check(AliveTotalRows==0 && AliveTeesInRow==0 && !AliveOverflow && AliveVisible, "empty alive-only capsule keeps a count-only capsule");
  ++AliveCases;
- AliveLayout(true, 20, 15, true, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
+ AliveLayout(true, 8, 0, true, false, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
+ Check(AliveTotalRows==0 && AliveTeesInRow==0 && !AliveOverflow && !AliveVisible, "empty capsule is skipped when the count text is off");
+ ++AliveCases;
+ AliveLayout(true, 20, 15, true, true, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
  Check(AliveTotalRows==1 && AliveTeesInRow==8 && AliveOverflow && AliveVisible, "alive-only overflow still driven by the unfrozen count");
  ++AliveCases;
- AliveLayout(true, 20, 5, true, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
+ AliveLayout(true, 20, 5, true, true, 8, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
  Check(AliveTotalRows==1 && AliveTeesInRow==5 && !AliveOverflow, "alive-only can clear an otherwise overflowing team");
  ++AliveCases;
- AliveLayout(true, 30, 20, true, 8, 2, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
+ AliveLayout(true, 30, 20, true, true, 8, 2, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
  Check(AliveTotalRows==2 && AliveTeesInRow==4 && AliveOverflow && AliveVisible, "multiple rows share the total icon limit");
  ++AliveCases;
  int LimitCases=0;
@@ -359,24 +362,24 @@ try {
  for(bool AliveOnly : {false,true}) for(int Limit : {-2147483647,-1,0,1,6,7,10,11,64,2147483647})
  for(int Rows : {-1,0,1,2,6,7}) {
   int Displayed=0;
-  AliveLayout(AliveOnly, Team, Alive, true, Limit, Rows, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible, &Displayed);
+  AliveLayout(AliveOnly, Team, Alive, true, true, Limit, Rows, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible, &Displayed);
   const int Available=AliveOnly?Alive:Team;
   const int Expected=std::min(Available,std::clamp(Limit,1,10));
   Check(Displayed==Expected && Displayed<=10, "total icon count exceeds the configured/global limit");
   Check(AliveTotalRows>=0 && AliveTotalRows<=std::clamp(Rows,1,6), "row count exceeds its bound");
   Check(AliveTeesInRow>=0 && AliveTotalRows*AliveTeesInRow>=Displayed, "layout cannot fit the capped icons");
   Check(AliveOverflow==(Available>Expected), "overflow selection must still prioritize the whole team");
-  Check(AliveVisible==(Available>0), "display cap changes empty capsule visibility");
+  Check(AliveVisible, "count text keeps the capsule visible when the capped set is empty");
   ++LimitCases;
  }
- AliveLayout(false, 64, 32, true, 7, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
+ AliveLayout(false, 64, 32, true, true, 7, 1, &AliveTotalRows, &AliveTeesInRow, &AliveOverflow, &AliveVisible);
  Check(AliveTotalRows==1 && AliveTeesInRow==7 && AliveOverflow, "default settings must show seven tees");
  std::printf("PASS: %d total-display-limit cases, including legacy values and multi-row/64-player teams\\n", LimitCases);
  std::printf("PASS: %d resolution/size/style/offset layout cases plus hidden, side, bottom, stretched and screen fallback checks\\n", Cases);
  std::printf("PASS: %d capsule offset/scale/aspect layout cases with padding math, margin clamp and island interaction\\n", CapsuleCases);
  std::printf("PASS: %d modeled count-font scale/alignment and status-dot placement cases including 200-percent font (not GPU ink)\\n", MarkerCases);
  std::printf("PASS: %d inline-island placement cases across island widths, offsets and scales\\n", InlineCases);
- std::printf("PASS: %d alive-only count/layout cases including empty-capsule skip and overflow\\n", AliveCases);
+ std::printf("PASS: %d alive-only count/layout cases including count-only empty capsules and overflow\\n", AliveCases);
 } catch(const std::exception &e) { std::fprintf(stderr, "FAIL: %s\\n", e.what()); return 1; }
 }
 `);

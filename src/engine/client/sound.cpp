@@ -515,9 +515,10 @@ bool CSound::DecodeWav(CSample &Sample, const void *pData, unsigned DataSize, co
 	while(Offset + 8 <= DataSize)
 	{
 		const unsigned ChunkSize = pRaw[Offset + 4] | (pRaw[Offset + 5] << 8) | (pRaw[Offset + 6] << 16) | (pRaw[Offset + 7] << 24);
-		if(Offset + 8 + ChunkSize > DataSize)
+		// [TClient] 审计修复：无回绕上界判断；畸形/截断块头直接结束解析
+		if(ChunkSize > DataSize - Offset - 8)
 			break;
-		if(memcmp(pRaw + Offset, "fmt ", 4) == 0)
+		if(memcmp(pRaw + Offset, "fmt ", 4) == 0 && ChunkSize >= 16)
 		{
 			Format = pRaw[Offset + 8] | (pRaw[Offset + 9] << 8);
 			Channels = pRaw[Offset + 10] | (pRaw[Offset + 11] << 8);
@@ -540,7 +541,15 @@ bool CSound::DecodeWav(CSample &Sample, const void *pData, unsigned DataSize, co
 
 	const int BytesPerSample = Bits / 8;
 	const int FrameSize = BytesPerSample * Channels;
-	const int NumFrames = DataChunkSize / FrameSize;
+	// [TClient] 审计修复：帧数用 64 位计算并设样本上限，避免畸形声明触发巨量分配/越界读
+	constexpr int64_t MAX_SAMPLE_BYTES = 256ll << 20;
+	const int64_t NumFrames64 = DataChunkSize / FrameSize;
+	if(NumFrames64 * Channels * (int64_t)sizeof(short) > MAX_SAMPLE_BYTES)
+	{
+		log_error("sound/wav", "WAV data chunk too large (frames=%lld). Filename='%s'", (long long)NumFrames64, pFilename);
+		return false;
+	}
+	const int NumFrames = (int)NumFrames64;
 	const int TotalSamples = NumFrames * Channels > 0 ? NumFrames * Channels : 1;
 	short *pSampleData = (short *)calloc(TotalSamples, sizeof(short));
 	if(!pSampleData)

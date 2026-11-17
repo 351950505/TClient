@@ -286,7 +286,8 @@ void CStatusBar::UpdateStatusBarScheme(char *pScheme)
 	int Index = 0;
 	for(CStatusItem *&pItem : m_StatusBarItems)
 	{
-		if(Index >= STATUSBAR_MAX_SIZE)
+		// [TClient] 审计修复：scheme cvar 缓冲为 STATUSBAR_MAX_SIZE，须留 1 字节给结尾 NUL
+		if(Index >= STATUSBAR_MAX_SIZE - 1)
 			break;
 		pScheme[Index++] = pItem->m_aLetters[0];
 	}

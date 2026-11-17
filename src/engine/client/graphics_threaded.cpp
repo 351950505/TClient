@@ -1681,13 +1681,17 @@ void CGraphics_Threaded::RenderQuadContainer(int ContainerIndex, int QuadOffset,
 
 	if(QuadDrawNum == -1)
 		QuadDrawNum = (int)Container.m_vQuads.size() - QuadOffset;
+	// Upstream f73e82f26 treats a zero draw count as a no-op. HUD callers
+	// legitimately pass 0 (no armor, no available jumps, ...), so this must
+	// return before the assertion that requires a positive draw count.
+	if(QuadDrawNum == 0)
+		return;
 
-	// Backport of upstream f73e82f26 with a release guard kept: the dbg_assert
-	// only fires in CONF_DEBUG, so the silent early-return stays as a safety
-	// net for out-of-range callers in release builds.
+	// Backport of upstream f73e82f26 with a release guard kept for
+	// out-of-range callers in release builds.
 	dbg_assert(QuadOffset >= 0 && QuadDrawNum > 0 && QuadOffset + QuadDrawNum <= (int)Container.m_vQuads.size(),
 		"Invalid quad container rendered: QuadOffset=%d QuadDrawNum=%d NumQuads=%d", QuadOffset, QuadDrawNum, (int)Container.m_vQuads.size());
-	if((int)Container.m_vQuads.size() < QuadOffset + QuadDrawNum || QuadDrawNum <= 0)
+	if((int)Container.m_vQuads.size() < QuadOffset + QuadDrawNum || QuadDrawNum < 0)
 		return;
 
 	if(IsQuadContainerBufferingEnabled())
@@ -1743,12 +1747,15 @@ void CGraphics_Threaded::RenderQuadContainerEx(int ContainerIndex, int QuadOffse
 
 	if(QuadDrawNum == -1)
 		QuadDrawNum = (int)Container.m_vQuads.size() - QuadOffset;
+	// Zero draw count is a no-op; see RenderQuadContainer.
+	if(QuadDrawNum == 0)
+		return;
 
 	// Backport of upstream f73e82f26 with a release guard kept (see
 	// RenderQuadContainer).
 	dbg_assert(QuadOffset >= 0 && QuadDrawNum > 0 && QuadOffset + QuadDrawNum <= (int)Container.m_vQuads.size(),
 		"Invalid quad container rendered: QuadOffset=%d QuadDrawNum=%d NumQuads=%d", QuadOffset, QuadDrawNum, (int)Container.m_vQuads.size());
-	if((int)Container.m_vQuads.size() < QuadOffset + QuadDrawNum || QuadDrawNum <= 0)
+	if((int)Container.m_vQuads.size() < QuadOffset + QuadDrawNum || QuadDrawNum < 0)
 		return;
 
 	if(IsQuadContainerBufferingEnabled())

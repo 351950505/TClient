@@ -50,6 +50,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <tlhelp32.h>
 // 系统音量控制（Core Audio endpoint volume 为主，mixer API 兜底）
 #include <mmsystem.h>
 #pragma comment(lib, "winmm.lib")
@@ -1090,11 +1091,24 @@ public:
 
 	HANDLE m_hIslandMap = nullptr;
 	void *m_pIslandView = nullptr;
+	// 可选 seqlock 序号（monitor 新版本才建）；没有时退回单次整块 memcpy。
+	HANDLE m_hIslandSeq = nullptr;
+	volatile LONG64 *m_pIslandSeq = nullptr;
 	int64_t m_NextShmTry = 0;
 	int64_t m_NextMonitorTry = 0;
 
 	void CloseIslandMap()
 	{
+		if(m_pIslandSeq)
+		{
+			UnmapViewOfFile((LPCVOID)m_pIslandSeq);
+			m_pIslandSeq = nullptr;
+		}
+		if(m_hIslandSeq)
+		{
+			CloseHandle(m_hIslandSeq);
+			m_hIslandSeq = nullptr;
+		}
 		if(m_pIslandView)
 		{
 			UnmapViewOfFile(m_pIslandView);
@@ -1119,9 +1133,100 @@ public:
 			CloseHandle(hMap);
 			return;
 		}
+		HANDLE hSeq = OpenFileMappingW(FILE_MAP_READ, FALSE, L"Local\\TClientIslandMediaSeq");
+		volatile LONG64 *pSeq = nullptr;
+		if(hSeq)
+		{
+			pSeq = (volatile LONG64 *)MapViewOfFile(hSeq, FILE_MAP_READ, 0, 0, sizeof(LONG64));
+			if(!pSeq)
+			{
+				CloseHandle(hSeq);
+				hSeq = nullptr;
+			}
+		}
 		CloseIslandMap();
 		m_hIslandMap = hMap;
 		m_pIslandView = pView;
+		m_hIslandSeq = hSeq;
+		m_pIslandSeq = pSeq;
+	}
+
+	// monitor 发布时序号先奇后偶；读到奇数或前后不一致就重试，避免多字段更新读到撕裂组合。
+	bool ReadIslandShm(SIslandShm &Out)
+	{
+		for(int Try = 0; Try < 8; ++Try)
+		{
+			if(!m_pIslandSeq)
+			{
+				memcpy(&Out, m_pIslandView, sizeof(Out));
+				return true;
+			}
+			const LONG64 Before = InterlockedCompareExchange64(m_pIslandSeq, 0, 0);
+			if(Before & 1)
+				continue;
+			memcpy(&Out, m_pIslandView, sizeof(Out));
+			const LONG64 After = InterlockedCompareExchange64(m_pIslandSeq, 0, 0);
+			if(Before == After && !(After & 1))
+				return true;
+		}
+		return false;
+	}
+
+	// 判死路径专用：只处理同一安装目录下的 island_media_monitor.exe。
+	// 僵死实例永久占着 Local\TClientIslandMonitorMutex，新实例拉起后立刻自己退出，
+	// 客户端每 5 秒无效重拉、音乐功能死锁到重启。先 SetEvent 请它正常退出
+	// （monitor 主循环收到后清理 SHM 并释放互斥量），2 秒不退再强杀。
+	// 只处理存活超过 10 秒的进程，避免误杀刚拉起、正在建映射的正常实例。
+	static void StopStaleMonitorInstances(const std::wstring &MonitorPath)
+	{
+		HANDLE Snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		if(Snapshot == INVALID_HANDLE_VALUE)
+			return;
+		PROCESSENTRY32W Entry;
+		Entry.dwSize = sizeof(Entry);
+		if(Process32FirstW(Snapshot, &Entry))
+		{
+			do
+			{
+				if(_wcsicmp(Entry.szExeFile, L"island_media_monitor.exe") != 0)
+					continue;
+				HANDLE Process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, Entry.th32ProcessID);
+				if(!Process)
+					continue;
+				wchar_t aPath[32768];
+				DWORD PathSize = std::size(aPath);
+				if(QueryFullProcessImageNameW(Process, 0, aPath, &PathSize) &&
+					CompareStringOrdinal(aPath, (int)PathSize, MonitorPath.c_str(), (int)MonitorPath.size(), TRUE) == CSTR_EQUAL)
+				{
+					FILETIME Creation, Exit, Kernel, User;
+					if(GetProcessTimes(Process, &Creation, &Exit, &Kernel, &User))
+					{
+						FILETIME NowFileTime;
+						GetSystemTimeAsFileTime(&NowFileTime);
+						const ULONGLONG Created = ((ULONGLONG)Creation.dwHighDateTime << 32) | Creation.dwLowDateTime;
+						const ULONGLONG Now = ((ULONGLONG)NowFileTime.dwHighDateTime << 32) | NowFileTime.dwLowDateTime;
+						if(Now > Created && Now - Created > 10ull * 10000000ull)
+						{
+							bool Signaled = false;
+							HANDLE StopEvent = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\TClientIslandMonitorStop");
+							if(StopEvent)
+							{
+								SetEvent(StopEvent);
+								CloseHandle(StopEvent);
+								Signaled = true;
+							}
+							if(Signaled)
+								WaitForSingleObject(Process, 2000);
+							if(WaitForSingleObject(Process, 0) != WAIT_OBJECT_0)
+								TerminateProcess(Process, 0);
+							WaitForSingleObject(Process, 2000);
+						}
+					}
+				}
+				CloseHandle(Process);
+			} while(Process32NextW(Snapshot, &Entry));
+		}
+		CloseHandle(Snapshot);
 	}
 
 	void StartMonitorProcess()
@@ -1141,6 +1246,7 @@ public:
 		// 在渲染线程上会变成周期性单帧卡顿（2026-11-08 卡顿调查）。
 		std::thread(
 			[MonitorPath = std::wstring(aMonitorPath)]() {
+				CIslandMusic::CImpl::StopStaleMonitorInstances(MonitorPath);
 				STARTUPINFOW Si;
 				memset(&Si, 0, sizeof(Si));
 				Si.cb = sizeof(Si);
@@ -1180,11 +1286,17 @@ public:
 		}
 
 		SIslandShm Snap;
-		memcpy(&Snap, m_pIslandView, sizeof(Snap));
+		if(!ReadIslandShm(Snap))
+			return; // 撕裂读重试用尽，下一轮再试
 		if(Snap.Magic != ISLAND_SHM_MAGIC || Snap.Version != ISLAND_SHM_VERSION)
 		{
-			// stale/broken mapping, remap next round
+			// 旧版/损坏映射：关闭并按死实例处理。节流后杀掉同目录旧 monitor 再拉起，
+			// 否则它会永久占着互斥量，客户端只能每 5 秒无效重拉直到重启。
 			CloseIslandMap();
+			if(m_NextMonitorTry != 0 && NowTick < m_NextMonitorTry)
+				return;
+			m_NextMonitorTry = NowTick + time_freq() * 5;
+			StartMonitorProcess();
 			return;
 		}
 
@@ -1212,7 +1324,8 @@ public:
 		m_NextMonitorPoll = NowTick + time_freq() / 4;
 
 		SIslandShm Snap;
-		memcpy(&Snap, m_pIslandView, sizeof(Snap));
+		if(!ReadIslandShm(Snap))
+			return m_LatestMonitor; // 撕裂读重试用尽，沿用上一帧
 		if(Snap.Magic != ISLAND_SHM_MAGIC || Snap.Version != ISLAND_SHM_VERSION || !Snap.aTitle[0])
 		{
 			m_LatestMonitor = Out;

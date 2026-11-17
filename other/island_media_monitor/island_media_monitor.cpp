@@ -43,6 +43,13 @@
 #pragma comment(lib, "iphlpapi.lib")
 
 static const wchar_t SHM_NAME[] = L"Local\\TClientIslandMedia";
+// 与 SHM 分开的 8 字节序号：monitor 每次整块发布前 +1（奇=写中）、写完后 +1（偶=稳定），
+// 客户端读前读后各取一次，避免整块 memcpy 撞上多字段更新读到撕裂状态。
+// 独立映射而不是加进 IslandMediaShared：旧 monitor 没有该映射时客户端自动退回单次 memcpy，
+// 新 monitor 配旧客户端也只是多建一个没人读的映射，双方都不因 SHM_VERSION 不符而断链。
+static const wchar_t SHM_SEQ_NAME[] = L"Local\\TClientIslandMediaSeq";
+// 客户端判定实例僵死后先 SetEvent 让 monitor 走正常退出；2 秒不退才 TerminateProcess。
+static const wchar_t STOP_EVENT_NAME[] = L"Local\\TClientIslandMonitorStop";
 static const wchar_t MUTEX_NAME[] = L"Local\\TClientIslandMonitorMutex";
 static const uint32_t SHM_MAGIC = 0x4D53494E; // "NISM"
 static const uint32_t SHM_VERSION = 7;
@@ -72,42 +79,79 @@ struct IslandMediaShared
 
 static HANDLE g_hShm = NULL;
 static IslandMediaShared *g_pShm = nullptr;
+static HANDLE g_hSeq = NULL;
+static volatile LONG64 *g_pSeq = nullptr;
+static HANDLE g_hStop = NULL; // 客户端判死时置位，主循环看到后走正常清理退出
 
 // ---------- 进程 PID 收集（cloudmusic.exe） ----------
 #define MAX_PIDS 32
 static int g_NumPids = 0;
 static uint32_t g_aPids[MAX_PIDS];
 static uint32_t g_aPidParents[MAX_PIDS]; // 父进程 PID，用于识别根进程建环回流
+// 主线程每 3 秒 RefreshPids，CdpThread 也要刷新；两边并发写同一张表会让
+// FindCdpPorts 读到"数量是新的、内容是旧的"这种错绑组合。表更新与所有读取
+// 都走 g_LoopCS（与环回流共用），刷新先写局部数组再整块发布。
+static CRITICAL_SECTION g_LoopCS;
+static bool g_LoopCSReady = false;
 
 static void RefreshPids()
 {
-	g_NumPids = 0;
+	uint32_t aPids[MAX_PIDS];
+	uint32_t aParents[MAX_PIDS];
+	int NumPids = 0;
 	HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	if(hSnap == INVALID_HANDLE_VALUE)
-		return;
-	PROCESSENTRY32W Pe;
-	Pe.dwSize = sizeof(Pe);
-	if(Process32FirstW(hSnap, &Pe))
+	if(hSnap != INVALID_HANDLE_VALUE)
 	{
-		do
+		PROCESSENTRY32W Pe;
+		Pe.dwSize = sizeof(Pe);
+		if(Process32FirstW(hSnap, &Pe))
 		{
-			if(_wcsicmp(Pe.szExeFile, L"cloudmusic.exe") == 0 && g_NumPids < MAX_PIDS)
+			do
 			{
-				g_aPids[g_NumPids] = Pe.th32ProcessID;
-				g_aPidParents[g_NumPids] = Pe.th32ParentProcessID;
-				++g_NumPids;
-			}
-		} while(Process32NextW(hSnap, &Pe));
+				if(_wcsicmp(Pe.szExeFile, L"cloudmusic.exe") == 0 && NumPids < MAX_PIDS)
+				{
+					aPids[NumPids] = Pe.th32ProcessID;
+					aParents[NumPids] = Pe.th32ParentProcessID;
+					++NumPids;
+				}
+			} while(Process32NextW(hSnap, &Pe));
+		}
+		CloseHandle(hSnap);
 	}
-	CloseHandle(hSnap);
+	if(g_LoopCSReady)
+		EnterCriticalSection(&g_LoopCS);
+	memcpy(g_aPids, aPids, sizeof(uint32_t) * (size_t)NumPids);
+	memcpy(g_aPidParents, aParents, sizeof(uint32_t) * (size_t)NumPids);
+	g_NumPids = NumPids;
+	if(g_LoopCSReady)
+		LeaveCriticalSection(&g_LoopCS);
 }
 
 static bool IsTargetPid(uint32_t Pid)
 {
+	bool Found = false;
+	if(g_LoopCSReady)
+		EnterCriticalSection(&g_LoopCS);
 	for(int i = 0; i < g_NumPids; ++i)
 		if(g_aPids[i] == Pid)
-			return true;
-	return false;
+		{
+			Found = true;
+			break;
+		}
+	if(g_LoopCSReady)
+		LeaveCriticalSection(&g_LoopCS);
+	return Found;
+}
+
+static int TargetPidCount()
+{
+	int Count = 0;
+	if(g_LoopCSReady)
+		EnterCriticalSection(&g_LoopCS);
+	Count = g_NumPids;
+	if(g_LoopCSReady)
+		LeaveCriticalSection(&g_LoopCS);
+	return Count;
 }
 
 // ---------- 窗口标题探测 ----------
@@ -285,16 +329,16 @@ struct SLoopStream
 {
 	DWORD Pid = 0;
 	HANDLE hThread = NULL;
-	volatile double Frames = 0.0;    // 累计帧数（含静音，渲染时间轴诊断用）
-	volatile double ActiveFrames = 0.0; // 有效播放帧（暂停冻结，见下）
+	// 环回线程按音频包频率累加，主线程切歌时清零；原来 double 的 += 与 =0.0
+	// 在临界区外并发，清零后旧增量会把进度"复活"（残留）。改用 64 位原子计数。
+	volatile LONG64 Frames = 0;       // 累计帧数（含静音，渲染时间轴诊断用）
+	volatile LONG64 ActiveFrames = 0; // 有效播放帧（暂停冻结，见下）
 	volatile double Rate = 0.0;      // 采样率（帧/秒）
 	volatile double LastFrameAt = 0.0; // 最近一包帧的 epoch 秒（含静音，诊断）
 	volatile double LastNonSilentAt = 0.0; // 最近一个"有声"包的 epoch 秒
 	volatile bool Dead = false;
 };
 
-static CRITICAL_SECTION g_LoopCS;
-static bool g_LoopCSReady = false;
 static std::vector<SLoopStream *> g_LoopStreams;
 static bool g_HaveAudio = false; // 至少一条环回流激活成功（失败则回退电表/LS 判定）
 
@@ -304,6 +348,10 @@ public:
 	HANDLE m_hDone = NULL;
 	IAudioClient *m_pClient = NULL;
 	HRESULT m_hrOp = E_FAIL;
+	// 创建方持 1 个引用；ActivateAudioInterfaceAsync 也持 1 个。
+	// 8 秒超时后创建方先 Release，若系统回调迟到，对象仍由异步侧引用保活，
+	// 回调写的是活对象而不是已析构的栈对象（原实现是栈上 Handler + 假计数 → UAF）。
+	volatile LONG m_Refs = 1;
 	CActHandler() { m_hDone = CreateEventW(NULL, TRUE, FALSE, NULL); }
 	~CActHandler()
 	{
@@ -326,8 +374,14 @@ public:
 		*ppv = NULL;
 		return E_NOINTERFACE;
 	}
-	STDMETHODIMP_(ULONG) AddRef() override { return 2; }
-	STDMETHODIMP_(ULONG) Release() override { return 1; }
+	STDMETHODIMP_(ULONG) AddRef() override { return (ULONG)InterlockedIncrement(&m_Refs); }
+	STDMETHODIMP_(ULONG) Release() override
+	{
+		const LONG Refs = InterlockedDecrement(&m_Refs);
+		if(Refs == 0)
+			delete this;
+		return (ULONG)(Refs < 0 ? 0 : Refs);
+	}
 	STDMETHODIMP ActivateCompleted(IActivateAudioInterfaceAsyncOperation *pOperation) override
 	{
 		if(pOperation)
@@ -364,9 +418,11 @@ static DWORD WINAPI LoopThread(void *pParam)
 	Pv.blob.cbSize = sizeof(Params);
 	Pv.blob.pBlobData = (BYTE *)&Params;
 
-	CActHandler Handler;
+	CActHandler *pHandler = new (std::nothrow) CActHandler();
 	IActivateAudioInterfaceAsyncOperation *pOp = NULL;
-	HRESULT hr = ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, __uuidof(IAudioClient), &Pv, &Handler, &pOp);
+	HRESULT hr = E_OUTOFMEMORY;
+	if(pHandler && pHandler->m_hDone)
+		hr = ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, __uuidof(IAudioClient), &Pv, pHandler, &pOp);
 	if(pOp)
 		pOp->Release();
 	{
@@ -374,18 +430,21 @@ static DWORD WINAPI LoopThread(void *pParam)
 		_snprintf(aMsg, sizeof(aMsg) - 1, "[loopback] pid=%lu ActivateAudioInterfaceAsync hr=0x%08lX", (unsigned long)pS->Pid, (unsigned long)hr);
 		LsDbgLog("lb-act", aMsg);
 	}
-	if(SUCCEEDED(hr))
+	if(SUCCEEDED(hr) && pHandler)
 	{
-		const DWORD Wr = WaitForSingleObject(Handler.m_hDone, 8000);
-		hr = (Wr == WAIT_OBJECT_0) ? Handler.m_hrOp : E_FAIL;
-		if(SUCCEEDED(hr) && !Handler.m_pClient)
+		const DWORD Wr = WaitForSingleObject(pHandler->m_hDone, 8000);
+		hr = (Wr == WAIT_OBJECT_0) ? pHandler->m_hrOp : E_FAIL;
+		if(SUCCEEDED(hr) && !pHandler->m_pClient)
 			hr = E_FAIL;
 		if(SUCCEEDED(hr))
 		{
-			pClient = Handler.m_pClient;
-			Handler.m_pClient = NULL; // 所有权转移
+			pClient = pHandler->m_pClient;
+			pHandler->m_pClient = NULL; // 所有权转移
 		}
 	}
+	// 创建方引用到此释放。超时后对象可能还活着（异步侧引用），回调迟到也不会写已回收内存。
+	if(pHandler)
+		pHandler->Release();
 	// 进程环回激活的 IAudioClient 不支持 GetMixFormat（实测 E_NOTIMPL）——
 	// 必须显式给格式；系统会把目标进程音频混到该格式。用 float32 立体声 48kHz。
 	if(SUCCEEDED(hr))
@@ -482,7 +541,7 @@ static DWORD WINAPI LoopThread(void *pParam)
 						}
 						Silent = Peak < 1e-4f;
 					}
-					pS->Frames += (double)Frames;
+					InterlockedExchangeAdd64(&pS->Frames, (LONG64)Frames);
 					pS->LastFrameAt = NowEp;
 					StatFrames += Frames;
 					// 有声包：推进有效播放帧 ActiveFrames（= 精确"播到哪一秒"），刷新 LastNonSilentAt；
@@ -490,13 +549,13 @@ static DWORD WINAPI LoopThread(void *pParam)
 					// 超过 0.3s 的静音 = 暂停，ActiveFrames 冻结（AudioMs 随之冻结）。
 					if(!Silent)
 					{
-						pS->ActiveFrames += (double)Frames;
+						InterlockedExchangeAdd64(&pS->ActiveFrames, (LONG64)Frames);
 						pS->LastNonSilentAt = NowEp;
 						StatActiveFrames += Frames;
 					}
 					else if(NowEp - pS->LastNonSilentAt < 0.3)
 					{
-						pS->ActiveFrames += (double)Frames;
+						InterlockedExchangeAdd64(&pS->ActiveFrames, (LONG64)Frames);
 						StatSilentDuringPlay += Frames;
 					}
 				}
@@ -620,6 +679,11 @@ static void ManageLoopStreams()
 // ---------- 网易云 LS leveldb 直读（playPostion / pauseStatus，seek 立即同步） ----------
 static wchar_t g_wszLSFile[MAX_PATH * 2] = L"";
 static FILETIME g_LsLastWrite = {0, 0};
+// 扫描门控记录的是"上次真正尝试解析的文件+mtime"（不管解析成不成功），
+// 与 g_LsLastWrite（最近一次成功解析的写入时间）分开；否则没有 lastPlaying
+// 的文件会每 100ms 被整份重读（上限 32MB）。
+static wchar_t g_wszLsScannedFile[MAX_PATH * 2] = L"";
+static FILETIME g_LsScannedWrite = {0, 0};
 static double g_LsFraction = 0.0;   // playPostion 0..1
 static double g_LsCapturedAt = 0.0; // epoch seconds
 static bool g_LsPaused = false;
@@ -721,6 +785,32 @@ static double FileTimeToEpochDouble(const FILETIME &Ft)
 	return (double)((__int64)Parts - 116444736000000000i64) / 10000000.0;
 }
 
+// 把 JSON 数字从原始字节里截到 NUL 结尾的小缓冲再交给 strtod。
+// 原来直接 strtod((const char *)pVal)，而 leveldb 日志缓冲不保证 NUL 结尾，
+// 数字串正好顶到文件尾时 strtod 会继续读缓冲之后（堆越界读）。
+static double ParseJsonNumber(const uint8_t *pVal, const uint8_t *pEnd)
+{
+	char aNum[32];
+	size_t Len = 0;
+	while(pVal < pEnd && Len < sizeof(aNum) - 1)
+	{
+		const char C = (char)*pVal;
+		if(C == ',' || C == '}' || C == ']' || C == '\r' || C == '\n' || C == ' ')
+			break;
+		aNum[Len++] = C;
+		++pVal;
+	}
+	aNum[Len] = '\0';
+	return Len ? strtod(aNum, nullptr) : 0.0;
+}
+
+static bool IsLsFileUnchanged(const wchar_t *pPath, const FILETIME &Write)
+{
+	return g_wszLsScannedFile[0] && wcscmp(pPath, g_wszLsScannedFile) == 0 &&
+		Write.dwLowDateTime == g_LsScannedWrite.dwLowDateTime &&
+		Write.dwHighDateTime == g_LsScannedWrite.dwHighDateTime;
+}
+
 static void ParseLSFile(const wchar_t *pPath, const FILETIME *pWrite)
 {
 	const double ReadingNow = (double)time(nullptr);
@@ -787,7 +877,7 @@ static void ParseLSFile(const wchar_t *pPath, const FILETIME *pWrite)
 				++pVal;
 			if(pVal >= pBuf + RecEnd || *pVal != ':')
 				continue;
-			const double Frac = strtod((const char *)(pVal + 1), nullptr);
+			const double Frac = ParseJsonNumber(pVal + 1, pBuf + RecEnd);
 			if(Frac > 0.0 && Frac <= 1.0)
 			{
 				BestRec = p0;
@@ -842,7 +932,7 @@ static void ParseLSFile(const wchar_t *pPath, const FILETIME *pWrite)
 						++pVal;
 					if(pVal < pEnd && *pVal == ':')
 					{
-						const double Secs = strtod((const char *)(pVal + 1), nullptr);
+						const double Secs = ParseJsonNumber(pVal + 1, pEnd);
 						if(Secs > 1.0 && Secs < 3600.0 * 6.0)
 							g_LsDurationMs = Secs * 1000.0;
 					}
@@ -992,6 +1082,14 @@ static void ScanLS()
 		FindClose(hFind);
 		if(!wBestFile[0])
 			continue;
+		// mtime 门控：同一文件、同一写入时间就跳过整份读盘/扫描。
+		// 网易云播放时约每秒写一次 playPostion，正常播放不受影响；
+		// 暂停/停写期间不再 10Hz 重读同一份最多 32MB 的日志。
+		if(IsLsFileUnchanged(wBestFile, BestWrite))
+			continue;
+		wcsncpy(g_wszLsScannedFile, wBestFile, MAX_PATH * 2 - 1);
+		g_wszLsScannedFile[MAX_PATH * 2 - 1] = 0;
+		g_LsScannedWrite = BestWrite;
 		// 最新文件里如果有 lastPlaying 就解析（一次性取到最新进度）；没有就跳过，等下次刷写
 		ParseLSFile(wBestFile, &BestWrite);
 	}
@@ -1037,12 +1135,14 @@ static bool FindCdpPorts(uint16_t *aOut, int &nOut)
 		if(Remote != 0) // LISTEN 行 remote=0.0.0.0
 			continue;
 		bool IsCloud = false;
+		EnterCriticalSection(&g_LoopCS);
 		for(int k = 0; k < g_NumPids; ++k)
 			if(g_aPids[k] == r.dwOwningPid)
 			{
 				IsCloud = true;
 				break;
 			}
+		LeaveCriticalSection(&g_LoopCS);
 		if(!IsCloud)
 			continue;
 		const uint16_t Port = (uint16_t)ntohs((uint16_t)(r.dwLocalPort & 0xFFFF));
@@ -1449,7 +1549,7 @@ static DWORD WINAPI CdpThread(LPVOID)
 			g_CdpHasData = 0;
 			{
 				char aMsg[80];
-				_snprintf(aMsg, sizeof(aMsg) - 1, "[cdp] no cdp ports (pids=%d)", g_NumPids);
+				_snprintf(aMsg, sizeof(aMsg) - 1, "[cdp] no cdp ports (pids=%d)", TargetPidCount());
 				LsDbgLog("cdp-np", aMsg);
 			}
 			Sleep(5000);
@@ -1716,6 +1816,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 	HANDLE hMutex = CreateMutexW(NULL, TRUE, MUTEX_NAME);
 	if(GetLastError() == ERROR_ALREADY_EXISTS)
 		return 0; // 已有实例
+	g_hStop = CreateEventW(NULL, FALSE, FALSE, STOP_EVENT_NAME);
 
 	CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	QueryPerformanceFrequency(&g_qpcFreq);
@@ -1735,6 +1836,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 	memset(g_pShm, 0, sizeof(*g_pShm));
 	g_pShm->Magic = SHM_MAGIC;
 	g_pShm->Version = SHM_VERSION;
+
+	// 可选序号映射：建不出来（极少数受限环境）就退化为无 seqlock，客户端同样兼容。
+	g_hSeq = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(LONG64), SHM_SEQ_NAME);
+	if(g_hSeq)
+	{
+		g_pSeq = (volatile LONG64 *)MapViewOfFile(g_hSeq, FILE_MAP_WRITE, 0, 0, sizeof(LONG64));
+		if(g_pSeq)
+			*g_pSeq = 0;
+	}
 
 	// WASAPI 初始化（失败无所谓，没有电表就当一直“播放”）
 	IMMDeviceEnumerator *pDevEnum = nullptr;
@@ -1758,6 +1868,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 
 	for(;;)
 	{
+		if(g_hStop && WaitForSingleObject(g_hStop, 0) == WAIT_OBJECT_0)
+			break; // 客户端判定本实例僵死，要求退出
 		LARGE_INTEGER liNow;
 		QueryPerformanceCounter(&liNow);
 		const double DtMs = (double)(liNow.QuadPart - liLast.QuadPart) * 1000.0 / g_qpcFreq.QuadPart;
@@ -1838,8 +1950,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 			EnterCriticalSection(&g_LoopCS);
 			for(SLoopStream *pS : g_LoopStreams)
 			{
-				pS->Frames = 0.0;
-				pS->ActiveFrames = 0.0;
+				InterlockedExchange64(&pS->Frames, 0);
+				InterlockedExchange64(&pS->ActiveFrames, 0);
 				pS->LastFrameAt = 0.0;
 				pS->LastNonSilentAt = 0.0;
 			}
@@ -1927,6 +2039,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 			g_WatcherStale = s_StaleSince != 0.0;
 		}
 
+		if(g_pSeq)
+			InterlockedIncrement64(g_pSeq); // 奇 = 正在写，客户端据此重试
 		g_pShm->Magic = SHM_MAGIC;
 		g_pShm->Version = SHM_VERSION;
 		// Liveness 用"是否有当前歌"判断，而不是"这一刻窗口在不在" —— 歌放完标题消失时岛应保持。
@@ -1994,11 +2108,43 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 			wcsncpy(g_pShm->Title, pShown, 255);
 			g_pShm->Title[255] = 0;
 		}
+		if(g_pSeq)
+			InterlockedIncrement64(g_pSeq); // 偶 = 稳定，整块更新结束
 
 		(void)TitleChanged;
 		Sleep(50);
 	}
 
-	// not reached
+	// 正常退出（收到 STOP_EVENT）：清 SHM 标记并释放句柄，让下一实例能立刻接管。
+	if(g_pSeq)
+		*g_pSeq = 0;
+	if(g_pShm)
+	{
+		g_pShm->Magic = 0;
+		UnmapViewOfFile(g_pShm);
+		g_pShm = nullptr;
+	}
+	if(g_hShm)
+	{
+		CloseHandle(g_hShm);
+		g_hShm = NULL;
+	}
+	if(g_pSeq)
+	{
+		UnmapViewOfFile((LPCVOID)g_pSeq);
+		g_pSeq = nullptr;
+	}
+	if(g_hSeq)
+	{
+		CloseHandle(g_hSeq);
+		g_hSeq = NULL;
+	}
+	if(g_hStop)
+	{
+		CloseHandle(g_hStop);
+		g_hStop = NULL;
+	}
+	ReleaseMutex(hMutex);
+	CloseHandle(hMutex);
 	return 0;
 }

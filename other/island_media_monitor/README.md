@@ -26,6 +26,10 @@ b2.bat
 
 注意：源码迁移入仓库后重新编译，产物哈希会因嵌入路径不同而变化；下一次发版若决定改用 freshly-built 产物，需同步更新打包脚本 `prepare_release_stage.py --monitor` 指向与 stage-inventory 校验。
 
+## 2026-11-17 审查修复（随下一版发布）
+
+源码已修复六项审查缺陷：leveldb 数字解析的堆越界读、WASAPI 激活回调超时后的 use-after-free、PID 表主线程/CDP 线程竞态、环回帧计数残留与 SHM 整块撕裂读、僵死实例无退出协议、LS 扫描 mtime 门控失效。下一版发布应改用本源码重建的 `island_media_monitor.exe`（spec 的 `monitor_path` 指向新产物并记入 stage inventory），不再沿用 .59 预构建件。夹具测试见 `test_island_media_monitor.cpp` 文件头；详细记录见 `D:/kehuduan/客户端交接摘要.md` §337。
+
 ## 相关源码
 
 - 游戏侧集成与数据源优先级：`src/game/client/components/tclient/island_music.cpp`

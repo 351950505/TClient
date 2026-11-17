@@ -1071,6 +1071,7 @@ public:
 	bool TcLightUseHookLogic() const;
 	bool TcLightIsHookClient(int ClientId) const;
 	bool TcLightIsHookLinkedClient(int ClientId) const;
+vec2 TcBclAncientSamplePos(int ClientId, float AmountMs, bool SafeGuard) const;
 	int GetSnowHookTicks() const;
 
 	int m_MultiViewTeam;

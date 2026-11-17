@@ -4689,17 +4689,13 @@ vec2 CGameClient::GetFastInputPos(int ClientId)
 		SnapshotTryGetPredPos(ClientId, Tick, Intra, Pos);
 	if(!FastInputActive(ClientId, !Local) && !((Mode == 2 || Mode == 12) && IsSnowHookAffected(ClientId)))
 		return Pos;
+	if(Mode == 14)
+		return TcBclAncientSamplePos(ClientId, GetAncientInputAmount(ClientId), true);
 	if(LightAncientActive)
 		FastInput::OffsetTicks(LightAncientAmount * std::max(1, Client()->GameTickSpeed()) / 1000.0f, Tick, Intra);
 	else
 		ApplyFastInputOffset(ClientId, Tick, Intra);
-	if(Mode == 14)
-	{
-		const auto &Data = m_aClients[ClientId];
-		if(Tick > 0 && Data.m_aPredTick[(Tick - 1) % 200] >= Client()->PrevGameTick(g_Config.m_ClDummy) && Data.m_aPredTick[Tick % 200] <= Tick)
-			Pos = mix(Data.m_aPredPos[(Tick - 1) % 200], Data.m_aPredPos[Tick % 200], Intra);
-	}
-	else if(IsSnapshotInputMode())
+	if(IsSnapshotInputMode())
 		SnapshotTryGetPredPos(ClientId, Tick, Intra, Pos);
 	else
 	{
@@ -4754,11 +4750,9 @@ vec2 CGameClient::GetFreezePos(int ClientId)
 		Client()->GetSmoothFreezeTick(&Tick, &Intra, MixAmount);
 		m_SmoothTick = Tick;
 		m_SmoothIntraTick = Intra;
-		const float LightAncientAmount = Mode == 14 && Local ? GetAncientInputAmount(ClientId) : 0.0f;
 		if(Mode == 14 && Local)
-			FastInput::OffsetTicks(LightAncientAmount * std::max(1, Client()->GameTickSpeed()) / 1000.0f, Tick, Intra);
-		else
-			ApplyFastInputOffset(ClientId, Tick, Intra);
+			return TcBclAncientSamplePos(ClientId, GetAncientInputAmount(ClientId), true);
+		ApplyFastInputOffset(ClientId, Tick, Intra);
 		const int Ticks = (Mode == 12 || Local) ? GetFastInputPredictionTicks() : GetFastInputOtherTicks();
 		ReadFastInputPos(ClientId, Tick, Intra, Client()->PredGameTick(g_Config.m_ClDummy) + Ticks, Pos);
 		return Pos;
@@ -5325,6 +5319,59 @@ float CGameClient::GetAncientInputAmount(int ClientId)
 	if(LightAncient)
 		return FastInput::AncientAmount(m_aLightAncientInputState[Slot], Main, m_Controls.GetFastInput(Slot).m_Direction, Velocity.x, Velocity.y, Client()->PredGameTick(g_Config.m_ClDummy));
 	return FastInput::AncientAmount(m_aAncientInputState[Slot], Main, m_Controls.GetFastInput(Slot).m_Direction, Velocity.x, Velocity.y, Client()->PredGameTick(g_Config.m_ClDummy));
+}
+
+
+// TClient: 忠实移植 BestClient-Light CAncientInput::SamplePos（c56daba94）——
+// 基准插值 → 按 Ancient 量前移（SplitAmount 拆 tick/intra）→ 严格门控读取预测
+// 数组 → SafeGuard：冻结/钩状态变化回退 RegularPos，前移超安全帽截断。
+// mode 14 的本地/他人位置统一走这里，替换之前散装的多路偏移。
+vec2 CGameClient::TcBclAncientSamplePos(int ClientId, float AmountMs, bool SafeGuard) const
+{
+	float PredIntraTick = Client()->PredIntraGameTick(g_Config.m_ClDummy);
+	int PredTick = Client()->PredGameTick(g_Config.m_ClDummy);
+	const auto &Data = m_aClients[ClientId];
+	vec2 Pos = mix(Data.m_PrevPredicted.m_Pos, Data.m_Predicted.m_Pos, PredIntraTick);
+	const vec2 RegularPos = Data.m_RegularPredicted.m_Pos;
+
+	int FastInputTicks = 0;
+	float FastInputIntra = 0.0f;
+	const float StepMs = 1000.0f / (float)std::max(1, Client()->GameTickSpeed());
+	const float TotalTicks = std::max(0.0f, AmountMs) / StepMs;
+	float WholeTicks = 0.0f;
+	FastInputIntra = std::modf(TotalTicks, &WholeTicks);
+	FastInputTicks = std::max(0, (int)WholeTicks);
+
+	const float CombinedIntra = PredIntraTick + FastInputIntra;
+	float WholeIntra = 0.0f;
+	const float FinalIntra = std::modf(CombinedIntra, &WholeIntra);
+	FastInputTicks += (int)WholeIntra;
+	const int FinalTick = PredTick + FastInputTicks;
+
+	if(FinalTick > 0 &&
+		Data.m_aPredTick[(FinalTick - 1) % 200] >= Client()->PrevGameTick(g_Config.m_ClDummy) &&
+		Data.m_aPredTick[FinalTick % 200] <= Client()->PredGameTick(g_Config.m_ClDummy) + FastInputTicks)
+	{
+		Pos = mix(Data.m_aPredPos[(FinalTick - 1) % 200], Data.m_aPredPos[FinalTick % 200], FinalIntra);
+	}
+
+	if(!SafeGuard)
+		return Pos;
+
+	const bool StateChanged =
+		Data.m_Predicted.m_FreezeEnd != Data.m_RegularPredicted.m_FreezeEnd ||
+		Data.m_Predicted.m_HookState != Data.m_RegularPredicted.m_HookState ||
+		Data.m_Predicted.HookedPlayer() != Data.m_RegularPredicted.HookedPlayer();
+	if(StateChanged)
+		return RegularPos;
+
+	const float MaxAdvance = std::max(24.0f, length(Data.m_RegularPredicted.m_Vel) * (AmountMs / 1000.0f) * 1.75f + 18.0f);
+	const vec2 Delta = Pos - RegularPos;
+	const float DeltaLength = length(Delta);
+	if(DeltaLength > MaxAdvance && DeltaLength > 0.0f)
+		Pos = RegularPos + Delta * (MaxAdvance / DeltaLength);
+
+	return Pos;
 }
 
 vec2 CGameClient::ApplyAncientInputPost(int ClientId, vec2 BasePos)

@@ -1261,6 +1261,27 @@ public:
 				memset(&Pi, 0, sizeof(Pi));
 				if(!CreateProcessW(MonitorPath.c_str(), nullptr, nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &Si, &Pi))
 					return;
+				// TClient: 后台节能降级（tc_island_bg_throttle）——BELOW_NORMAL 优先级
+				// 恒定生效；EcoQoS 需 Win10+，SDK 目标偏旧导致声明缺失，就地用
+				// GetProcAddress 解析（拿不到就只保留优先级这一层，无副作用）。
+				if(g_Config.m_TcIslandBgThrottle)
+				{
+					SetPriorityClass(Pi.hProcess, BELOW_NORMAL_PRIORITY_CLASS);
+					const HMODULE hK32 = GetModuleHandleW(L"kernel32.dll");
+					const auto pSetProcessInformation = (BOOL (WINAPI *)(HANDLE, DWORD, void *, DWORD))GetProcAddress(hK32, "SetProcessInformation");
+					if(pSetProcessInformation)
+					{
+						// PROCESS_POWER_THROTTLING_STATE{Version=1, ControlMask=StateMask=0x1(EXECUTION_SPEED)}，
+						// ProcessInformationClass=4(ProcessPowerThrottling)。
+						struct
+						{
+							DWORD Version;
+							DWORD ControlMask;
+							DWORD StateMask;
+						} Throttle = {1, 0x1, 0x1};
+						pSetProcessInformation(Pi.hProcess, 4, &Throttle, sizeof(Throttle));
+					}
+				}
 				CloseHandle(Pi.hThread);
 				CloseHandle(Pi.hProcess);
 			})

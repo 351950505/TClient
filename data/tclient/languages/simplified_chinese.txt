@@ -2133,4 +2133,7 @@ Linear visual interpolation
 == 线性视觉插值
 
 Hook pull visual intensity
-== 钩拉视觉强度
+== 钩拉视觉强度（100=原版，越大越跟手，越小越贴；只在钩住时生效）
+
+Background helper power saving (helpers yield CPU while you play)
+== 后台辅助进程节能降级（你游玩时 monitor/watcher 让出 CPU，防卡顿）

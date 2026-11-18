@@ -1584,6 +1584,8 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 			Column.HSplitTop(LineSize, &Button, &Column);
 			Ui()->DoScrollbarOption(&g_Config.m_TcIslandTransparentTextShadow, &g_Config.m_TcIslandTransparentTextShadow, &Button, TCLocalize("Text outline strength"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 		}
+		// TClient: 后台辅助进程节能降级（EcoQoS）——monitor/watcher 游玩时让出 CPU
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandBgThrottle, TCLocalize("Background helper power saving (helpers yield CPU while you play)"), &g_Config.m_TcIslandBgThrottle, &Column, LineSize);
 	}
 	else
 		Column.HSplitTop(LineSize, nullptr, &Column);

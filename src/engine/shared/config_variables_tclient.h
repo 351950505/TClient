@@ -477,6 +477,9 @@ MACRO_CONFIG_INT(TcIslandOffsetY, tc_island_offset_y, 0, -2000, 2000, CFGFLAG_CL
 MACRO_CONFIG_INT(TcIslandTransparent, tc_island_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode (no black capsule, outlined text)")
 MACRO_CONFIG_INT(TcIslandTransparentTextShadow, tc_island_transparent_text_shadow, 85, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode text outline strength (%)")
 MACRO_CONFIG_INT(TcIslandShadow, tc_island_shadow, 100, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island drop shadow strength under the capsule (softens the hard edge against the game)")
+// TClient: 后台辅助进程节能降级（BELOW_NORMAL 优先级 + EcoQoS）——monitor/watcher
+// 游玩时让出 CPU，防解码/拉取突发顶飞游戏线程。旧系统优雅降级为只降优先级。
+MACRO_CONFIG_INT(TcIslandBgThrottle, tc_island_bg_throttle, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: background helper processes (island media monitor, netease watcher) run at Below-Normal priority with EcoQoS so they never steal CPU from the game")
 // 胶囊配色：两个端点色构成线性渐变，方向由 tc_island_gradient 决定（0=纯色）。
 // 默认上浅下深，是一条极轻的竖向渐变——观感与旧的近黑平色几乎一致，但多了层次。
 MACRO_CONFIG_COL(TcIslandColorTop, tc_island_color_top, 10244371, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island capsule gradient start color (#0D1119)")

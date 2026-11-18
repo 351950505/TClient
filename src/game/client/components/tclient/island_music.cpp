@@ -563,6 +563,7 @@ public:
 	static constexpr size_t COVER_MAX_BYTES = 16u * 1024u * 1024u;
 	static constexpr int COVER_MAX_DIMENSION = 2048;
 	static constexpr size_t COVER_MAX_PIXELS = 4u * 1024u * 1024u; // 2048x2048 RGBA：解码/遮罩/上传峰值降 4 倍（换歌卡顿治理 2026-11-08）
+	static constexpr int COVER_DISPLAY_MAX_DIMENSION = 512; // 灵动岛显示单元远小于源图：解码后先缩到此上限，圆蒙版与上传都按它算（2026-11-19 尖刺排查）
 
 	// ---- request slot: render thread -> decode thread ----
 	std::vector<uint8_t> m_vCoverDecodeReqPng;
@@ -3261,13 +3262,60 @@ public:
 		str_time((int64_t)Time * 100, ETimeFormat::DAYS, pBuf, BufSize);
 	}
 
+	// 面积平均箱式缩放（RGBA8）：输出像素 = 源矩形重叠区的加权平均。
+	// 只在缩小时调用；一次全图遍历、无 sqrt，是解码后的唯一额外成本。
+	static void DownscaleRgbaBox(const unsigned char *pSrc, int SW, int SH, unsigned char *pDst, int DW, int DH)
+	{
+		for(int Dy = 0; Dy < DH; ++Dy)
+		{
+			const double Sy0 = (double)Dy * SH / DH;
+			const double Sy1 = (double)(Dy + 1) * SH / DH;
+			const int Yi0 = std::max(0, (int)Sy0);
+			const int Yi1 = std::min(SH, (int)std::ceil(Sy1));
+			for(int Dx = 0; Dx < DW; ++Dx)
+			{
+				const double Sx0 = (double)Dx * SW / DW;
+				const double Sx1 = (double)(Dx + 1) * SW / DW;
+				const int Xi0 = std::max(0, (int)Sx0);
+				const int Xi1 = std::min(SW, (int)std::ceil(Sx1));
+				double Sum[4] = {0.0, 0.0, 0.0, 0.0};
+				double Total = 0.0;
+				for(int Y = Yi0; Y < Yi1; ++Y)
+				{
+					const double Wy = std::min(Sy1, Y + 1.0) - std::max(Sy0, (double)Y);
+					const unsigned char *pRow = pSrc + ((size_t)Y * (size_t)SW) * 4;
+					for(int X = Xi0; X < Xi1; ++X)
+					{
+						const double Wx = std::min(Sx1, X + 1.0) - std::max(Sx0, (double)X);
+						const double W = Wy * Wx;
+						const unsigned char *pPx = pRow + (size_t)X * 4;
+						for(int Ch = 0; Ch < 4; ++Ch)
+							Sum[Ch] += pPx[Ch] * W;
+						Total += W;
+					}
+				}
+				unsigned char *pOut = pDst + ((size_t)Dy * (size_t)DW + (size_t)Dx) * 4;
+				if(Total > 0.0)
+				{
+					for(int Ch = 0; Ch < 4; ++Ch)
+						pOut[Ch] = (unsigned char)std::lround(std::min(255.0, Sum[Ch] / Total));
+				}
+			}
+		}
+	}
+
 	// ---- cover decode thread ------------------------------------------------
 	// stbi decode + the circular alpha mask used to run inline in
 	// UpdateCoverTexture(), i.e. on the render thread, exactly when a track
 	// changed: a 2048x2048 cover is a 16 MiB RGBA buffer plus ~4M sqrt() calls.
-	// It runs here now; the render thread only uploads finished pixels.
+	// It runs here now; the render thread only uploads finished pixels, and the
+	// image is downscaled to COVER_DISPLAY_MAX_DIMENSION right after the decode,
+	// so the mask and the upload both work on the small buffer.
 	void CoverDecodeMain()
 	{
+		// 解码不赶时间（好了才显示）：压到低优先级，换歌突发解码时给游戏线程让路。
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+
 		auto ValidDimensions = [](int W, int H) {
 			if(W <= 0 || H <= 0 || W > COVER_MAX_DIMENSION || H > COVER_MAX_DIMENSION)
 				return false;
@@ -3324,8 +3372,18 @@ public:
 					}
 					else
 					{
-						Image.m_Width = (size_t)IW;
-						Image.m_Height = (size_t)IH;
+						// 灵动岛封面显示尺寸远小于源图（源图可达 2048²）：解码后先
+						// 箱式缩到显示上限，圆蒙版与 GPU 上传都按缩后尺寸做，
+						// 逐像素 sqrt 与上传字节量一起压下来（2026-11-19 尖刺排查）。
+						int TW = IW, TH = IH;
+						if(TW > COVER_DISPLAY_MAX_DIMENSION || TH > COVER_DISPLAY_MAX_DIMENSION)
+						{
+							const double Scale = (double)COVER_DISPLAY_MAX_DIMENSION / std::max(TW, TH);
+							TW = std::max(1, (int)std::lround(IW * Scale));
+							TH = std::max(1, (int)std::lround(IH * Scale));
+						}
+						Image.m_Width = (size_t)TW;
+						Image.m_Height = (size_t)TH;
 						Image.m_Format = CImageInfo::FORMAT_RGBA;
 						Image.Allocate();
 						if(!Image.m_pData)
@@ -3335,20 +3393,23 @@ public:
 						}
 						else
 						{
-							memcpy(Image.m_pData, pPixels, (size_t)IW * (size_t)IH * 4);
+							if(TW == IW && TH == IH)
+								memcpy(Image.m_pData, pPixels, (size_t)IW * (size_t)IH * 4);
+							else
+								DownscaleRgbaBox(pPixels, IW, IH, (unsigned char *)Image.m_pData, TW, TH);
 							// 网易云黑胶样式：封面裁成圆形（边缘 2px 抗锯齿），黑胶边从圆外露出
-							const float CXp = (IW - 1) * 0.5f;
-							const float CYp = (IH - 1) * 0.5f;
-							const float Radius = std::min(IW, IH) * 0.5f - 1.0f;
+							const float CXp = (TW - 1) * 0.5f;
+							const float CYp = (TH - 1) * 0.5f;
+							const float Radius = std::min(TW, TH) * 0.5f - 1.0f;
 							unsigned char *pPx = (unsigned char *)Image.m_pData;
-							for(int y = 0; y < IH; ++y)
+							for(int y = 0; y < TH; ++y)
 							{
-								for(int x = 0; x < IW; ++x)
+								for(int x = 0; x < TW; ++x)
 								{
 									const float Dx = x - CXp;
 									const float Dy = y - CYp;
 									const float Edge = Radius - std::sqrt(Dx * Dx + Dy * Dy);
-									unsigned char &Alpha = pPx[((size_t)y * (size_t)IW + (size_t)x) * 4 + 3];
+									unsigned char &Alpha = pPx[((size_t)y * (size_t)TW + (size_t)x) * 4 + 3];
 									if(Edge <= 0.0f)
 										Alpha = 0;
 									else if(Edge < 2.0f)
@@ -3356,6 +3417,8 @@ public:
 								}
 							}
 							Reason = "decoded " + std::to_string(IW) + "x" + std::to_string(IH);
+							if(TW != IW || TH != IH)
+								Reason += "->" + std::to_string(TW) + "x" + std::to_string(TH);
 						}
 					}
 				}

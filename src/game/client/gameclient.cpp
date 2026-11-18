@@ -4644,7 +4644,9 @@ vec2 CGameClient::GetSmoothPos(int ClientId)
 		const int64_t TimePassed = Now - m_aClients[ClientId].m_aSmoothStart[Axis];
 		if(!in_range(TimePassed, (int64_t)0, Len - 1))
 			continue;
-		const float MixAmount = 1.0f - std::pow(1.0f - TimePassed / (float)Len, 1.2f);
+		// TClient: tc_input_linear_visual（对齐 Nova nc_input_linear_visual）开启时跳过平滑追赶，
+		// 用恒定速率（线性）插值渲染，纯视觉；MixAmount=0 时 GetSmoothTick 回到原始渲染时间。
+		const float MixAmount = g_Config.m_TcInputLinearVisual ? 0.0f : 1.0f - std::pow(1.0f - TimePassed / (float)Len, 1.2f);
 		int Tick;
 		float Intra;
 		Client()->GetSmoothTick(&Tick, &Intra, MixAmount);

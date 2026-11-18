@@ -48,7 +48,7 @@ MACRO_CONFIG_INT(TcShowChatClient, tc_show_chat_client, 1, 0, 1, CFGFLAG_CLIENT 
 
 MACRO_CONFIG_INT(TcShowFrozenText, tc_frozen_tees_text, 1, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show the remaining tee count inside the frozen tee HUD, to the left of the tees. (0 - off, 1 - show alive [default], 2 - show frozen)")
 MACRO_CONFIG_INT(TcShowFrozenHud, tc_frozen_tees_hud, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show frozen tee HUD")
-MACRO_CONFIG_INT(TcFrozenTeesShowAll, tc_frozen_tees_showall, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Request native /showall 1 once per connection on DDRace when tee status icons or text are enabled. Requires server support, may increase traffic; other visibility limits still apply. Disabling does not send /showall 0.")
+// （tc_frozen_tees_showall 已移除：全距离 tee 状态 2026-11-19 起强制开启，DDRace 服连接后自动 /showall 1 一次，无用户选项。）
 MACRO_CONFIG_INT(TcShowFrozenHudSkins, tc_frozen_tees_hud_skins, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use ninja skin, or darkened skin for frozen tees on hud")
 
 MACRO_CONFIG_INT(TcFrozenHudTeeSize, tc_frozen_tees_size, 10, 8, 20, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Size of tees in frozen tee HUD")
@@ -116,6 +116,8 @@ MACRO_CONFIG_INT(TcFastInput, tc_fast_input, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_S
 MACRO_CONFIG_INT(TcFastInputAmount, tc_fast_input_amount, 20, 1, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "How many milliseconds fast input will apply")
 MACRO_CONFIG_INT(TcFastInputOthers, tc_fast_input_others, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Apply fast input to other tees")
 MACRO_CONFIG_INT(TcFastInputRepredictHook, tc_fast_input_repredict_hook, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Repredict fast input hook when the direction changes (requires Sub-Tick aiming disabled)")
+// TClient: 对齐 NovaClient nc_input_linear_visual——独立于快速输入模式的恒定速率（线性）渲染插值，纯视觉
+MACRO_CONFIG_INT(TcInputLinearVisual, tc_input_linear_visual, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use linear player and flying-hook interpolation independently of input mode")
 // 快速输入模式：0=Tater(原版) 1=Meow 2=Snow 3=Next 5=Salatik 6=Ancient 7=F（对齐 MeowClient-Next alpha）
 // 8=Best 9=Saiko 10=Delta 11=Cloud（2026-10-29 自 BestClient 移植，见 交接摘要 §172）
 MACRO_CONFIG_INT(TcFastInputMode, tc_fast_input_mode, 0, 0, 14, CFGFLAG_CLIENT | CFGFLAG_SAVE, "快速输入模式：0=Tater 1=Meow 2=Snow 3=Next 5=Salatik 6=Ancient 7=F 8=Best 9=Saiko 10=Delta 11=Cloud 12=Light 13=Azure 14=BestClient-Light Ancient")
@@ -460,9 +462,14 @@ MACRO_CONFIG_INT(MeClientBadge, me_client_badge, 1, 0, 1, CFGFLAG_CLIENT | CFGFL
 // ME page: Gores 组队落水榜（QmClient 移植）——统计同队玩家冻结次数，默认关闭。
 MACRO_CONFIG_INT(TcDrownBoard, tc_drown_board, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: show the team drown board on Gores maps")
 MACRO_CONFIG_INT(TcDrownBoardIncludeTeam0, tc_drown_board_include_team0, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: include Team 0")
-MACRO_CONFIG_INT(TcDrownBoardMaxPlayers, tc_drown_board_max_players, 8, 1, 16, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: maximum players shown")
+MACRO_CONFIG_INT(TcDrownBoardMaxPlayers, tc_drown_board_max_players, 5, 1, 16, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: maximum players shown")
 MACRO_CONFIG_INT(TcDrownBoardOpacity, tc_drown_board_opacity, 80, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: background opacity")
 MACRO_CONFIG_INT(TcDrownBoardShowTee, tc_drown_board_show_tee, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: show player Tee")
+// 落水榜列选择位掩码：bit0 落水 bit1 死亡 bit2 救援 bit3 坚持 bit4 全灭 bit5 跳跃
+// bit6 出钩 bit7 钩人 bit8 存活时间 bit9 冻结时间 bit10 效率；默认 133 = 落水+救援+钩人
+//（用户指定）；2047 = 全开。除落水外均为客户端估算（判据见落水榜多列语义 2026-11-19）。
+MACRO_CONFIG_INT(TcDrownBoardColumns, tc_drown_board_columns, 133, 0, 2047, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: column bitmask (1 Freezes, 2 Deaths, 4 Saves, 8 Lasts, 16 Aleds, 32 Jumps, 64 Hooks launched, 128 Player hooks, 256 Time alive, 512 Time frozen, 1024 Eff; default 133 = Freezes+Saves+Player hooks; estimated stats)")
+MACRO_CONFIG_INT(TcDrownBoardResetOnWipe, tc_drown_board_reset_on_wipe, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: reset all stats when the whole team is frozen at once (new round)")
 MACRO_CONFIG_INT(TcIslandOffsetX, tc_island_offset_x, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island horizontal offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandOffsetY, tc_island_offset_y, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island vertical offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandTransparent, tc_island_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode (no black capsule, outlined text)")

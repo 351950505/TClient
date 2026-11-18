@@ -1040,6 +1040,8 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_ClSubTickAiming, TCLocalize("Sub-Tick aiming"), &g_Config.m_ClSubTickAiming, &Column, LineSize);
 	if(!g_Config.m_ClSubTickAiming)
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFastInputRepredictHook, TCLocalize("Repredict on mid-tick hook direction change (may lag)"), &g_Config.m_TcFastInputRepredictHook, &Column, LineSize);
+	// TClient: 对齐 Nova nc_input_linear_visual——独立于快速输入模式的线性视觉插值（纯视觉，默认关）
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcInputLinearVisual, TCLocalize("Linear visual interpolation"), &g_Config.m_TcInputLinearVisual, &Column, LineSize);
 
 	// A little extra spacing because these are multi line
 	Column.HSplitTop(MarginSmall, nullptr, &Column);
@@ -1629,12 +1631,11 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 				g_Config.m_TcShowFrozenText = g_Config.m_TcShowFrozenText != 2 ? 2 : 1;
 		}
 	}
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesShowAll, TCLocalize("Request full-distance tee status (native /showall)"), &g_Config.m_TcFrozenTeesShowAll, &Column, LineSize);
 	{
 		SLabelProperties Props;
 		Props.m_MaxWidth = Column.w;
-		Column.HSplitTop(LineSize * 4, &Label, &Column);
-		Ui()->DoLabel(&Label, TCLocalize("With tee icons or text enabled, requests /showall 1 once per connection on DDRace. Requires native /showall server support and may increase traffic. Other visibility limits still apply; not a confirmation. Disabling does not send /showall 0."), FontSize, TEXTALIGN_TL, Props);
+		Column.HSplitTop(LineSize * 2, &Label, &Column);
+		Ui()->DoLabel(&Label, TCLocalize("Full-distance tee status is requested automatically once per connection (native /showall; requires server support)"), FontSize, TEXTALIGN_TL, Props);
 	}
 	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
 
@@ -4144,17 +4145,49 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	Ui()->DoLabel(&Label, TCLocalize("Drown board"), HeadlineFontSize, TEXTALIGN_ML);
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoard, TCLocalize("Show the team drown board on Gores maps"), &g_Config.m_TcDrownBoard, &LeftView, LineSize);
-	if(g_Config.m_TcDrownBoard)
+	// Nova 式布局：列选择与子开关始终可见，不藏在总开关里（用户 2026-11-19 反馈找不到）。
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoardIncludeTeam0, TCLocalize("Include Team 0"), &g_Config.m_TcDrownBoardIncludeTeam0, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoardShowTee, TCLocalize("Show player Tee"), &g_Config.m_TcDrownBoardShowTee, &LeftView, LineSize);
+	LeftView.HSplitTop(LineSize, &Button, &LeftView);
+	Ui()->DoScrollbarOption(&g_Config.m_TcDrownBoardMaxPlayers, &g_Config.m_TcDrownBoardMaxPlayers, &Button, TCLocalize("Players shown"), 1, 16, &CUi::ms_LinearScrollbarScale, 0, "");
+	LeftView.HSplitTop(LineSize, &Button, &LeftView);
+	Ui()->DoScrollbarOption(&g_Config.m_TcDrownBoardOpacity, &g_Config.m_TcDrownBoardOpacity, &Button, TCLocalize("Board opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+	// 列选择（位掩码；除落水外均为客户端估算）。至少保留落水列，避免空榜。
+	int aColumnMirror[11];
+	for(int Bit = 0; Bit < 11; ++Bit)
+		aColumnMirror[Bit] = (g_Config.m_TcDrownBoardColumns >> Bit) & 1;
+	const char *apColumnLabels[11] = {
+		TCLocalize("Freezes"),
+		TCLocalize("Deaths"),
+		TCLocalize("Saves"),
+		TCLocalize("Lasts"),
+		TCLocalize("Aleds"),
+		TCLocalize("Jumps"),
+		TCLocalize("Hooks launched"),
+		TCLocalize("Player hooks"),
+		TCLocalize("Time alive"),
+		TCLocalize("Time frozen"),
+		TCLocalize("Eff")};
+	// 两列横排（对齐 Nova 的 chips 布局，省竖向空间）。
+	for(int Row = 0; Row < 6; ++Row)
 	{
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoardIncludeTeam0, TCLocalize("Include Team 0"), &g_Config.m_TcDrownBoardIncludeTeam0, &LeftView, LineSize);
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoardShowTee, TCLocalize("Show player Tee"), &g_Config.m_TcDrownBoardShowTee, &LeftView, LineSize);
-		LeftView.HSplitTop(LineSize, &Button, &LeftView);
-		Ui()->DoScrollbarOption(&g_Config.m_TcDrownBoardMaxPlayers, &g_Config.m_TcDrownBoardMaxPlayers, &Button, TCLocalize("Players shown"), 1, 16, &CUi::ms_LinearScrollbarScale, 0, "");
-		LeftView.HSplitTop(LineSize, &Button, &LeftView);
-		Ui()->DoScrollbarOption(&g_Config.m_TcDrownBoardOpacity, &g_Config.m_TcDrownBoardOpacity, &Button, TCLocalize("Board opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+		CUIRect RowRect, CellLeft, CellRight;
+		LeftView.HSplitTop(LineSize, &RowRect, &LeftView);
+		RowRect.VSplitMid(&CellLeft, &CellRight, 6.0f);
+		const int BitLeft = Row * 2;
+		const int BitRight = Row * 2 + 1;
+		if(BitLeft < 11)
+			DoButton_CheckBoxAutoVMarginAndSet(&aColumnMirror[BitLeft], apColumnLabels[BitLeft], &aColumnMirror[BitLeft], &CellLeft, LineSize);
+		if(BitRight < 11)
+			DoButton_CheckBoxAutoVMarginAndSet(&aColumnMirror[BitRight], apColumnLabels[BitRight], &aColumnMirror[BitRight], &CellRight, LineSize);
 	}
+	int NewColumns = 0;
+	for(int Bit = 0; Bit < 11; ++Bit)
+		NewColumns |= (aColumnMirror[Bit] & 1) << Bit;
+	g_Config.m_TcDrownBoardColumns = NewColumns == 0 ? 1 : NewColumns;
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoardResetOnWipe, TCLocalize("Reset all stats when the whole team is frozen"), &g_Config.m_TcDrownBoardResetOnWipe, &LeftView, LineSize);
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
-	Ui()->DoLabel(&Label, TCLocalize("Counts drown deaths for players in your DDRace team. Only shown on Gores maps."), EditBoxFontSize, TEXTALIGN_TL);
+	Ui()->DoLabel(&Label, TCLocalize("Counts drown deaths for players in your DDRace team. Only shown on Gores maps. All columns except Freezes are client-side estimates."), EditBoxFontSize, TEXTALIGN_TL);
 
 	// [STEAM-HIDE] Steam 隐藏：不连 Steam，好友列表不再显示"正在玩"
 	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);

@@ -318,3 +318,206 @@ TEST(ClientDrownBoard, MovingBetweenTeamZeroAndNonZeroStartsNewBaseline)
 	Observe(Tracker, 1, true, false, TEAM_FLOCK);
 	EXPECT_EQ(Tracker.Count(1), 1);
 }
+
+// —— 多列统计（ObserveStats / FeedDeath，估算口径见 docs 落水榜多列语义 2026-11-19）——
+
+namespace
+{
+	using CTickArray = std::array<CTClientDrownBoard::SDrownStatTick, MAX_CLIENTS>;
+
+	CTClientDrownBoard::SDrownStatTick MakeStatTick(bool Frozen = false, bool OnStart = false, int HookState = HOOK_IDLE, int JumpedTotal = -1, float X = 0.0f, float Y = 0.0f, float HookX = 0.0f, float HookY = 0.0f)
+	{
+		CTClientDrownBoard::SDrownStatTick Tick;
+		Tick.m_Active = true;
+		Tick.m_HasCharacter = true;
+		Tick.m_Frozen = Frozen;
+		Tick.m_OnStart = OnStart;
+		Tick.m_HookState = HookState;
+		Tick.m_JumpedTotal = JumpedTotal;
+		Tick.m_X = X;
+		Tick.m_Y = Y;
+		Tick.m_HookX = HookX;
+		Tick.m_HookY = HookY;
+		return Tick;
+	}
+
+	// 同时喂 Observe（冻结计数基线）与 StatTick 数组，模拟一个快照 tick。
+	void FeedTick(CTClientDrownBoard &Tracker, CTickArray &aTicks, int ClientId, int Team, const CTClientDrownBoard::SDrownStatTick &Tick, bool IncludeTeamZero = true)
+	{
+		aTicks[ClientId] = Tick;
+		Tracker.Observe(ClientId, true, "player", "clan", Team, true, Tick.m_Frozen,
+			Tick.m_HookState == HOOK_FLYING || Tick.m_HookState == HOOK_GRABBED, Tick.m_OnStart, IncludeTeamZero);
+	}
+
+	void RunStats(CTClientDrownBoard &Tracker, const CTickArray &aTicks, int LocalTeam = 1, bool IncludeTeamZero = true, bool ResetOnWipe = false)
+	{
+		Tracker.ObserveStats(aTicks.data(), LocalTeam, IncludeTeamZero, ResetOnWipe);
+	}
+}
+
+TEST(ClientDrownBoard, DeathsCountPerKillAndClearOnNewRound)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	RunStats(Tracker, aTicks);
+	Tracker.FeedDeath(1);
+	Tracker.FeedDeath(1);
+	EXPECT_EQ(Tracker.Stats(1).m_Deaths, 2);
+	// 回到起点再离开 = 新一轮，全部计数清零。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, true));
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Deaths, 0);
+}
+
+TEST(ClientDrownBoard, HookLaunchesAndPlayerHooks)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick());
+	RunStats(Tracker, aTicks);
+	// 队友站在 (100,100)：出钩 +1（钩尖指向队友）。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_FLYING, -1, 50.0f, 50.0f, 100.0f, 100.0f));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_HooksLaunched, 1);
+	EXPECT_EQ(Tracker.Stats(1).m_PlayerHooks, 0);
+	// 钩住瞬间且钩尖在队友位置 → 钩人 +1。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_PlayerHooks, 1);
+	// 持续 GRABBED 不重复计钩人。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_PlayerHooks, 1);
+}
+
+TEST(ClientDrownBoard, JumpsFollowCumulativeCounterAndRespawnResetsBaseline)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, 0));
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, 3));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Jumps, 3);
+	// 重生后累计值回退：只重建基线，不把回退当跳。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, 0));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Jumps, 3);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, 5));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Jumps, 8);
+}
+
+TEST(ClientDrownBoard, SaveCreditedToHookerWhenFrozenMateUnfreezes)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true));
+	RunStats(Tracker, aTicks);
+	// 钩手出钩并钩住冻结队友（钩尖在队友位置）。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_FLYING, -1, 50.0f, 50.0f, 100.0f, 100.0f));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f));
+	RunStats(Tracker, aTicks);
+	// 队友解冻 → 救援 +1。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 1);
+	EXPECT_EQ(Tracker.Stats(2).m_Saves, 0);
+}
+
+TEST(ClientDrownBoard, LastsAndAledsPerTeamEpisode)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	for(int ClientId = 1; ClientId <= 3; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 10.0f * ClientId, 0.0f));
+	RunStats(Tracker, aTicks);
+	// 两人冻结：剩下的那名玩家记一次坚持。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 10.0f, 0.0f));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 20.0f, 0.0f));
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 30.0f, 0.0f));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(3).m_Lasts, 1);
+	// 持续未解冻不重复计数。
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(3).m_Lasts, 1);
+	// 最后一人也冻结 → 全灭，三人各 +1。
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 30.0f, 0.0f));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	EXPECT_EQ(Tracker.Stats(2).m_Aleds, 1);
+	EXPECT_EQ(Tracker.Stats(3).m_Aleds, 1);
+	EXPECT_EQ(Tracker.Stats(3).m_Lasts, 1);
+	// 有人解冻 → 轮次结束，再次出现“只剩一人”时可再记坚持。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 10.0f, 0.0f));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 20.0f, 0.0f));
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 30.0f, 0.0f));
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 10.0f, 0.0f));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(2).m_Lasts, 0);
+	// 解冻者随后也冻住，此时 2/3 仍冻结、1 冻结——不，全员冻结只会再记全灭。
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 2);
+}
+
+TEST(ClientDrownBoard, ResetOnWipeClearsAllCountersLikeNewRound)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick());
+	RunStats(Tracker, aTicks, 1, true, true);
+	Tracker.FeedDeath(1);
+	ASSERT_EQ(Tracker.Stats(1).m_Deaths, 1);
+	// “全灭重置”开启时，全员冻结的那一 tick 记完全灭就把全部统计清零（新开局）。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true));
+	RunStats(Tracker, aTicks, 1, true, true);
+	EXPECT_EQ(Tracker.Stats(1).m_Deaths, 0);
+	EXPECT_EQ(Tracker.Stats(1).m_Freezes, 0);
+	EXPECT_EQ(Tracker.Stats(2).m_Freezes, 0);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 0);
+	EXPECT_EQ(Tracker.Stats(2).m_Aleds, 0);
+}
+
+TEST(ClientDrownBoard, TickTimeAccumulatesWhileCharacterPresent)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true));
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_TicksAlive, 1);
+	EXPECT_EQ(Tracker.Stats(1).m_TicksFrozen, 2);
+}
+
+TEST(ClientDrownBoard, LocalTeamChangeRestartsEpisodesOnly)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	for(int ClientId = 1; ClientId <= 2; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 10.0f * ClientId, 0.0f));
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 10.0f, 0.0f));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(2).m_Lasts, 1);
+	// 本地换队：轮次状态重来，但已计入的数字不变（队伍 1 的玩家不再产生新轮次）。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 10.0f, 0.0f));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 20.0f, 0.0f));
+	RunStats(Tracker, aTicks, 2);
+	EXPECT_EQ(Tracker.Stats(2).m_Lasts, 1);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 10.0f, 0.0f));
+	RunStats(Tracker, aTicks, 2);
+	EXPECT_EQ(Tracker.Stats(1).m_Lasts, 0);
+	EXPECT_EQ(Tracker.Stats(2).m_Lasts, 1);
+}

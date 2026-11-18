@@ -346,6 +346,13 @@ void CTClient::OnMessage(int MsgType, void *pRawMsg)
 	if(Client()->State() == IClient::STATE_DEMOPLAYBACK)
 		return;
 
+	if(MsgType == NETMSGTYPE_SV_KILLMSG)
+	{
+		// 落水榜死亡列：Sv_KillMsg 的 victim 即一次死亡（估算口径，见落水榜语义文档）。
+		if(g_Config.m_TcDrownBoard && m_DrownBoardModeActive)
+			m_DrownBoard.FeedDeath(static_cast<CNetMsg_Sv_KillMsg *>(pRawMsg)->m_Victim);
+	}
+
 	if(MsgType == NETMSGTYPE_SV_CHAT)
 	{
 		CNetMsg_Sv_Chat *pMsg = (CNetMsg_Sv_Chat *)pRawMsg;
@@ -2074,6 +2081,7 @@ void CTClient::UpdateDrownBoard()
 
 	const CCollision *pCollision = GameClient()->Collision();
 	const bool IncludeTeamZero = g_Config.m_TcDrownBoardIncludeTeam0 != 0;
+	CTClientDrownBoard::SDrownStatTick aStatTicks[MAX_CLIENTS];
 	for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
 	{
 		const auto &Player = GameClient()->m_aClients[ClientId];
@@ -2088,7 +2096,23 @@ void CTClient::UpdateDrownBoard()
 		}
 		m_DrownBoard.Observe(ClientId, Active, Player.m_aName, Player.m_aClan, GameClient()->m_Teams.Team(ClientId),
 			Character.m_Active, Player.m_FreezeEnd != 0, Hooking, OnStart, IncludeTeamZero);
+
+		CTClientDrownBoard::SDrownStatTick &Tick = aStatTicks[ClientId];
+		Tick.m_Active = Active;
+		Tick.m_HasCharacter = Character.m_Active;
+		Tick.m_Frozen = Player.m_FreezeEnd != 0;
+		Tick.m_OnStart = OnStart;
+		Tick.m_HookState = Character.m_Active ? Character.m_Cur.m_HookState : HOOK_IDLE;
+		Tick.m_JumpedTotal = Character.m_HasExtendedData ? Character.m_ExtendedData.m_JumpedTotal : -1;
+		Tick.m_X = Character.m_Active ? (float)Character.m_Cur.m_X : 0.0f;
+		Tick.m_Y = Character.m_Active ? (float)Character.m_Cur.m_Y : 0.0f;
+		Tick.m_HookX = Character.m_Active ? (float)Character.m_Cur.m_HookX : 0.0f;
+		Tick.m_HookY = Character.m_Active ? (float)Character.m_Cur.m_HookY : 0.0f;
 	}
+
+	const int LocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy] >= 0 ? GameClient()->m_aLocalIds[g_Config.m_ClDummy] : GameClient()->m_Snap.m_LocalClientId;
+	const int LocalTeam = LocalId >= 0 && LocalId < MAX_CLIENTS ? GameClient()->m_Teams.Team(LocalId) : -1;
+	m_DrownBoard.ObserveStats(aStatTicks, LocalTeam, IncludeTeamZero, g_Config.m_TcDrownBoardResetOnWipe != 0);
 }
 
 constexpr const char STRIP_CHARS[] = {'-', '=', '+', '_', ' '};

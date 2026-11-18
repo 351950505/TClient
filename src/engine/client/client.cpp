@@ -944,7 +944,10 @@ void CClient::UpdateFrozenTeesShowAll(int Conn, const CSnapshot *pSnapshot)
 	const bool FallbackDDRace = str_find_nocase(m_CurrentServerInfo.m_aGameType, "ddrace") ||
 		str_find_nocase(m_CurrentServerInfo.m_aGameType, "mkrace");
 	const bool EntitiesDDRace = TcFrozenTeesEntitiesDDRace(InfoExSize, Version, Flags, FallbackDDRace);
-	const bool Requested = g_Config.m_TcFrozenTeesShowAll && (g_Config.m_TcShowFrozenHud || g_Config.m_TcShowFrozenText);
+	// 全距离 tee 状态强制开启（用户要求，2026-11-19，不设选项）：DDRace 服连接后
+	// 自动 /showall 1 一次——落水榜计数、last/全灭判定、冻结 tee 显示都依赖这份
+	// 全距离快照。每连接一次由 CFrozenTeesShowAll 保证；服务器不支持时无副作用。
+	const bool Requested = true;
 	if(m_aFrozenTeesShowAll[Conn].Update(time_get(), time_freq(), Online, Requested, EntitiesDDRace))
 	{
 		SendChatCommand(Conn, "/showall 1");

@@ -2087,7 +2087,44 @@ Drown deaths
 More teammates...
 == 更多队友…
 
-Counts drown deaths for players in your DDRace team. Only shown on Gores maps.
-== 统计同队玩家的落水（冻结）次数，仅在 Gores 地图显示。
+Counts drown deaths for players in your DDRace team. Only shown on Gores maps. All columns except Freezes are client-side estimates.
+== 统计同队玩家的落水（冻结）次数，仅在 Gores 地图显示。除落水次数外均为客户端估算值。
 
+Freezes
+== 落水次数
 
+Saves
+== 救援次数
+
+Lasts
+== 坚持次数
+
+Aleds
+== 全灭次数
+
+Jumps
+== 跳跃次数
+
+Hooks launched
+== 出钩次数
+
+Player hooks
+== 钩人次数
+
+Time alive
+== 存活时间
+
+Time frozen
+== 冻结时间
+
+Eff
+== 效率
+
+Reset all stats when the whole team is frozen
+== 全队同时冻结时重置全部统计
+
+Full-distance tee status is requested automatically once per connection (native /showall; requires server support)
+== 全距离 tee 状态会在每次连接时自动请求一次（原生 /showall；需要服务器支持）
+
+Linear visual interpolation
+== 线性视觉插值

@@ -180,6 +180,7 @@ public:
 	bool IsGoresGameMode() const;
 	bool IsDrownBoardMode() const { return IsGoresGameMode(); }
 	int GetDrownCount(int ClientId) const { return m_DrownBoard.Count(ClientId); }
+	CTClientDrownBoard::SPlayerStats GetDrownStats(int ClientId) const { return m_DrownBoard.Stats(ClientId); }
 
 	bool ChatDoSpecId(const char *pInput);
 	bool InfoTaskDone() { return m_pTClientInfoTask && m_pTClientInfoTask->State() == EHttpState::DONE; }

@@ -2742,10 +2742,63 @@ void CHud::RenderDrownBoard()
 	if(!CTClientDrownBoard::IsBoardVisible(GameClient()->m_TClient.IsDrownBoardMode(), HasLocalClient, LocalTeam, IncludeTeamZero))
 		return;
 
+	// 列定义：位掩码 → 列（矢量小图标 + 专属配色，参考 Nova 精简统计板）。除落水外
+	// 均为客户端估算（判据见 docs 落水榜多列语义 2026-11-19）。
+	struct SColumn
+	{
+		int m_Bit;
+		ColorRGBA m_Color;
+		bool m_Time;    // tick 换算秒
+		bool m_Percent; // Eff 百分比
+	};
+	const int ColumnsMask = g_Config.m_TcDrownBoardColumns == 0 ? 1 : g_Config.m_TcDrownBoardColumns;
+	const SColumn aAllColumns[] = {
+		{0, ColorRGBA(0.247f, 0.776f, 0.831f, 1.0f), false, false}, // 落水：水色雪花
+		{1, ColorRGBA(0.95f, 0.36f, 0.36f, 1.0f), false, false}, // 死亡：红骷髅
+		{2, ColorRGBA(0.45f, 0.85f, 0.45f, 1.0f), false, false}, // 救援：绿锤
+		{3, ColorRGBA(0.96f, 0.82f, 0.32f, 1.0f), false, false}, // 坚持：金星
+		{4, ColorRGBA(0.96f, 0.55f, 0.28f, 1.0f), false, false}, // 全灭：橙骷髅+线
+		{5, ColorRGBA(0.55f, 0.85f, 0.60f, 1.0f), false, false}, // 跳跃：草绿双箭头
+		{6, ColorRGBA(0.55f, 0.68f, 0.95f, 1.0f), false, false}, // 出钩：天蓝钩形
+		{7, ColorRGBA(0.75f, 0.60f, 0.95f, 1.0f), false, false}, // 钩人：紫钩+目标点
+		{8, ColorRGBA(0.92f, 0.92f, 0.92f, 1.0f), true, false}, // 存活：白时钟
+		{9, ColorRGBA(0.60f, 0.78f, 0.95f, 1.0f), true, false}, // 冻结时长：冰蓝冻结钟
+		{10, ColorRGBA(0.85f, 0.85f, 0.85f, 1.0f), false, true}, // 效率：灰 %
+	};
+	std::vector<SColumn> vColumns;
+	int SortBit = 0;
+	for(const SColumn &Column : aAllColumns)
+	{
+		if(!(ColumnsMask & (1 << Column.m_Bit)))
+			continue;
+		if(vColumns.empty())
+			SortBit = Column.m_Bit;
+		vColumns.push_back(Column);
+	}
+	if(vColumns.empty())
+		vColumns.push_back(aAllColumns[0]);
+
+	const auto ColumnValueAt = [](int Bit, const CTClientDrownBoard::SPlayerStats &Stats) -> int {
+		switch(Bit)
+		{
+		case 0: return Stats.m_Freezes;
+		case 1: return Stats.m_Deaths;
+		case 2: return Stats.m_Saves;
+		case 3: return Stats.m_Lasts;
+		case 4: return Stats.m_Aleds;
+		case 5: return Stats.m_Jumps;
+		case 6: return Stats.m_HooksLaunched;
+		case 7: return Stats.m_PlayerHooks;
+		case 8: return Stats.m_TicksAlive;
+		case 9: return Stats.m_TicksFrozen;
+		default: return (100 * Stats.m_Saves) / std::max(1, Stats.m_Saves + Stats.m_Freezes);
+		}
+	};
+
 	struct SEntry
 	{
 		int m_ClientId;
-		int m_Count;
+		CTClientDrownBoard::SPlayerStats m_Stats;
 	};
 	std::vector<SEntry> vEntries;
 	for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
@@ -2754,14 +2807,16 @@ void CHud::RenderDrownBoard()
 			GameClient()->m_Snap.m_apPlayerInfos[ClientId] == nullptr ||
 			!CTClientDrownBoard::IsSameTrackedTeam(LocalTeam, GameClient()->m_Teams.Team(ClientId), IncludeTeamZero))
 			continue;
-		vEntries.push_back({ClientId, GameClient()->m_TClient.GetDrownCount(ClientId)});
+		vEntries.push_back({ClientId, GameClient()->m_TClient.GetDrownStats(ClientId)});
 	}
 	if(vEntries.empty())
 		return;
 
-	std::stable_sort(vEntries.begin(), vEntries.end(), [](const SEntry &Left, const SEntry &Right) {
-		if(Left.m_Count != Right.m_Count)
-			return Left.m_Count > Right.m_Count;
+	std::stable_sort(vEntries.begin(), vEntries.end(), [&](const SEntry &Left, const SEntry &Right) {
+		const int LeftValue = ColumnValueAt(SortBit, Left.m_Stats);
+		const int RightValue = ColumnValueAt(SortBit, Right.m_Stats);
+		if(LeftValue != RightValue)
+			return LeftValue > RightValue;
 		return Left.m_ClientId < Right.m_ClientId;
 	});
 
@@ -2769,43 +2824,111 @@ void CHud::RenderDrownBoard()
 	const int RowCount = std::min((int)vEntries.size(), MaxRows);
 	const bool HasMoreRows = (int)vEntries.size() > RowCount;
 	const bool ShowTee = g_Config.m_TcDrownBoardShowTee != 0;
-	const char *pTitle = Localize("Drown deaths");
-	const int MaxCount = vEntries.front().m_Count;
+	const char *pTitle = TCLocalize("Drown board");
+	const int LeaderValue = ColumnValueAt(SortBit, vEntries.front().m_Stats);
 
-	// 设计：深水面板 + 全场最大的次数列（唯一醒目元素）。落水最多的人次数用
-	// aqua 水色，其余按是否 >0 分灰度；标题下一条渐隐"水面线"，仅此一处装饰。
-	// 右缘贴边 + 左圆角，与下方观战名字框同款语言，右列读成一个整体。
-	constexpr float TitleFontSize = 5.0f;
-	constexpr float RowFontSize = 6.0f;
-	constexpr float CountFontSize = 7.6f;
-	constexpr float MoreFontSize = 5.5f;
-	constexpr float PaddingX = 4.5f;
-	constexpr float PaddingY = 3.5f;
-	constexpr float TitleHeight = TitleFontSize + 3.5f;
-	constexpr float RowHeight = 9.0f;
-	constexpr float MoreHeight = MoreFontSize + 2.0f;
-	constexpr float TeeSize = 6.5f;
-	constexpr float TeeGap = 2.5f;
-	constexpr float CountGap = 4.0f;
+	// 设计：深水面板 + 表头一行小字 + 数值列右对齐。首个启用列即排序列，榜首
+	// 用 aqua 水色；标题下一条渐隐"水面线"，仅此一处装饰。右缘贴边 + 左圆角，
+	// 与下方观战名字框同款语言。
+	constexpr float TitleFontSize = 4.5f;
+	constexpr float RowFontSize = 5.5f;
+	constexpr float ValueFontSize = 5.5f;
+	constexpr float MoreFontSize = 5.0f;
+	constexpr float PaddingX = 4.0f;
+	constexpr float PaddingY = 3.0f;
+	constexpr float TitleHeight = TitleFontSize + 2.5f;
+	constexpr float IconSize = 6.5f;
+	constexpr float HeaderHeight = IconSize + 1.0f;
+	constexpr float RowHeight = 7.0f;
+	constexpr float MoreHeight = MoreFontSize + 1.5f;
+	constexpr float TeeSize = 6.0f;
+	constexpr float TeeGap = 2.0f;
+	constexpr float ColumnGap = 3.0f;
+	constexpr float NameBudget = 44.0f; // 名字列固定预算：超宽按 UTF-8 边界省略号截断，面板不随名字变宽
 	constexpr float WaterlineWidth = 14.0f;
 	const ColorRGBA WaterlineColor(0.247f, 0.776f, 0.831f, 1.0f);
 	const float TeeColumnWidth = ShowTee ? TeeSize + TeeGap : 0.0f;
 
-	float CountWidthMax = 0.0f;
-	float NameWidthMax = 0.0f;
-	for(int Index = 0; Index < RowCount; ++Index)
+	const auto FormatCell = [&](const SColumn &Column, const CTClientDrownBoard::SPlayerStats &Stats, char *pBuf, size_t BufSize) {
+		if(Column.m_Time)
+			str_format(pBuf, BufSize, "%ds", ColumnValueAt(Column.m_Bit, Stats) / Client()->GameTickSpeed());
+		else if(Column.m_Percent)
+			str_format(pBuf, BufSize, "%d%%", ColumnValueAt(Column.m_Bit, Stats));
+		else
+			str_format(pBuf, BufSize, "%d", ColumnValueAt(Column.m_Bit, Stats));
+	};
+
+	// 表头图标：Font Awesome 字形（DDNet 字体系统自带 FA6 Free，SIL OFL 许可；
+	// 与 Nova 同源做法）。钩人用 Noto Emoji 的 🪝（走默认字体 emoji 回退链）。
+	// 全部码点已用 fontTools 对照字体 cmap 校验存在，视觉样张见
+	// D:\kehuduan\NovaClient-2.2.9.1-分析\glyph-preview.png。
+	const auto DrawIcon = [&](int Bit, float X, float Y, float S, const ColorRGBA &Color) {
+		struct SGlyphSpec
+		{
+			const char *m_pUtf8;
+			bool m_IconFace;
+		};
+		static const SGlyphSpec aGlyphs[11] = {
+			{"\xEF\x8B\x9C", true}, // f2dc snowflake  落水次数
+			{"\xEF\x95\x8C", true}, // f54c skull      死亡
+			{"\xEF\x9B\xA3", true}, // f6e3 hammer     救援次数
+			{"\xEF\x80\x85", true}, // f005 star       坚持次数
+			{"\xEF\x9B\xA2", true}, // f6e2 ghost      全灭次数
+			{"\xEF\x9C\x8C", true}, // f70c person-running 跳跃次数
+			{"\xEF\x84\xBD", true}, // f13d anchor     出钩次数
+			{"\xF0\x9F\xAA\x9D", false}, // 1fa9d hook 钩人次数
+			{"\xEF\x88\x9E", true}, // f21e heart-pulse 存活时间
+			{"\xEF\x9E\xAD", true}, // f7ad icicles    冻结时间
+			{"\xEF\x8A\x95", true}, // f295 percent    效率
+		};
+		TextRender()->SetFontPreset(aGlyphs[Bit].m_IconFace ? EFontPreset::ICON_FONT : EFontPreset::DEFAULT_FONT);
+		TextRender()->TextColor(Color.r, Color.g, Color.b, Color.a);
+		const float GlyphWidth = TextRender()->TextWidth(S, aGlyphs[Bit].m_pUtf8);
+		TextRender()->Text(X + (S - GlyphWidth) / 2.0f, Y, S, aGlyphs[Bit].m_pUtf8);
+		TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+	};
+
+	// 名字按固定预算截断：从尾部按 UTF-8 边界回退，补省略号（面板不随长名变宽）。
+	const auto EllipsizeName = [&](const char *pText, char *pBuf, size_t BufSize) {
+		str_copy(pBuf, pText, BufSize);
+		if(TextRender()->TextWidth(RowFontSize, pBuf) <= NameBudget)
+			return;
+		const float DotWidth = TextRender()->TextWidth(RowFontSize, "…");
+		int Len = str_length(pBuf);
+		while(Len > 0)
+		{
+			--Len;
+			while(Len > 0 && (pBuf[Len] & 0xC0) == 0x80)
+				--Len; // UTF-8 续字节，不在多字节字符中间切断
+			pBuf[Len] = '\0';
+			if(TextRender()->TextWidth(RowFontSize, pBuf) + DotWidth <= NameBudget)
+				break;
+		}
+		str_append(pBuf, "…", BufSize);
+	};
+
+	std::vector<float> vColumnWidth(vColumns.size(), 0.0f);
+	for(size_t ColumnIndex = 0; ColumnIndex < vColumns.size(); ++ColumnIndex)
 	{
-		char aCount[16];
-		const char *pName = GameClient()->m_aClients[vEntries[Index].m_ClientId].m_aName;
-		str_format(aCount, sizeof(aCount), "%d", vEntries[Index].m_Count);
-		CountWidthMax = std::max(CountWidthMax, TextRender()->TextWidth(CountFontSize, aCount));
-		NameWidthMax = std::max(NameWidthMax, TextRender()->TextWidth(RowFontSize, pName));
+		const SColumn &Column = vColumns[ColumnIndex];
+		float WidthMax = IconSize + 1.5f;
+		for(int Index = 0; Index < RowCount; ++Index)
+		{
+			char aCell[16];
+			FormatCell(Column, vEntries[Index].m_Stats, aCell, sizeof(aCell));
+			WidthMax = std::max(WidthMax, TextRender()->TextWidth(ValueFontSize, aCell));
+		}
+		vColumnWidth[ColumnIndex] = WidthMax;
 	}
 
-	float BoardWidth = PaddingX * 2.0f + TeeColumnWidth + NameWidthMax + CountGap + CountWidthMax;
+	float ColumnsWidth = 0.0f;
+	for(float Width : vColumnWidth)
+		ColumnsWidth += Width + ColumnGap;
+
+	float BoardWidth = PaddingX * 2.0f + TeeColumnWidth + NameBudget + ColumnsWidth;
 	BoardWidth = std::max(BoardWidth, PaddingX * 2.0f + TextRender()->TextWidth(TitleFontSize, pTitle));
-	BoardWidth = std::clamp(BoardWidth, 60.0f, m_Width * 0.5f);
-	const float BoardHeight = PaddingY * 2.0f + TitleHeight + RowCount * RowHeight + (HasMoreRows ? MoreHeight : 0.0f);
+	BoardWidth = std::clamp(BoardWidth, 50.0f, m_Width * 0.5f);
+	const float BoardHeight = PaddingY * 2.0f + TitleHeight + HeaderHeight + RowCount * RowHeight + (HasMoreRows ? MoreHeight : 0.0f);
 
 	// 与 RenderSpectatorCount 的右下角堆叠链保持一致，落在观战名字框上方
 	float Anchor = 285.0f - 4.0f;
@@ -2846,19 +2969,31 @@ void CHud::RenderDrownBoard()
 	TextRender()->TextOutlineColor(TextRender()->DefaultTextOutlineColor());
 
 	const float RowLeft = BoardX + PaddingX;
-	const float CountX = BoardX + BoardWidth - PaddingX - CountWidthMax;
+	const float HeaderY = BoardY + PaddingY + TitleHeight;
+	std::vector<float> vColumnX(vColumns.size(), 0.0f);
+	float NextColumnX = RowLeft + TeeColumnWidth + NameBudget + ColumnGap;
+	for(size_t ColumnIndex = 0; ColumnIndex < vColumns.size(); ++ColumnIndex)
+	{
+		vColumnX[ColumnIndex] = NextColumnX;
+		NextColumnX += vColumnWidth[ColumnIndex] + ColumnGap;
+	}
+
 	TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.62f);
 	TextRender()->Text(RowLeft, BoardY + PaddingY, TitleFontSize, pTitle);
+	for(size_t ColumnIndex = 0; ColumnIndex < vColumns.size(); ++ColumnIndex)
+	{
+		const SColumn &Column = vColumns[ColumnIndex];
+		DrawIcon(Column.m_Bit, vColumnX[ColumnIndex] + (vColumnWidth[ColumnIndex] - IconSize) / 2.0f, HeaderY + (HeaderHeight - IconSize) / 2.0f, IconSize, Column.m_Color);
+	}
+
 	for(int Index = 0; Index < RowCount; ++Index)
 	{
-		char aCount[16];
 		const int ClientId = vEntries[Index].m_ClientId;
-		const char *pName = GameClient()->m_aClients[ClientId].m_aName;
-		str_format(aCount, sizeof(aCount), "%d", vEntries[Index].m_Count);
-		const int Count = vEntries[Index].m_Count;
-		const bool IsLeader = Index == 0 && MaxCount > 0;
-		const float Y = BoardY + PaddingY + TitleHeight + Index * RowHeight;
-		const float NameWidth = std::max(0.0f, CountX - CountGap - RowLeft - TeeColumnWidth);
+		char aName[64];
+		EllipsizeName(GameClient()->m_aClients[ClientId].m_aName, aName, sizeof(aName));
+		const int RowValue = ColumnValueAt(SortBit, vEntries[Index].m_Stats);
+		const bool IsLeader = Index == 0 && LeaderValue > 0;
+		const float Y = HeaderY + HeaderHeight + Index * RowHeight;
 
 		if(ShowTee)
 		{
@@ -2871,26 +3006,30 @@ void CHud::RenderDrownBoard()
 
 		if(IsLeader)
 			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.95f);
-		else if(Count > 0)
+		else if(RowValue > 0)
 			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.85f);
 		else
 			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.55f);
-		TextRender()->Text(RowLeft + TeeColumnWidth, Y + (RowHeight - RowFontSize) / 2.0f, RowFontSize, pName, NameWidth);
+		TextRender()->Text(RowLeft + TeeColumnWidth, Y + (RowHeight - RowFontSize) / 2.0f, RowFontSize, aName, NameBudget);
 
-		if(IsLeader)
-			TextRender()->TextColor(WaterlineColor.r, WaterlineColor.g, WaterlineColor.b, 0.95f);
-		else if(Count > 0)
-			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.92f);
-		else
-			TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.45f);
-		TextRender()->Text(CountX, Y + RowHeight / 2.0f - CountFontSize / 2.0f, CountFontSize, aCount);
+		for(size_t ColumnIndex = 0; ColumnIndex < vColumns.size(); ++ColumnIndex)
+		{
+			const SColumn &Column = vColumns[ColumnIndex];
+			char aCell[16];
+			FormatCell(Column, vEntries[Index].m_Stats, aCell, sizeof(aCell));
+			const int CellValue = ColumnValueAt(Column.m_Bit, vEntries[Index].m_Stats);
+			TextRender()->TextColor(Column.m_Color.r, Column.m_Color.g, Column.m_Color.b,
+				(IsLeader && Column.m_Bit == SortBit) ? 1.0f : (CellValue > 0 ? 0.88f : 0.38f));
+			TextRender()->Text(vColumnX[ColumnIndex] + (vColumnWidth[ColumnIndex] - TextRender()->TextWidth(ValueFontSize, aCell)) / 2.0f,
+				Y + RowHeight / 2.0f - ValueFontSize / 2.0f, ValueFontSize, aCell);
+		}
 	}
 	if(HasMoreRows)
 	{
 		char aMore[16];
 		str_format(aMore, sizeof(aMore), "+%d", (int)vEntries.size() - RowCount);
 		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 0.55f);
-		TextRender()->Text(RowLeft, BoardY + PaddingY + TitleHeight + RowCount * RowHeight + (MoreHeight - MoreFontSize) / 2.0f, MoreFontSize, aMore);
+		TextRender()->Text(RowLeft, HeaderY + HeaderHeight + RowCount * RowHeight + (MoreHeight - MoreFontSize) / 2.0f, MoreFontSize, aMore);
 	}
 
 	TextRender()->TextColor(PreviousColor);

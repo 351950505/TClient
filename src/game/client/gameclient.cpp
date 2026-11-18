@@ -4621,6 +4621,9 @@ vec2 CGameClient::GetSmoothPos(int ClientId)
 	const int ExtraTicks = Active ? (Local ? GetFastInputPredictionTicks() : OtherTicks) : 0;
 	const int UpperTick = Client()->PredGameTick(g_Config.m_ClDummy) + ExtraTicks;
 	vec2 Pos = mix(m_aClients[ClientId].m_PrevPredicted.m_Pos, m_aClients[ClientId].m_Predicted.m_Pos, Client()->PredIntraGameTick(g_Config.m_ClDummy));
+	// TClient: 钩拉视觉强度的缩放基准（tc_hook_pull_visual 只缩放输入档叠加的
+	// 渲染偏移位移，100=档位原生）。
+	const vec2 BasePos = Pos;
 	// Ancient 的动态量每次调用只计算一次，两轴共享同一份 EMA 结果。
 	const float AncientAmount = Active && Mode == 6 ? GetAncientInputAmount(ClientId) : 0.0f;
 	auto ApplyOffset = [&](int &Tick, float &Intra) {
@@ -4670,6 +4673,13 @@ vec2 CGameClient::GetSmoothPos(int ClientId)
 			Pos[Axis] = Candidate[Axis];
 		}
 	}
+	// TClient: 钩拉视觉强度——本地 tee 钩在拉拽期（FLYING/GRABBED）时，把输入档
+	// 叠加的渲染偏移位移按强度缩放（50=减半，100=档位原生，200=加倍）；纯视觉，
+	// 不改预测与服务器物理。
+	if(g_Config.m_TcHookPullVisual != 100 && ClientId == m_Snap.m_LocalClientId &&
+		(m_Snap.m_aCharacters[ClientId].m_Cur.m_HookState == HOOK_GRABBED ||
+		 m_Snap.m_aCharacters[ClientId].m_Cur.m_HookState == HOOK_FLYING))
+		Pos = BasePos + (Pos - BasePos) * (g_Config.m_TcHookPullVisual / 100.0f);
 	return Pos;
 }
 

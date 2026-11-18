@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.91",
+  "version": "1.7.8.92",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17393668,
-  "sha256": "c8a537ba4a1cb9683fa8d28f3b5a23333a1b19ee9d9729552a1a53fc6d7a49d1",
-  "notes": "## 紧急稳定性回退\n\n- 针对近期版本的玩家崩溃反馈，本版整体恢复至 v1.7.8.87 的客户端代码、资源及音乐监控程序基线。\n- v1.7.8.88–v1.7.8.90 引入的改动暂时撤回，后续定位并验证后再逐项恢复。\n- 发行版本号继续递增至 v1.7.8.91，确保已安装近期版本的玩家可以通过自动更新获取回退版本。\n- 更新包仍只更新程序及 `data/tclient`，不覆盖玩家自定义地图、皮肤与其他素材。\n\n这是稳定基线回退，不代表已定位或确认解决所有崩溃问题。若仍出现异常，请保留报错截图及 `data/log` 下的日志。\n\n### 下载\n- 全量安装：`TClient-v1.7.8.91-full-win64.zip`\n- 现有安装：使用客户端自动更新，或下载 `TClient-update-win64.zip`。",
+  "size": 17409508,
+  "sha256": "3b541abfe01c0fff4866d6b7c68e2104b3d1682e75453cbd1cca79d14be9ad24",
+  "notes": "## 修复冻结 tee 状态栏崩溃\n\n- 修复 tee 状态栏胶囊底板与高光之间切换纹理时，可能触发 `called Graphics()->TextureSet within begin` 断言并退出的问题。\n- 底板与高光分别完成绘制后再切换纹理，保留胶囊遮罩的显示效果。\n- 恢复 v1.7.8.90 的功能与资源基线；v1.7.8.91 的整体回退是临时措施。本版是在 90 基线上加入上述修复后发布。\n- 更新包只更新程序及 `data/tclient`，不覆盖玩家自定义地图、皮肤和其他素材。\n\n修复测试版已完成用户实测反馈与绘制状态差分回归；此项针对已定位的纹理切换断言，不代表所有其他崩溃均已解决。\n\n### 下载\n- 全量安装：`TClient-v1.7.8.92-full-win64.zip`\n- 现有安装：使用客户端获取更新，或下载 `TClient-update-win64.zip`。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 451584,

@@ -2117,6 +2117,9 @@ Time alive
 Time frozen
 == 冻结时间
 
+Deaths
+== 死亡数
+
 Eff
 == 效率
 

@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.92",
+  "version": "1.7.8.93",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17409508,
-  "sha256": "3b541abfe01c0fff4866d6b7c68e2104b3d1682e75453cbd1cca79d14be9ad24",
-  "notes": "## 修复冻结 tee 状态栏崩溃\n\n- 修复 tee 状态栏胶囊底板与高光之间切换纹理时，可能触发 `called Graphics()->TextureSet within begin` 断言并退出的问题。\n- 底板与高光分别完成绘制后再切换纹理，保留胶囊遮罩的显示效果。\n- 恢复 v1.7.8.90 的功能与资源基线；v1.7.8.91 的整体回退是临时措施。本版是在 90 基线上加入上述修复后发布。\n- 更新包只更新程序及 `data/tclient`，不覆盖玩家自定义地图、皮肤和其他素材。\n\n修复测试版已完成用户实测反馈与绘制状态差分回归；此项针对已定位的纹理切换断言，不代表所有其他崩溃均已解决。\n\n### 下载\n- 全量安装：`TClient-v1.7.8.92-full-win64.zip`\n- 现有安装：使用客户端获取更新，或下载 `TClient-update-win64.zip`。",
+  "size": 17415053,
+  "sha256": "765c40c90c2539011fa8570bb553d0cc340e749255892712349c233b5ca486f4",
+  "notes": "TClient v1.7.8.93\n\n新增\n+ 落水榜升级为 11 列可选统计（对齐 NovaClient Compact Statboard）：落水/死亡/救援/坚持/全灭/跳跃/出钩/钩人/存活时间/冻结时间/效率；表头图标+列专属配色，ME 设置页自选显示列（两列布局）。默认显示落水/救援/钩人。\n+ 全距离 tee 状态强制开启：DDRace 服务器连接后自动请求一次 /showall 1（原可选设置移除）——落水榜对远处队友的计数、last/全灭判定都依赖这份全距离快照。\n+ 线性视觉插值独立开关（默认关，对齐 Nova Independent Input controls）：玩家与飞钩渲染用恒定速率插值，减少视觉速度突变，不影响延迟与物理。\n调整\n- 落水榜默认显示 5 人；表头图标改用 Font Awesome 字形（救援锤子/钩人钩子等码点勘误）。\n- 死亡计数改用 Sv_KillMsg 正确消息名。\n说明\n- 除落水次数外，落水榜统计为客户端估算；全灭重置等开关在 ME 设置页。\n- /showall 需服务器支持（DDNet/Gores 系均支持）；客户端不追踪服务器确认。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 451584,

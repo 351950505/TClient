@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.90",
+  "version": "1.7.8.91",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17409757,
-  "sha256": "a10423d5407b84fe4661b6b7afbf47c17be88ec5415d0599af850271cecaf098",
-  "notes": "TClient v1.7.8.90\n\n修复\n- Mode 14（BestClient-Light Ancient）位置管线按原版 CAncientInput::SamplePos 逐行对齐：\n  单源位置计算（基准插值 → SplitAmount 拆 tick/intra → 严格门控读取预测数组 → SafeGuard 状态变化回退 + MaxAdvance 安全帽），本地/他人渲染路径统一走单源，\n  修复该模式下的抖动（此前散装的宽松门控偏移+二次叠加导致）\n\n说明\n- Mode 12 的钩链检测修复已随 .89 发布，本版是其位置管线的同类对齐\n- 音乐监控 exe 随包更新（重编译绑定本版提交）",
+  "size": 17393668,
+  "sha256": "c8a537ba4a1cb9683fa8d28f3b5a23333a1b19ee9d9729552a1a53fc6d7a49d1",
+  "notes": "## 紧急稳定性回退\n\n- 针对近期版本的玩家崩溃反馈，本版整体恢复至 v1.7.8.87 的客户端代码、资源及音乐监控程序基线。\n- v1.7.8.88–v1.7.8.90 引入的改动暂时撤回，后续定位并验证后再逐项恢复。\n- 发行版本号继续递增至 v1.7.8.91，确保已安装近期版本的玩家可以通过自动更新获取回退版本。\n- 更新包仍只更新程序及 `data/tclient`，不覆盖玩家自定义地图、皮肤与其他素材。\n\n这是稳定基线回退，不代表已定位或确认解决所有崩溃问题。若仍出现异常，请保留报错截图及 `data/log` 下的日志。\n\n### 下载\n- 全量安装：`TClient-v1.7.8.91-full-win64.zip`\n- 现有安装：使用客户端自动更新，或下载 `TClient-update-win64.zip`。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 451584,

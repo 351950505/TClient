@@ -118,6 +118,8 @@ MACRO_CONFIG_INT(TcFastInputOthers, tc_fast_input_others, 0, 0, 1, CFGFLAG_CLIEN
 MACRO_CONFIG_INT(TcFastInputRepredictHook, tc_fast_input_repredict_hook, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Repredict fast input hook when the direction changes (requires Sub-Tick aiming disabled)")
 // TClient: 对齐 NovaClient nc_input_linear_visual——独立于快速输入模式的恒定速率（线性）渲染插值，纯视觉
 MACRO_CONFIG_INT(TcInputLinearVisual, tc_input_linear_visual, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use linear player and flying-hook interpolation independently of input mode")
+// TClient: 对齐 Nova nc_hook_visual_pull——本地钩拉视觉强度，纯视觉提前/滞后量，100=原生。
+MACRO_CONFIG_INT(TcHookPullVisual, tc_hook_pull_visual, 100, 50, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Local hook pull visual intensity in percent (100 = vanilla). Purely visual lead/lag while your hook is attached; does not change server physics.")
 // 快速输入模式：0=Tater(原版) 1=Meow 2=Snow 3=Next 5=Salatik 6=Ancient 7=F（对齐 MeowClient-Next alpha）
 // 8=Best 9=Saiko 10=Delta 11=Cloud（2026-10-29 自 BestClient 移植，见 交接摘要 §172）
 MACRO_CONFIG_INT(TcFastInputMode, tc_fast_input_mode, 0, 0, 14, CFGFLAG_CLIENT | CFGFLAG_SAVE, "快速输入模式：0=Tater 1=Meow 2=Snow 3=Next 5=Salatik 6=Ancient 7=F 8=Best 9=Saiko 10=Delta 11=Cloud 12=Light 13=Azure 14=BestClient-Light Ancient")

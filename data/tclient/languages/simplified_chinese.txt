@@ -2131,3 +2131,6 @@ Full-distance tee status is requested automatically once per connection (native 
 
 Linear visual interpolation
 == 线性视觉插值
+
+Hook pull visual intensity
+== 钩拉视觉强度

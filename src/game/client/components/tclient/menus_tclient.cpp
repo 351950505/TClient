@@ -1042,6 +1042,9 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFastInputRepredictHook, TCLocalize("Repredict on mid-tick hook direction change (may lag)"), &g_Config.m_TcFastInputRepredictHook, &Column, LineSize);
 	// TClient: 对齐 Nova nc_input_linear_visual——独立于快速输入模式的线性视觉插值（纯视觉，默认关）
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcInputLinearVisual, TCLocalize("Linear visual interpolation"), &g_Config.m_TcInputLinearVisual, &Column, LineSize);
+	// TClient: 对齐 Nova nc_hook_visual_pull——本地钩拉视觉强度（纯视觉，100=原生）
+	Column.HSplitTop(LineSize, &Button, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcHookPullVisual, &g_Config.m_TcHookPullVisual, &Button, TCLocalize("Hook pull visual intensity"), 50, 200, &CUi::ms_LinearScrollbarScale, 0, "%");
 
 	// A little extra spacing because these are multi line
 	Column.HSplitTop(MarginSmall, nullptr, &Column);

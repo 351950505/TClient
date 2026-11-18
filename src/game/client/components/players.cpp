@@ -493,6 +493,24 @@ void CPlayers::RenderHookCollLine(
 	}
 }
 
+// TClient: 钩拉视觉强度（tc_hook_pull_visual 50–200，默认 100=原生）。
+// 本地 tee 钩已挂壁/挂人（HOOK_GRABBED）时，渲染位置沿钩拉方向加
+// (强度-100)% 的每 tick 拉拽速度分量，纯视觉提前/滞后量：不改预测、
+// 不改服务器物理，100% 时与原版逐像素一致。
+static vec2 TcHookPullOffset(const CNetObj_Character &Cur, const vec2 &Position)
+{
+	if(g_Config.m_TcHookPullVisual == 100 || Cur.m_HookState != HOOK_GRABBED)
+		return vec2(0, 0);
+	const vec2 HookPos((float)Cur.m_HookX, (float)Cur.m_HookY);
+	const vec2 PullDir = HookPos - Position;
+	const float Len = length(PullDir);
+	if(Len < 1.0f)
+		return vec2(0, 0);
+	const vec2 Dir = PullDir / Len;
+	const vec2 Vel((float)Cur.m_VelX, (float)Cur.m_VelY);
+	return Dir * dot(Vel, Dir) * (g_Config.m_TcHookPullVisual - 100) / 100.0f;
+}
+
 void CPlayers::RenderHook(
 	const CScreenRect &ScreenRect,
 	const CNetObj_Character *pPrevChar,
@@ -530,6 +548,8 @@ void CPlayers::RenderHook(
 		Position = GameClient()->m_aClients[ClientId].m_RenderPos;
 	else
 		Position = mix(vec2(Prev.m_X, Prev.m_Y), vec2(Player.m_X, Player.m_Y), Intra);
+	if(GameClient()->m_Snap.m_LocalClientId == ClientId)
+		Position += TcHookPullOffset(Player, Position);
 
 	// draw hook
 	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -637,6 +657,9 @@ void CPlayers::RenderPlayer(
 	}
 	else
 		Position = mix(vec2(Prev.m_X, Prev.m_Y), vec2(Player.m_X, Player.m_Y), Intra);
+
+	if(Local)
+		Position += TcHookPullOffset(Player, Position);
 
 	if(!ScreenRect.Inside(Position))
 		return;

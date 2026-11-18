@@ -515,6 +515,9 @@ void CGameClient::OnInit()
 
 void CGameClient::OnUpdate()
 {
+	// TClient: 自动余量帧驱动（tc_auto_margin，默认关；内部含在线/antiping 暂停门）。
+	TcAutoMarginUpdate();
+
 	HandleLanguageChanged();
 
 	CUIElementBase::Init(Ui()); // update static pointer because game and editor use separate UI
@@ -733,6 +736,10 @@ void CGameClient::OnReset()
 
 	for(auto &Client : m_aClients)
 		Client.Reset();
+	// TClient: mode 16 jitter 延迟样本环与自动余量状态随重置清零。
+	m_TcNovaPilotLatencySampleCount = 0;
+	m_TcAutoMarginState = AutoMargin::CState{};
+
 	for(auto &State : m_aAncientInputState)
 		State = {};
 	for(auto &State : m_aLightAncientInputState)
@@ -2649,6 +2656,8 @@ void CGameClient::OnNewSnapshot(bool DummySwapped)
 	SnapCollectEntities(); // creates a collection that associates EntityEx snap items with the entities they belong to
 
 	UpdateLocalTuning();
+	// TClient: 自动余量/NovaPilot jitter 的本地延迟样本采集（每快照一次，m_pLocalInfo 已填充）。
+	TcAutoMarginCollectSample();
 	m_IsDummySwapping = 0;
 	if(Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		UpdatePrediction();
@@ -4703,6 +4712,16 @@ vec2 CGameClient::GetFastInputPos(int ClientId)
 		return Pos;
 	if(Mode == 14)
 		return TcBclAncientSamplePos(ClientId, GetAncientInputAmount(ClientId), true);
+	if(Mode == 16)
+	{
+		// TClient: NovaPilot——偏移（含自适应 jitter）后严格槽读取；nc_novapilot_curved
+		// 且 t-2..t+1 四槽连续走 Catmull-Rom（相邻段 >256 单元回退线性）；
+		// nc_novapilot_clamp 拒绝冻结 tile(9/12/144) 内或距基准 >300 单元的候选
+		// （Nova 帮助串 0x140d1aba0 口径，见 modes-15对拍-20261119.md §9.7）。
+		ApplyFastInputOffset(ClientId, Tick, Intra);
+		TcNovaPilotSamplePos(ClientId, Tick, Intra, Pos);
+		return Pos;
+	}
 	if(LightAncientActive)
 		FastInput::OffsetTicks(LightAncientAmount * std::max(1, Client()->GameTickSpeed()) / 1000.0f, Tick, Intra);
 	else
@@ -5117,6 +5136,10 @@ bool CGameClient::FastInputActive(int ClientId, bool Others) const
 		return g_Config.m_TcAzureInput > 0 && (Others ? g_Config.m_TcAzureInputOthers : true);
 	case 14: // BestClient-Light Ancient
 		return g_Config.m_TcLightAncientInput > 0 && (!Others || (g_Config.m_TcLightAncientInputOthers && g_Config.m_TcLightAncientInputOthersAmount > 0));
+	case 15: // Fast (JuKKi)：本机量>0，他人按开关（Nova 0x14020f290/0x1402103f0）
+		return g_Config.m_TcJukkiInput > 0 && (Others ? g_Config.m_TcJukkiInputOthers : true);
+	case 16: // NovaPilot：本机量>0，他人按开关（Nova nc_novapilot_input_others）
+		return g_Config.m_TcNovapilotInput > 0 && (Others ? g_Config.m_TcNovapilotInputOthers : true);
 	default:
 		return false;
 	}
@@ -5127,7 +5150,8 @@ bool CGameClient::IsSnapshotInputMode() const
 	if(m_Snap.m_LocalClientId < 0 || !FastInputActive(m_Snap.m_LocalClientId, false))
 		return false;
 	const int Mode = FastInputMode();
-	return Mode >= 11 && Mode <= 14;
+	// mode 16 NovaPilot 走严格槽读取 + Catmull-Rom/钳制渲染管线。
+	return (Mode >= 11 && Mode <= 14) || Mode == 16;
 }
 
 bool CGameClient::FastInputImmediateOthers() const
@@ -5143,6 +5167,8 @@ int CGameClient::SnapshotInputMaxTick(int ClientId) const
 		return BaseTick;
 	if(FastInputMode() == 12)
 		return BaseTick + (TcLightUseHookLogic() ? TcLightHookTickOffset() : static_cast<int>(std::ceil(g_Config.m_TcLightInput / 100.0f)));
+	if(FastInputMode() == 16)
+		return BaseTick + static_cast<int>(std::ceil(TcNovaPilotTickOffset()));
 	return BaseTick + (IsFastInputLocal(ClientId) ? GetFastInputPredictionTicks() : GetFastInputOtherTicks());
 }
 
@@ -5192,6 +5218,12 @@ int CGameClient::GetFastInputPredictionTicks() const
 		return static_cast<int>(std::ceil(g_Config.m_TcAzureInput / 100.0f + 1.0f));
 	case 14:
 		return static_cast<int>(std::ceil(g_Config.m_TcLightAncientInput * std::max(1, Client()->GameTickSpeed()) / 1000.0f - 0.0001f));
+	case 15:
+		// Fast (JuKKi)：ticks = amount/1000（Nova 0x14020f42f）
+		return FastInput::PredictionTicks(FastInput::JukkiAmount(g_Config.m_TcJukkiInput));
+	case 16:
+		// NovaPilot：ticks = amount/100 + 自适应 jitter（Nova 0x14020f627 + 0x14020ef50）
+		return FastInput::PredictionTicks(TcNovaPilotTickOffset());
 	default:
 		return 0;
 	}
@@ -5211,6 +5243,13 @@ int CGameClient::GetFastInputOtherTicks() const
 		return static_cast<int>(std::ceil(g_Config.m_TcAzureInput / 100.0f));
 	if(FastInputMode() == 3)
 		return static_cast<int>(std::ceil(g_Config.m_TcNextInput / 100.0f));
+	if(FastInputMode() == 15)
+		// Fast (JuKKi)：他人恒 +1 整 tick，与本机量无关（前提本机量>0 = 模式激活；
+		// Nova 0x1402103f0 dl==0 mode==13 分支 amount>0 ? 1 : 0，调用点传入本机量）。
+		return 1;
+	if(FastInputMode() == 16)
+		// NovaPilot：他人同管线（others 开关已由 FastInputActive 把关），含 jitter。
+		return static_cast<int>(std::ceil(TcNovaPilotTickOffset()));
 	// Cloud only shifts other players after this connection has received pre-input data.
 	if(FastInputMode() == 11)
 		return g_Config.m_TcCloudInputOthers && m_aReceivedPreInput[g_Config.m_ClDummy] ? 1 : 0;
@@ -5284,6 +5323,17 @@ void CGameClient::ApplyFastInputOffset(int ClientId, int &Tick, float &Intra)
 		break;
 	case 14:
 		FastInput::OffsetTicks(GetAncientInputAmount(ClientId) * std::max(1, Client()->GameTickSpeed()) / 1000.0f, Tick, Intra);
+		break;
+	case 15:
+		// Fast (JuKKi)：本机 amount/1000 进位；他人恒 +1 整 tick（Nova 0x14020f42f/0x1402103f0）。
+		if(Local)
+			FastInput::OffsetTicks(FastInput::JukkiAmount(g_Config.m_TcJukkiInput), Tick, Intra);
+		else
+			Tick += 1;
+		break;
+	case 16:
+		// NovaPilot：本机/他人同管线 amount/100 + 自适应 jitter（others 开关已把关）。
+		FastInput::OffsetTicks(TcNovaPilotTickOffset(), Tick, Intra);
 		break;
 	case 11:
 		// Cloud uses the configured offset locally and one server pre-input tick for others.
@@ -5467,6 +5517,97 @@ vec2 CGameClient::GetFInputPos(int ClientId)
 	FInputLastTime = Now;
 	FInputValid = true;
 	return Pos + Extra;
+}
+
+// TClient: NovaPilot(mode 16) tick 偏移 = amount/100 + 自适应 jitter
+// （Nova 0x14020f627 + jitter 0x14020ef50；jitter 来源 = 16 槽快照延迟样本环）。
+float CGameClient::TcNovaPilotTickOffset() const
+{
+	return FastInput::NovaPilotAmount(g_Config.m_TcNovapilotInput) +
+		FastInput::NovaPilotJitterTicks(m_aTcNovaPilotLatencySamples, m_TcNovaPilotLatencySampleCount);
+}
+
+// TClient: NovaPilot(mode 16) 渲染采样。线性基线 = 未加偏移的预测插值位；严格槽
+// (Tick-1, Tick) 命中后，nc_novapilot_curved 且 t-2..t+1 四槽连续且相邻段 ≤256 单元
+// 时按 Catmull-Rom 取值；nc_novapilot_clamp 时候选在冻结 tile(9/12/144) 内或距基准
+// >300 单元则拒绝、回退基准位（Nova 帮助串 0x140d1aba0 口径；tile 常数
+// mapitems.h TILE_FREEZE=9/TILE_DFREEZE=12/TILE_LFREEZE=144）。
+void CGameClient::TcNovaPilotSamplePos(int ClientId, int Tick, float Intra, vec2 &Pos) const
+{
+	const auto &Data = m_aClients[ClientId];
+	const vec2 Base = mix(Data.m_PrevPredicted.m_Pos, Data.m_Predicted.m_Pos, Client()->PredIntraGameTick(g_Config.m_ClDummy));
+	Pos = Base;
+	if(!SnapshotTryGetPredPos(ClientId, Tick, Intra, Pos))
+		return;
+	if(g_Config.m_TcNovapilotCurved && Tick >= 2)
+	{
+		const auto &Slots = Data.m_aPredTick;
+		const auto &PredPos = Data.m_aPredPos;
+		const int SlotPrev2 = (Tick - 2) % 200;
+		const int SlotPrev = (Tick - 1) % 200;
+		const int SlotCur = Tick % 200;
+		const int SlotNext = (Tick + 1) % 200;
+		if(Slots[SlotPrev2] == Tick - 2 && Slots[SlotPrev] == Tick - 1 && Slots[SlotCur] == Tick && Slots[SlotNext] == Tick + 1 &&
+			distance(PredPos[SlotPrev2], PredPos[SlotPrev]) <= 256.0f &&
+			distance(PredPos[SlotPrev], PredPos[SlotCur]) <= 256.0f &&
+			distance(PredPos[SlotCur], PredPos[SlotNext]) <= 256.0f)
+		{
+			Pos.x = FastInput::CatmullRom(PredPos[SlotPrev2].x, PredPos[SlotPrev].x, PredPos[SlotCur].x, PredPos[SlotNext].x, Intra);
+			Pos.y = FastInput::CatmullRom(PredPos[SlotPrev2].y, PredPos[SlotPrev].y, PredPos[SlotCur].y, PredPos[SlotNext].y, Intra);
+		}
+	}
+	if(g_Config.m_TcNovapilotClamp)
+	{
+		if(distance(Base, Pos) > 300.0f)
+		{
+			Pos = Base;
+			return;
+		}
+		const int Tile = Collision()->GetTile(round_to_int(Pos.x), round_to_int(Pos.y));
+		if(Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE)
+			Pos = Base;
+	}
+}
+
+// TClient: 自动余量——每快照收集本地延迟样本（Nova bc_auto_margin 样本源 =
+// m_Snap.m_pLocalInfo->m_Latency；jitter 环同源）。在 OnNewSnapshot 尾部调用。
+void CGameClient::TcAutoMarginCollectSample()
+{
+	if(Client()->State() != IClient::STATE_ONLINE || !m_Snap.m_pLocalInfo)
+		return;
+	const int Latency = std::max(0, m_Snap.m_pLocalInfo->m_Latency);
+	m_TcAutoMarginState.Window.AddSample((float)Latency);
+	if(m_TcNovaPilotLatencySampleCount < FastInput::NovaPilotJitterSampleSlots)
+	{
+		m_aTcNovaPilotLatencySamples[m_TcNovaPilotLatencySampleCount++] = Latency;
+	}
+	else
+	{
+		// 满 16 前移一位 + 尾写（Nova 0x1402103a0 的 memmove 60 字节 + 尾部写入）。
+		memmove(m_aTcNovaPilotLatencySamples, m_aTcNovaPilotLatencySamples + 1, (FastInput::NovaPilotJitterSampleSlots - 1) * sizeof(int));
+		m_aTcNovaPilotLatencySamples[FastInput::NovaPilotJitterSampleSlots - 1] = Latency;
+	}
+}
+
+// TClient: 自动余量帧驱动（BC-Light CBcAutoMargin::OnUpdate / Nova 0x14020eb92）。
+// 写回 cl_prediction_margin（Nova 消费端 0x140ff5d40 直接生效）；
+// 互斥：cl_antiping_players>0 期间暂停（恢复用户原值）；tc_prediction_margin_smooth
+// 会平滑 margin 过渡、拖慢保护性抬升（engine/client/smooth_time.cpp），帮助串注明。
+void CGameClient::TcAutoMarginUpdate()
+{
+	AutoMargin::CUpdateInput Input;
+	Input.Enabled = g_Config.m_TcAutoMargin != 0;
+	Input.Online = Client()->State() == IClient::STATE_ONLINE && m_Snap.m_pLocalInfo != nullptr;
+	Input.AntipingPlayersPause = g_Config.m_ClAntiPingPlayers > 0;
+	Input.DeltaTime = Client()->RenderFrameTime();
+	Input.CurrentMargin = g_Config.m_ClPredictionMargin;
+	const AutoMargin::CStep Step = AutoMargin::Update(m_TcAutoMarginState, Input);
+	if(Step.SaveMargin)
+		m_TcAutoMarginState.SavedMargin = g_Config.m_ClPredictionMargin;
+	if(Step.RestoreMargin && Step.RestoreValue >= 0)
+		g_Config.m_ClPredictionMargin = Step.RestoreValue;
+	if(Step.AdjustMargin)
+		g_Config.m_ClPredictionMargin = Step.MarginTarget;
 }
 
 void CGameClient::Echo(const char *pString)

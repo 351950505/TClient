@@ -142,6 +142,63 @@ inline float SalatikIntra(float Intra, float Distance, int Mode)
 {
 	return InterpolationIntra(Intra, Distance, Mode);
 }
+
+// ---- 2026-11-19 新增档（对拍依据见 D:\kehuduan\NovaClient-2.2.9.1-分析\modes-15对拍-20261119.md §9）----
+
+// Fast (JuKKi)（mode 15，Nova bc_inputs=13）：量 0.001-tick，ticks = amount/1000
+// （Nova 0x14020f42f divss 1000.0；cvar bc_jukki_input_amount def=1000 max=5000）。
+inline float JukkiAmount(int Amount)
+{
+	return Amount / 1000.0f;
+}
+
+// NovaPilot（mode 16，Nova 隐藏 mode 16）：量 0.01-tick，ticks = amount/100
+// （Nova 0x14020f627；cvar nc_novapilot_input_amount def=100 max=300）。
+inline float NovaPilotAmount(int Amount)
+{
+	return Amount / 100.0f;
+}
+
+// NovaPilot 自适应 jitter（Nova 0x14020ef50 逐条复核）：16 槽 int32 延迟样本环的
+// population 方差；样本数 <=4 → 0；jitter = clamp(0.05·std, 0, 0.35)；
+// var<0/NaN/Inf → 0（0x140c7eb60=0.05、0x140c83a64=0.35 实读）。
+constexpr int NovaPilotJitterSampleSlots = 16;
+inline float NovaPilotJitterTicks(const int *pSamples, int Count)
+{
+	if(!pSamples || Count <= 4)
+		return 0.0f;
+	if(Count > NovaPilotJitterSampleSlots)
+		Count = NovaPilotJitterSampleSlots;
+	float Sum = 0.0f;
+	for(int i = 0; i < Count; i++)
+		Sum += static_cast<float>(pSamples[i]);
+	const float Mean = Sum / Count;
+	float Variance = 0.0f;
+	for(int i = 0; i < Count; i++)
+	{
+		const float Diff = static_cast<float>(pSamples[i]) - Mean;
+		Variance += Diff * Diff;
+	}
+	Variance /= Count;
+	if(!std::isfinite(Variance) || Variance <= 0.0f)
+		return 0.0f;
+	const float Jitter = std::sqrt(Variance) * 0.05f;
+	if(!std::isfinite(Jitter))
+		return 0.0f;
+	return std::clamp(Jitter, 0.0f, 0.35f);
+}
+
+// NovaPilot 渲染 Catmull-Rom（Nova 0x14020fa30 求值；采样门 0x1408126c0：t-2/t-1/t/t+1
+// 四槽连续）。标准均匀 Catmull-Rom（切向 0.5·(p2-p0)），p(0)=P1、p(1)=P2。
+// 注：Nova 权重代码未逐条提取，此为帮助串语义下的标准实现口径（§9.7）。
+inline float CatmullRom(float P0, float P1, float P2, float P3, float T)
+{
+	const float T2 = T * T;
+	const float T3 = T2 * T;
+	return 0.5f * ((2.0f * P1) + (-P0 + P2) * T +
+			       (2.0f * P0 - 5.0f * P1 + 4.0f * P2 - P3) * T2 +
+			       (-P0 + 3.0f * P1 - 3.0f * P2 + P3) * T3);
+}
 }
 
 #endif

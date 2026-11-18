@@ -3,6 +3,7 @@
 #ifndef GAME_CLIENT_GAMECLIENT_H
 #define GAME_CLIENT_GAMECLIENT_H
 
+#include "automargin.h"
 #include "fastinput.h"
 #include "render.h"
 
@@ -1073,6 +1074,15 @@ public:
 	bool TcLightIsHookLinkedClient(int ClientId) const;
 vec2 TcBclAncientSamplePos(int ClientId, float AmountMs, bool SafeGuard) const;
 	int GetSnowHookTicks() const;
+	// TClient: mode 15 Fast (JuKKi) / mode 16 NovaPilot / 自动余量（2026-11-19 对齐 Nova
+	// bc_inputs 13/16 + bc_auto_margin；依据见 modes-15对拍-20261119.md §9）。
+	float TcNovaPilotTickOffset() const;
+	void TcNovaPilotSamplePos(int ClientId, int Tick, float Intra, vec2 &Pos) const;
+	void TcAutoMarginCollectSample();
+	void TcAutoMarginUpdate();
+	int m_aTcNovaPilotLatencySamples[FastInput::NovaPilotJitterSampleSlots] = {};
+	int m_TcNovaPilotLatencySampleCount = 0;
+	AutoMargin::CState m_TcAutoMarginState;
 
 	int m_MultiViewTeam;
 	float m_MultiViewPersonalZoom;

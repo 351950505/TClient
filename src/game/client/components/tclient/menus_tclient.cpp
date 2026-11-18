@@ -854,11 +854,12 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 
 
 	// 快速输入模式选择（照 alpha 客户端顺序：Tater/Ancient/Next/Meow/Snow/Salatik/F，对应 mode 0/6/3/1/2/5/7；
-	// 8~11 = BestClient 四模式 Best/Saiko/Delta/Cloud，接在 F 后）
+	// 8~11 = BestClient 四模式 Best/Saiko/Delta/Cloud，接在 F 后；12~14 = Light/Azure/BCL-Ancient；
+	// 15/16 = 2026-11-19 对齐 Nova 的 Fast (JuKKi)/NovaPilot；mode 4 历史空位不出现）
 	{
-		static const std::vector<int> s_vModeValues = {0, 6, 3, 1, 2, 5, 7, 8, 9, 10, 11, 12, 13, 14};
+		static const std::vector<int> s_vModeValues = {0, 6, 3, 1, 2, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
 		static std::vector<const char *> s_vModeNames;
-		s_vModeNames = {TCLocalize("Tater"), TCLocalize("Ancient"), TCLocalize("Next"), TCLocalize("Meow"), TCLocalize("Snow"), TCLocalize("Salatik"), TCLocalize("F"), TCLocalize("Best"), TCLocalize("Saiko"), TCLocalize("Delta"), TCLocalize("Cloud"), TCLocalize("Light"), TCLocalize("Azure"), TCLocalize("BestClient-Light Ancient")};
+		s_vModeNames = {TCLocalize("Tater"), TCLocalize("Ancient"), TCLocalize("Next"), TCLocalize("Meow"), TCLocalize("Snow"), TCLocalize("Salatik"), TCLocalize("F"), TCLocalize("Best"), TCLocalize("Saiko"), TCLocalize("Delta"), TCLocalize("Cloud"), TCLocalize("Light"), TCLocalize("Azure"), TCLocalize("BestClient-Light Ancient"), TCLocalize("Fast (JuKKi)"), TCLocalize("NovaPilot")};
 		static CUi::SDropDownState s_ModeDropDownState;
 		static CScrollRegion s_ModeDropDownScrollRegion;
 		s_ModeDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_ModeDropDownScrollRegion;
@@ -992,6 +993,17 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 			Column.HSplitTop(LineSize, &Button, &Column);
 			DoSliderWithScaledValue(&g_Config.m_TcLightAncientInput, &g_Config.m_TcLightAncientInput, &Button, TCLocalize("Amount"), 0, 100, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
 			break;
+		case 15: // Fast (JuKKi)：千分之一 tick（/1000）
+			Column.HSplitTop(LineSize, &Button, &Column);
+			DoSliderWithDividedValue(&g_Config.m_TcJukkiInput, &g_Config.m_TcJukkiInput, &Button, TCLocalize("Fast Input Amount"), 0, 5000, 1000, " ticks");
+			break;
+		case 16: // NovaPilot：百分之一 tick（/100）+ 自适应管线开关（对齐 Nova def=1）
+			Column.HSplitTop(LineSize, &Button, &Column);
+			DoSliderWithDividedValue(&g_Config.m_TcNovapilotInput, &g_Config.m_TcNovapilotInput, &Button, TCLocalize("Fast Input Amount"), 0, 300, 100, " ticks");
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcNovapilotJitter, TCLocalize("Adaptive jitter"), &g_Config.m_TcNovapilotJitter, &Column, LineSize);
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcNovapilotCurved, TCLocalize("Curved rendering"), &g_Config.m_TcNovapilotCurved, &Column, LineSize);
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcNovapilotClamp, TCLocalize("Reject freeze tiles"), &g_Config.m_TcNovapilotClamp, &Column, LineSize);
+			break;
 		default:
 			Column.HSplitTop(LineSize, nullptr, &Column);
 			break;
@@ -1029,6 +1041,8 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 				DoSliderWithScaledValue(&g_Config.m_TcLightAncientInputOthersAmount, &g_Config.m_TcLightAncientInputOthersAmount, &Button, TCLocalize("Others prediction amount"), 0, 100, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
 			}
 			break;
+		case 15: DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcJukkiInputOthers, TCLocalize("Extra tick other tees"), &g_Config.m_TcJukkiInputOthers, &Column, LineSize); break;
+		case 16: DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcNovapilotInputOthers, TCLocalize("NovaPilot input others"), &g_Config.m_TcNovapilotInputOthers, &Column, LineSize); break;
 		default: Column.HSplitTop(LineSize, nullptr, &Column); break;
 		}
 	}
@@ -1060,6 +1074,10 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_ClPredictionMargin, &g_Config.m_ClPredictionMargin, &Button, TCLocalize("Prediction Margin"), 10, 75, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
+	// TClient: 自动余量（对齐 Nova bc_auto_margin）——按本地延迟/抖动自动调
+	// cl_prediction_margin（9~300）；cl_antiping_players>0 期间自动暂停；
+	// 与 tc_prediction_margin_smooth 互斥建议（平滑层拖慢保护性抬升）。
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAutoMargin, TCLocalize("Auto margin"), &g_Config.m_TcAutoMargin, &Column, LineSize);
 	{
 		// [DUP-UPSTREAM] 开关：勾上=自适应上限3，取消=0关闭
 		int DupEnabled = g_Config.m_ClDupUpstream > 0;

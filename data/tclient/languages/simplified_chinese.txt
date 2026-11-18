@@ -2137,3 +2137,18 @@ Hook pull visual intensity
 
 Background helper power saving (helpers yield CPU while you play)
 == 后台辅助进程节能降级（你游玩时 monitor/watcher 让出 CPU，防卡顿）
+
+Adaptive jitter
+== 自适应抖动
+
+Curved rendering
+== 曲线渲染
+
+Reject freeze tiles
+== 拒绝冻结地形
+
+NovaPilot input others
+== NovaPilot 应用到其他玩家
+
+Auto margin
+== 自动余量

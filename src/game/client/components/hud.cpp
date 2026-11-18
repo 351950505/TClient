@@ -1037,7 +1037,9 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 			Graphics()->QuadsSetSubset(0.0f, 0.0f, 1.0f, 1.0f);
 			const IGraphics::CQuadItem PlateQuad(Capsule.x, Capsule.y, Capsule.w, Capsule.h);
 			Graphics()->QuadsDrawTL(&PlateQuad, 1);
+			Graphics()->QuadsEnd();
 			Graphics()->TextureSet(SheenTex);
+			Graphics()->QuadsBegin();
 			Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 			Graphics()->QuadsDrawTL(&PlateQuad, 1);
 			Graphics()->QuadsEnd();

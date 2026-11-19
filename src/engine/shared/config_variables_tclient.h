@@ -182,10 +182,9 @@ MACRO_CONFIG_INT(TcNovapilotInput, tc_novapilot_input, 100, 0, 300, CFGFLAG_CLIE
 MACRO_CONFIG_INT(TcNovapilotInputOthers, tc_novapilot_input_others, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 应用到其他玩家")
 MACRO_CONFIG_INT(TcNovapilotJitter, tc_novapilot_jitter, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 自适应 jitter（16 槽延迟样本 population 方差，clamp(0.05·std, 0, 0.35) tick，样本 >4 生效）")
 MACRO_CONFIG_INT(TcNovapilotCurved, tc_novapilot_curved, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 渲染 Catmull-Rom 插值（相邻预测段 >256 单元回退线性）")
-MACRO_CONFIG_INT(TcNovapilotClamp, tc_novapilot_clamp, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 钳制：拒绝冻结 tile(9/12/144) 内或距基准 >300 单元的预测位置")
+MACRO_CONFIG_INT(TcNovapilotClamp, tc_novapilot_clamp, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 钳制：拒绝游戏层/前景层冻结地块内、非有限或距基准 >300 / <=1 单元的预测位置")
 // 自动余量：按本地延迟均值/抖动自动调 cl_prediction_margin（9~300ms，抬升一步到位、下调每步≤5ms、0.5s 评估一步）。
-// 互斥：cl_antiping_players>0 期间自动暂停并恢复原值；不建议与 tc_prediction_margin_smooth 同开（平滑层会拖慢保护性抬升）。
-MACRO_CONFIG_INT(TcAutoMargin, tc_auto_margin, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Auto margin - automatically adjusts prediction margin (9~300 ms) from local latency and jitter; pauses while cl_antiping_players > 0; do not combine with tc_prediction_margin_smooth")
+MACRO_CONFIG_INT(TcAutoMargin, tc_auto_margin, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically adjusts prediction margin (9~300 ms) from local latency and jitter; restores the original margin when disabled or disconnected")
 
 MACRO_CONFIG_INT(TcAntiPingImproved, tc_antiping_improved, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Different antiping smoothing algorithm, not compatible with cl_antiping_smooth")
 MACRO_CONFIG_INT(TcAntiPingNegativeBuffer, tc_antiping_negative_buffer, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Helps in Gores. Allows internal certainty value to be negative which causes more conservative prediction")

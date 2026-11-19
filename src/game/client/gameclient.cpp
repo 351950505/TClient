@@ -736,9 +736,9 @@ void CGameClient::OnReset()
 
 	for(auto &Client : m_aClients)
 		Client.Reset();
-	// TClient: mode 16 jitter 延迟样本环与自动余量状态随重置清零。
+	// 重置前恢复用户余量，避免断线或换图后把自动值当作原值。
 	m_TcNovaPilotLatencySampleCount = 0;
-	m_TcAutoMarginState = AutoMargin::CState{};
+	m_TcAutoMarginState.Restore(g_Config.m_ClPredictionMargin);
 
 	for(auto &State : m_aAncientInputState)
 		State = {};
@@ -1418,6 +1418,9 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker, int Conn, bool Dumm
 
 void CGameClient::OnStateChange(int NewState, int OldState)
 {
+	if(NewState != IClient::STATE_ONLINE)
+		m_TcAutoMarginState.Restore(g_Config.m_ClPredictionMargin);
+
 	// reset everything when not already connected (to keep gathered stuff)
 	if(NewState < IClient::STATE_ONLINE)
 		OnReset();
@@ -4623,16 +4626,21 @@ vec2 CGameClient::GetSmoothPos(int ClientId)
 	const bool Local = IsFastInputLocal(ClientId);
 	const bool SnapshotInputMode = IsSnapshotInputMode();
 	const int OtherTicks = GetFastInputOtherTicks();
+	const vec2 BasePos = mix(m_aClients[ClientId].m_PrevPredicted.m_Pos, m_aClients[ClientId].m_Predicted.m_Pos, Client()->PredIntraGameTick(g_Config.m_ClDummy));
+	auto ApplyHookPullVisual = [&](vec2 Candidate) {
+		if(Active && g_Config.m_TcHookPullVisual != 100 && ClientId == m_Snap.m_LocalClientId &&
+			(m_Snap.m_aCharacters[ClientId].m_Cur.m_HookState == HOOK_GRABBED ||
+				m_Snap.m_aCharacters[ClientId].m_Cur.m_HookState == HOOK_FLYING))
+			return BasePos + (Candidate - BasePos) * (g_Config.m_TcHookPullVisual / 100.0f);
+		return Candidate;
+	};
 	if(Active && SnapshotInputMode && (Local || OtherTicks > 0 || (Mode == 12 && TcLightIsHookLinkedClient(ClientId))))
-		return GetFastInputPos(ClientId);
+		return ApplyHookPullVisual(GetFastInputPos(ClientId));
 	if(Active && !Local && ((Mode == 3 && OtherTicks > 0) || FastInputImmediateOthers()))
-		return GetFastInputPos(ClientId);
+		return ApplyHookPullVisual(GetFastInputPos(ClientId));
 	const int ExtraTicks = Active ? (Local ? GetFastInputPredictionTicks() : OtherTicks) : 0;
 	const int UpperTick = Client()->PredGameTick(g_Config.m_ClDummy) + ExtraTicks;
-	vec2 Pos = mix(m_aClients[ClientId].m_PrevPredicted.m_Pos, m_aClients[ClientId].m_Predicted.m_Pos, Client()->PredIntraGameTick(g_Config.m_ClDummy));
-	// TClient: 钩拉视觉强度的缩放基准（tc_hook_pull_visual 只缩放输入档叠加的
-	// 渲染偏移位移，100=档位原生）。
-	const vec2 BasePos = Pos;
+	vec2 Pos = BasePos;
 	// Ancient 的动态量每次调用只计算一次，两轴共享同一份 EMA 结果。
 	const float AncientAmount = Active && Mode == 6 ? GetAncientInputAmount(ClientId) : 0.0f;
 	auto ApplyOffset = [&](int &Tick, float &Intra) {
@@ -4682,14 +4690,7 @@ vec2 CGameClient::GetSmoothPos(int ClientId)
 			Pos[Axis] = Candidate[Axis];
 		}
 	}
-	// TClient: 钩拉视觉强度——本地 tee 钩在拉拽期（FLYING/GRABBED）时，把输入档
-	// 叠加的渲染偏移位移按强度缩放（50=减半，100=档位原生，200=加倍）；纯视觉，
-	// 不改预测与服务器物理。
-	if(g_Config.m_TcHookPullVisual != 100 && ClientId == m_Snap.m_LocalClientId &&
-		(m_Snap.m_aCharacters[ClientId].m_Cur.m_HookState == HOOK_GRABBED ||
-		 m_Snap.m_aCharacters[ClientId].m_Cur.m_HookState == HOOK_FLYING))
-		Pos = BasePos + (Pos - BasePos) * (g_Config.m_TcHookPullVisual / 100.0f);
-	return Pos;
+	return ApplyHookPullVisual(Pos);
 }
 
 vec2 CGameClient::GetFastInputPos(int ClientId)
@@ -4714,10 +4715,7 @@ vec2 CGameClient::GetFastInputPos(int ClientId)
 		return TcBclAncientSamplePos(ClientId, GetAncientInputAmount(ClientId), true);
 	if(Mode == 16)
 	{
-		// TClient: NovaPilot——偏移（含自适应 jitter）后严格槽读取；nc_novapilot_curved
-		// 且 t-2..t+1 四槽连续走 Catmull-Rom（相邻段 >256 单元回退线性）；
-		// nc_novapilot_clamp 拒绝冻结 tile(9/12/144) 内或距基准 >300 单元的候选
-		// （Nova 帮助串 0x140d1aba0 口径，见 modes-15对拍-20261119.md §9.7）。
+		// 偏移后严格槽采样；曲线和位置钳制分别受开关控制。
 		ApplyFastInputOffset(ClientId, Tick, Intra);
 		TcNovaPilotSamplePos(ClientId, Tick, Intra, Pos);
 		return Pos;
@@ -5523,15 +5521,12 @@ vec2 CGameClient::GetFInputPos(int ClientId)
 // （Nova 0x14020f627 + jitter 0x14020ef50；jitter 来源 = 16 槽快照延迟样本环）。
 float CGameClient::TcNovaPilotTickOffset() const
 {
-	return FastInput::NovaPilotAmount(g_Config.m_TcNovapilotInput) +
-		FastInput::NovaPilotJitterTicks(m_aTcNovaPilotLatencySamples, m_TcNovaPilotLatencySampleCount);
+	return FastInput::NovaPilotTickOffset(g_Config.m_TcNovapilotInput, g_Config.m_TcNovapilotJitter != 0,
+		m_aTcNovaPilotLatencySamples, m_TcNovaPilotLatencySampleCount);
 }
 
-// TClient: NovaPilot(mode 16) 渲染采样。线性基线 = 未加偏移的预测插值位；严格槽
-// (Tick-1, Tick) 命中后，nc_novapilot_curved 且 t-2..t+1 四槽连续且相邻段 ≤256 单元
-// 时按 Catmull-Rom 取值；nc_novapilot_clamp 时候选在冻结 tile(9/12/144) 内或距基准
-// >300 单元则拒绝、回退基准位（Nova 帮助串 0x140d1aba0 口径；tile 常数
-// mapitems.h TILE_FREEZE=9/TILE_DFREEZE=12/TILE_LFREEZE=144）。
+// NovaPilot：严格预测槽采样，四槽连续时尝试曲线插值，异常时整体回退。
+// 冻结钳制检查游戏层和前景层原始地块，修正 Nova 过滤后读取无法命中的分支。
 void CGameClient::TcNovaPilotSamplePos(int ClientId, int Tick, float Intra, vec2 &Pos) const
 {
 	const auto &Data = m_aClients[ClientId];
@@ -5547,24 +5542,24 @@ void CGameClient::TcNovaPilotSamplePos(int ClientId, int Tick, float Intra, vec2
 		const int SlotPrev = (Tick - 1) % 200;
 		const int SlotCur = Tick % 200;
 		const int SlotNext = (Tick + 1) % 200;
-		if(Slots[SlotPrev2] == Tick - 2 && Slots[SlotPrev] == Tick - 1 && Slots[SlotCur] == Tick && Slots[SlotNext] == Tick + 1 &&
-			distance(PredPos[SlotPrev2], PredPos[SlotPrev]) <= 256.0f &&
-			distance(PredPos[SlotPrev], PredPos[SlotCur]) <= 256.0f &&
-			distance(PredPos[SlotCur], PredPos[SlotNext]) <= 256.0f)
-		{
-			Pos.x = FastInput::CatmullRom(PredPos[SlotPrev2].x, PredPos[SlotPrev].x, PredPos[SlotCur].x, PredPos[SlotNext].x, Intra);
-			Pos.y = FastInput::CatmullRom(PredPos[SlotPrev2].y, PredPos[SlotPrev].y, PredPos[SlotCur].y, PredPos[SlotNext].y, Intra);
-		}
+		if(Slots[SlotPrev2] == Tick - 2 && Slots[SlotPrev] == Tick - 1 && Slots[SlotCur] == Tick && Slots[SlotNext] == Tick + 1)
+			Pos = FastInput::NovaPilotCurvedPos(PredPos[SlotPrev2], PredPos[SlotPrev], PredPos[SlotCur], PredPos[SlotNext], Intra, Pos);
+	}
+	if(!FastInput::FinitePos(Pos))
+	{
+		Pos = Base;
+		return;
 	}
 	if(g_Config.m_TcNovapilotClamp)
 	{
-		if(distance(Base, Pos) > 300.0f)
+		if(FastInput::NovaPilotRejectPosition(Base, Pos))
 		{
 			Pos = Base;
 			return;
 		}
-		const int Tile = Collision()->GetTile(round_to_int(Pos.x), round_to_int(Pos.y));
-		if(Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE)
+		const int Index = Collision()->GetPureMapIndex(Pos);
+		if(FastInput::NovaPilotFreezeTile(Collision()->GetTileIndex(Index)) ||
+			FastInput::NovaPilotFreezeTile(Collision()->GetFrontTileIndex(Index)))
 			Pos = Base;
 	}
 }
@@ -5590,15 +5585,12 @@ void CGameClient::TcAutoMarginCollectSample()
 }
 
 // TClient: 自动余量帧驱动（BC-Light CBcAutoMargin::OnUpdate / Nova 0x14020eb92）。
-// 写回 cl_prediction_margin（Nova 消费端 0x140ff5d40 直接生效）；
-// 互斥：cl_antiping_players>0 期间暂停（恢复用户原值）；tc_prediction_margin_smooth
-// 会平滑 margin 过渡、拖慢保护性抬升（engine/client/smooth_time.cpp），帮助串注明。
+// 写回 cl_prediction_margin；沿用引擎的 margin 平滑和服务器能力判断。
 void CGameClient::TcAutoMarginUpdate()
 {
 	AutoMargin::CUpdateInput Input;
 	Input.Enabled = g_Config.m_TcAutoMargin != 0;
 	Input.Online = Client()->State() == IClient::STATE_ONLINE && m_Snap.m_pLocalInfo != nullptr;
-	Input.AntipingPlayersPause = g_Config.m_ClAntiPingPlayers > 0;
 	Input.DeltaTime = Client()->RenderFrameTime();
 	Input.CurrentMargin = g_Config.m_ClPredictionMargin;
 	const AutoMargin::CStep Step = AutoMargin::Update(m_TcAutoMarginState, Input);

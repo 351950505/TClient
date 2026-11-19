@@ -127,6 +127,56 @@ TEST(TcFastInputAuthority, CatmullRomEndpointsAndMidpoint)
 	EXPECT_FLOAT_EQ(FastInput::CatmullRom(10.0f, 20.0f, 40.0f, 80.0f, 1.0f), 40.0f);
 }
 
+TEST(TcFastInputAuthority, NovaPilotJitterSwitchControlsOffset)
+{
+	const int Samples[] = {0, 100, 0, 100, 0};
+	EXPECT_FLOAT_EQ(FastInput::NovaPilotTickOffset(100, false, Samples, 5), 1.0f);
+	EXPECT_FLOAT_EQ(FastInput::NovaPilotTickOffset(100, true, Samples, 5), 1.35f);
+}
+
+TEST(TcFastInputAuthority, NovaPilotClampDistanceAndNonfinite)
+{
+	const vec2 Base(0.0f, 0.0f);
+	EXPECT_TRUE(FastInput::NovaPilotRejectPosition(Base, vec2(1.0f, 0.0f)));
+	EXPECT_FALSE(FastInput::NovaPilotRejectPosition(Base, vec2(1.01f, 0.0f)));
+	EXPECT_FALSE(FastInput::NovaPilotRejectPosition(Base, vec2(300.0f, 0.0f)));
+	EXPECT_TRUE(FastInput::NovaPilotRejectPosition(Base, vec2(300.01f, 0.0f)));
+	EXPECT_TRUE(FastInput::NovaPilotRejectPosition(Base, vec2(std::numeric_limits<float>::infinity(), 1.0f)));
+	EXPECT_TRUE(FastInput::NovaPilotRejectPosition(Base, vec2(1.0f, std::numeric_limits<float>::quiet_NaN())));
+	for(int Tile : {TILE_FREEZE, TILE_DFREEZE, TILE_LFREEZE})
+		EXPECT_TRUE(FastInput::NovaPilotFreezeTile(Tile));
+	for(int Tile : {TILE_AIR, TILE_SOLID, TILE_UNFREEZE, TILE_DUNFREEZE, TILE_LUNFREEZE})
+		EXPECT_FALSE(FastInput::NovaPilotFreezeTile(Tile));
+}
+
+TEST(TcFastInputAuthority, NovaPilotCurveFallsBackForEveryLongSegment)
+{
+	const vec2 Linear(15.0f, 5.0f);
+	const vec2 Normal[] = {vec2(0, 0), vec2(10, 0), vec2(20, 0), vec2(30, 0)};
+	EXPECT_EQ(FastInput::NovaPilotCurvedPos(Normal[0], Normal[1], Normal[2], Normal[3], 0.5f, Linear), vec2(15, 0));
+	for(int Segment = 0; Segment < 3; ++Segment)
+	{
+		vec2 Points[4];
+		for(int i = 0; i < 4; ++i)
+			Points[i] = vec2(i > Segment ? 257.0f : 0.0f, 0.0f);
+		EXPECT_EQ(FastInput::NovaPilotCurvedPos(Points[0], Points[1], Points[2], Points[3], 0.5f, Linear), Linear);
+	}
+	EXPECT_NE(FastInput::NovaPilotCurvedPos(vec2(0, 0), vec2(256, 0), vec2(256, 0), vec2(256, 0), 0.5f, Linear), Linear);
+}
+
+TEST(TcFastInputAuthority, NovaPilotCurveRejectsEntireNonfiniteVector)
+{
+	const vec2 Linear(15.0f, 5.0f);
+	for(int Slot = 0; Slot < 4; ++Slot)
+		for(int Axis = 0; Axis < 2; ++Axis)
+		{
+			vec2 Points[] = {vec2(0, 0), vec2(10, 0), vec2(20, 0), vec2(30, 0)};
+			Points[Slot][Axis] = std::numeric_limits<float>::quiet_NaN();
+			EXPECT_EQ(FastInput::NovaPilotCurvedPos(Points[0], Points[1], Points[2], Points[3], 0.5f, Linear), Linear);
+		}
+	EXPECT_EQ(FastInput::NovaPilotCurvedPos(vec2(0, 0), vec2(10, 0), vec2(20, 0), vec2(30, 0), std::numeric_limits<float>::infinity(), Linear), Linear);
+}
+
 // ---- 2026-11-19 新增：自动余量（automargin.h，对拍 Nova 0x14020ead0/0x14020eb92 + BC-Light automargin.cpp）----
 
 TEST(TcAutoMargin, SavesAndRestoresUserMargin)
@@ -151,25 +201,72 @@ TEST(TcAutoMargin, SavesAndRestoresUserMargin)
 	EXPECT_FALSE(Off.AdjustMargin);
 }
 
-TEST(TcAutoMargin, AntipingPlayersPauseRestoresMargin)
+TEST(TcAutoMargin, KeepsLatestPingBetweenEvaluations)
 {
 	AutoMargin::CState State;
 	AutoMargin::CUpdateInput In;
 	In.Enabled = true;
 	In.Online = true;
-	In.DeltaTime = 100.0f;
-	In.CurrentMargin = 30;
-	EXPECT_TRUE(AutoMargin::Update(State, In).SaveMargin);
-	State.SavedMargin = 30; // 接线层已保存
+	In.DeltaTime = 0.5f;
+	In.CurrentMargin = 9;
+	State.Window.AddSample(100.0f);
+	const AutoMargin::CStep First = AutoMargin::Update(State, In);
+	ASSERT_TRUE(First.AdjustMargin);
+	In.CurrentMargin = First.MarginTarget;
+	for(int i = 0; i < 10; ++i)
+	{
+		const AutoMargin::CStep Step = AutoMargin::Update(State, In);
+		EXPECT_FLOAT_EQ(State.Window.Latest, 100.0f);
+		EXPECT_FLOAT_EQ(State.SmoothedPing, 100.0f);
+		EXPECT_FALSE(Step.AdjustMargin);
+		EXPECT_TRUE(State.Latched);
+	}
+}
 
-	// cl_antiping_players > 0 → 暂停（恢复用户原值，估计槽清零，不产生调整）。
-	In.AntipingPlayersPause = true;
-	const AutoMargin::CStep Paused = AutoMargin::Update(State, In);
-	EXPECT_TRUE(Paused.RestoreMargin);
-	EXPECT_EQ(Paused.RestoreValue, 30);
+TEST(TcAutoMargin, EvaluatesAtHalfSecondIntervals)
+{
+	AutoMargin::CState State;
+	AutoMargin::CUpdateInput In;
+	In.Enabled = true;
+	In.Online = true;
+	In.CurrentMargin = 100;
+	State.Window.AddSample(10.0f);
+	EXPECT_EQ(AutoMargin::Update(State, In).MarginTarget, 95);
+	In.CurrentMargin = 95;
+	In.DeltaTime = 0.125f;
+	for(int i = 0; i < 3; ++i)
+		EXPECT_FALSE(AutoMargin::Update(State, In).AdjustMargin);
+	EXPECT_EQ(AutoMargin::Update(State, In).MarginTarget, 90);
+}
+
+TEST(TcAutoMargin, RestoreIsIdempotentAcrossResetAndReconnect)
+{
+	AutoMargin::CState State;
+	AutoMargin::CUpdateInput In;
+	In.Enabled = true;
+	In.Online = true;
+	In.CurrentMargin = 37;
+	State.Window.AddSample(120.0f);
+	AutoMargin::Update(State, In);
+	EXPECT_EQ(State.SavedMargin, 37);
+	int Margin = 30;
+	State.Restore(Margin);
+	EXPECT_EQ(Margin, 37);
+	EXPECT_FALSE(State.WasEnabled);
 	EXPECT_EQ(State.SavedMargin, -1);
-	EXPECT_FALSE(Paused.AdjustMargin);
-	EXPECT_FALSE(State.Latched);
+	EXPECT_FLOAT_EQ(State.Window.Latest, -1.0f);
+	Margin = 42;
+	State.Restore(Margin);
+	EXPECT_EQ(Margin, 42);
+	In.CurrentMargin = Margin;
+	AutoMargin::Update(State, In);
+	EXPECT_EQ(State.SavedMargin, 42);
+	In.Online = false;
+	const auto Disconnected = AutoMargin::Update(State, In);
+	EXPECT_TRUE(Disconnected.RestoreMargin);
+	EXPECT_EQ(Disconnected.RestoreValue, 42);
+	EXPECT_FALSE(Disconnected.AdjustMargin);
+	EXPECT_FALSE(AutoMargin::Update(State, In).RestoreMargin);
 }
 
 TEST(TcAutoMargin, HighPingLatchesAndRaisesMargin)

@@ -6,9 +6,6 @@
 // 逐常数证据表：D:\kehuduan\NovaClient-2.2.9.1-分析\modes-15对拍-20261119.md §9.5。
 // 纯数值状态机：样本收集（每快照）与评估（0.5s 一步）分离，输出写回动作，
 // cl_prediction_margin 的实际读写由 gameclient 接线完成。
-// 互斥（协调者 2026-11-19 指令 + Nova 提示串 0x140cb0ad0）：
-//   - cl_antiping_players > 0 期间暂停（恢复用户原值）；
-//   - tc_prediction_margin_smooth 会平滑 margin 过渡、拖慢保护性抬升，帮助串注明不建议同开。
 #include <algorithm>
 #include <cmath>
 
@@ -41,13 +38,18 @@ struct CSampleWindow
 	float Min = -1.0f;
 	float Peak = -1.0f;
 
-	void Reset()
+	void ResetInterval()
 	{
-		Latest = -1.0f;
 		Sum = 0.0f;
 		Count = 0;
 		Min = -1.0f;
 		Peak = -1.0f;
+	}
+
+	void Reset()
+	{
+		Latest = -1.0f;
+		ResetInterval();
 	}
 
 	// 样本 = m_Snap.m_pLocalInfo->m_Latency（快照本地延迟），max(0,·)（Nova
@@ -75,6 +77,13 @@ struct CState
 	bool WasEnabled = false;       // BC-Light m_WasEnabled
 	int SavedMargin = -1;          // Nova +0x34
 
+	void Restore(int &Margin)
+	{
+		if(WasEnabled && SavedMargin >= 0)
+			Margin = SavedMargin;
+		*this = CState{};
+	}
+
 	void ResetEstimates()
 	{
 		CheckTimer = 0.0f;
@@ -89,7 +98,6 @@ struct CUpdateInput
 {
 	bool Enabled = false;              // tc_auto_margin
 	bool Online = false;               // STATE_ONLINE 且 m_Snap.m_pLocalInfo 可用
-	bool AntipingPlayersPause = false; // cl_antiping_players > 0 → 暂停（恢复用户原值）
 	float DeltaTime = 0.0f;            // Client()->RenderFrameTime()
 	int CurrentMargin = 0;             // cl_prediction_margin 活值
 };
@@ -106,7 +114,7 @@ struct CStep
 inline CStep Update(CState &State, const CUpdateInput &In)
 {
 	CStep Step;
-	const bool Active = In.Enabled && In.Online && !In.AntipingPlayersPause;
+	const bool Active = In.Enabled && In.Online;
 	if(!Active)
 	{
 		if(State.WasEnabled)
@@ -123,6 +131,7 @@ inline CStep Update(CState &State, const CUpdateInput &In)
 	if(!State.WasEnabled)
 	{
 		Step.SaveMargin = true;
+		State.SavedMargin = In.CurrentMargin;
 		State.WasEnabled = true;
 	}
 
@@ -140,7 +149,7 @@ inline CStep Update(CState &State, const CUpdateInput &In)
 	const float IntervalMinPing = State.Window.Min >= 0.0f ? State.Window.Min : CurrentPing;
 	const float SamplePing = State.Window.Peak >= 0.0f ? State.Window.Peak : CurrentPing;
 	const float BandRaw = std::max(0.0f, SamplePing - IntervalMinPing);
-	State.Window.Reset();
+	State.Window.ResetInterval();
 
 	if(State.SmoothedPing < 0.0f)
 		State.SmoothedPing = IntervalAveragePing;

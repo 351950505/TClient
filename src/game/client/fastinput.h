@@ -1,6 +1,10 @@
 #ifndef GAME_CLIENT_FASTINPUT_H
 #define GAME_CLIENT_FASTINPUT_H
 
+#include <base/vmath.h>
+
+#include <game/mapitems.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -188,16 +192,47 @@ inline float NovaPilotJitterTicks(const int *pSamples, int Count)
 	return std::clamp(Jitter, 0.0f, 0.35f);
 }
 
+inline float NovaPilotTickOffset(int Amount, bool JitterEnabled, const int *pSamples, int Count)
+{
+	return NovaPilotAmount(Amount) + (JitterEnabled ? NovaPilotJitterTicks(pSamples, Count) : 0.0f);
+}
+
+inline bool FinitePos(vec2 Pos)
+{
+	return std::isfinite(Pos.x) && std::isfinite(Pos.y);
+}
+
+inline bool NovaPilotRejectPosition(vec2 Base, vec2 Pos)
+{
+	const float Distance = distance(Base, Pos);
+	return !FinitePos(Pos) || !std::isfinite(Distance) || Distance > 300.0f || Distance <= 1.0f;
+}
+
+inline bool NovaPilotFreezeTile(int Tile)
+{
+	return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE;
+}
+
 // NovaPilot 渲染 Catmull-Rom（Nova 0x14020fa30 求值；采样门 0x1408126c0：t-2/t-1/t/t+1
 // 四槽连续）。标准均匀 Catmull-Rom（切向 0.5·(p2-p0)），p(0)=P1、p(1)=P2。
-// 注：Nova 权重代码未逐条提取，此为帮助串语义下的标准实现口径（§9.7）。
 inline float CatmullRom(float P0, float P1, float P2, float P3, float T)
 {
 	const float T2 = T * T;
 	const float T3 = T2 * T;
 	return 0.5f * ((2.0f * P1) + (-P0 + P2) * T +
 			       (2.0f * P0 - 5.0f * P1 + 4.0f * P2 - P3) * T2 +
-			       (-P0 + 3.0f * P1 - 3.0f * P2 + P3) * T3);
+				       (-P0 + 3.0f * P1 - 3.0f * P2 + P3) * T3);
+}
+
+inline vec2 NovaPilotCurvedPos(vec2 P0, vec2 P1, vec2 P2, vec2 P3, float T, vec2 Linear)
+{
+	if(!FinitePos(P0) || !FinitePos(P1) || !FinitePos(P2) || !FinitePos(P3) ||
+		!std::isfinite(T) || distance(P0, P1) > 256.0f ||
+		distance(P1, P2) > 256.0f || distance(P2, P3) > 256.0f)
+		return Linear;
+	const vec2 Curved(CatmullRom(P0.x, P1.x, P2.x, P3.x, T),
+		CatmullRom(P0.y, P1.y, P2.y, P3.y, T));
+	return FinitePos(Curved) ? Curved : Linear;
 }
 }
 

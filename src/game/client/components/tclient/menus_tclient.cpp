@@ -1074,9 +1074,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 
 	Column.HSplitTop(LineSize, &Button, &Column);
 	Ui()->DoScrollbarOption(&g_Config.m_ClPredictionMargin, &g_Config.m_ClPredictionMargin, &Button, TCLocalize("Prediction Margin"), 10, 75, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
-	// TClient: 自动余量（对齐 Nova bc_auto_margin）——按本地延迟/抖动自动调
-	// cl_prediction_margin（9~300）；cl_antiping_players>0 期间自动暂停；
-	// 与 tc_prediction_margin_smooth 互斥建议（平滑层拖慢保护性抬升）。
+	// 按本地延迟和抖动调整余量，关闭或离线时恢复原值。
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAutoMargin, TCLocalize("Auto margin"), &g_Config.m_TcAutoMargin, &Column, LineSize);
 	{
 		// [DUP-UPSTREAM] 开关：勾上=自适应上限3，取消=0关闭

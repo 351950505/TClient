@@ -138,8 +138,33 @@ static void TestHandlerRefCount()
 	Check(pHandler->Release() == 0, "handler final Release destroys object");
 }
 
+static void TestWatcherPauseTiming()
+{
+	SWatcherPauseTracker Tracker;
+	bool PausedWhilePlaying = false;
+	for(int i = 0; i < 200; ++i)
+	{
+		const double SampleAt = 100.0 + (i / 6) * 0.3;
+		PausedWhilePlaying |= Tracker.Update((i / 6) * 300.0, SampleAt, 100.0 + i * 0.05);
+	}
+	Check(!PausedWhilePlaying, "50ms main loop does not mistake repeated 300ms samples for pause");
+	Tracker = {};
+	Check(!Tracker.Update(0.0, 100.0, 100.0), "zero position starts a valid pause baseline");
+	Check(!Tracker.Update(0.0, 102.9, 102.9), "pause needs three elapsed seconds");
+	Check(Tracker.Update(0.0, 103.0, 103.0), "three seconds without progress detects pause");
+	Check(!Tracker.Update(500.0, 103.1, 103.1), "seek or resume clears pause immediately");
+	Check(!Tracker.Update(500.0, 103.1, 109.0), "stale watcher does not assert pause");
+	g_vPidBackoff.clear();
+	for(int i = 0; i < 3; ++i)
+		BumpPidBackoff(12345, 100.0 + i);
+	Check(PidBackedOff(12345, 110.0), "three failed activations trigger backoff");
+	Check(!PidBackedOff(12345, 163.0), "backoff permits a retry after sixty seconds");
+	g_vPidBackoff.clear();
+}
+
 int main()
 {
+	TestWatcherPauseTiming();
 	TestParseJsonNumberAtBufferEnd();
 	TestParseJsonNumberDelimiters();
 	TestParseLSFileDurationAtEnd();

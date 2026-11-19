@@ -515,7 +515,7 @@ void CGameClient::OnInit()
 
 void CGameClient::OnUpdate()
 {
-	// TClient: 自动余量帧驱动（tc_auto_margin，默认关；内部含在线/antiping 暂停门）。
+	// 自动余量默认关闭，仅在线且本地信息有效时评估。
 	TcAutoMarginUpdate();
 
 	HandleLanguageChanged();
@@ -4478,6 +4478,17 @@ void CGameClient::UpdateRenderedCharacters()
 					Pos = UnpredPos;
 			}
 		}
+		if(i == m_Snap.m_LocalClientId && m_aClients[i].m_IsPredicted &&
+			FastInputActive(i, false) && !g_Config.m_TcRemoveAnti && g_Config.m_TcHookPullVisual != 100 &&
+			(m_Snap.m_aCharacters[i].m_Cur.m_HookState == HOOK_GRABBED ||
+				m_Snap.m_aCharacters[i].m_Cur.m_HookState == HOOK_FLYING))
+		{
+			vec2 Base;
+			const int Tick = Client()->PredGameTick(g_Config.m_ClDummy);
+			const float Intra = Client()->PredIntraGameTick(g_Config.m_ClDummy);
+			if(ReadFastInputPos(i, Tick, Intra, Tick, Base))
+				Pos = Base + (Pos - Base) * (g_Config.m_TcHookPullVisual / 100.0f);
+		}
 		m_aClients[i].m_RenderPos = Pos;
 		if(Predict() && i == m_Snap.m_LocalClientId)
 			m_LocalCharacterPos = Pos;
@@ -4627,17 +4638,10 @@ vec2 CGameClient::GetSmoothPos(int ClientId)
 	const bool SnapshotInputMode = IsSnapshotInputMode();
 	const int OtherTicks = GetFastInputOtherTicks();
 	const vec2 BasePos = mix(m_aClients[ClientId].m_PrevPredicted.m_Pos, m_aClients[ClientId].m_Predicted.m_Pos, Client()->PredIntraGameTick(g_Config.m_ClDummy));
-	auto ApplyHookPullVisual = [&](vec2 Candidate) {
-		if(Active && g_Config.m_TcHookPullVisual != 100 && ClientId == m_Snap.m_LocalClientId &&
-			(m_Snap.m_aCharacters[ClientId].m_Cur.m_HookState == HOOK_GRABBED ||
-				m_Snap.m_aCharacters[ClientId].m_Cur.m_HookState == HOOK_FLYING))
-			return BasePos + (Candidate - BasePos) * (g_Config.m_TcHookPullVisual / 100.0f);
-		return Candidate;
-	};
 	if(Active && SnapshotInputMode && (Local || OtherTicks > 0 || (Mode == 12 && TcLightIsHookLinkedClient(ClientId))))
-		return ApplyHookPullVisual(GetFastInputPos(ClientId));
+		return GetFastInputPos(ClientId);
 	if(Active && !Local && ((Mode == 3 && OtherTicks > 0) || FastInputImmediateOthers()))
-		return ApplyHookPullVisual(GetFastInputPos(ClientId));
+		return GetFastInputPos(ClientId);
 	const int ExtraTicks = Active ? (Local ? GetFastInputPredictionTicks() : OtherTicks) : 0;
 	const int UpperTick = Client()->PredGameTick(g_Config.m_ClDummy) + ExtraTicks;
 	vec2 Pos = BasePos;
@@ -4690,7 +4694,7 @@ vec2 CGameClient::GetSmoothPos(int ClientId)
 			Pos[Axis] = Candidate[Axis];
 		}
 	}
-	return ApplyHookPullVisual(Pos);
+	return Pos;
 }
 
 vec2 CGameClient::GetFastInputPos(int ClientId)

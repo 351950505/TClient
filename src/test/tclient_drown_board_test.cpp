@@ -432,6 +432,24 @@ TEST(ClientDrownBoard, SaveCreditedToHookerWhenFrozenMateUnfreezes)
 	EXPECT_EQ(Tracker.Stats(2).m_Saves, 0);
 }
 
+TEST(ClientDrownBoard, SaveDoesNotTransferToAnotherFrozenTeammate)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f));
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 500.0f, 100.0f));
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f));
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 500.0f, 100.0f));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 1);
+}
+
 TEST(ClientDrownBoard, LastsAndAledsPerTeamEpisode)
 {
 	CTClientDrownBoard Tracker;
@@ -499,6 +517,34 @@ TEST(ClientDrownBoard, TickTimeAccumulatesWhileCharacterPresent)
 	RunStats(Tracker, aTicks);
 	EXPECT_EQ(Tracker.Stats(1).m_TicksAlive, 1);
 	EXPECT_EQ(Tracker.Stats(1).m_TicksFrozen, 2);
+}
+
+TEST(ClientDrownBoard, TimeUsesElapsedServerTicks)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	Tracker.ObserveStats(aTicks.data(), 1, true, false, 2);
+	Tracker.ObserveStats(aTicks.data(), 1, true, false, 2);
+	EXPECT_EQ(Tracker.Stats(1).m_TicksAlive, 4);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true));
+	Tracker.ObserveStats(aTicks.data(), 1, true, false, 3);
+	EXPECT_EQ(Tracker.Stats(1).m_TicksFrozen, 3);
+	Tracker.ObserveStats(aTicks.data(), 1, true, false, 0);
+	EXPECT_EQ(Tracker.Stats(1).m_TicksFrozen, 3);
+}
+
+TEST(ClientDrownBoard, NewRoundClearsJumpBaseline)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, 5));
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, true, HOOK_IDLE, 5));
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, 8));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Jumps, 0);
 }
 
 TEST(ClientDrownBoard, LocalTeamChangeRestartsEpisodesOnly)

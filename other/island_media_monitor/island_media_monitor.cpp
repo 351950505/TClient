@@ -23,7 +23,7 @@
 #include <audiopolicy.h>
 #include <tlhelp32.h>
 #include <shellapi.h>
-#include <math.h>
+#include <cmath>
 #include <stdint.h>
 #include <time.h>
 #include <vector>
@@ -336,6 +336,7 @@ struct SLoopStream
 	volatile double Rate = 0.0;      // 采样率（帧/秒）
 	volatile double LastFrameAt = 0.0; // 最近一包帧的 epoch 秒（含静音，诊断）
 	volatile double LastNonSilentAt = 0.0; // 最近一个"有声"包的 epoch 秒
+	bool Started = false; // guarded by g_LoopCS
 	volatile bool Dead = false;
 };
 
@@ -490,6 +491,7 @@ static DWORD WINAPI LoopThread(void *pParam)
 	if(SUCCEEDED(hr) && pCap)
 	{
 		EnterCriticalSection(&g_LoopCS);
+		pS->Started = true;
 		g_HaveAudio = true;
 		LeaveCriticalSection(&g_LoopCS);
 		HANDLE hProc = OpenProcess(SYNCHRONIZE, FALSE, pS->Pid);
@@ -684,6 +686,7 @@ static void ManageLoopStreams()
 		return;
 	const double NowEp = NowEpochQpc();
 	EnterCriticalSection(&g_LoopCS);
+	g_HaveAudio = false;
 	for(size_t i = 0; i < g_LoopStreams.size();)
 	{
 		if(g_LoopStreams[i]->Dead)
@@ -696,7 +699,11 @@ static void ManageLoopStreams()
 		}
 		else
 		{
-			ResetPidBackoff(g_LoopStreams[i]->Pid);
+			if(g_LoopStreams[i]->Started)
+			{
+				ResetPidBackoff(g_LoopStreams[i]->Pid);
+				g_HaveAudio = true;
+			}
 			++i;
 		}
 	}
@@ -1725,6 +1732,28 @@ static std::atomic<double> g_WatcherTimeMs{-1.0};
 static std::atomic<double> g_WatcherDurMs{-1.0};
 static std::atomic<double> g_WatcherAt{0.0};
 static std::atomic<uint32_t> g_WatcherStale{0};   // time 冻结+有声 = hook 失效（重锚停用） // 最近成功轮询（epoch 秒）
+struct SWatcherPauseTracker
+{
+	double m_Position = -1.0;
+	double m_LastAdvanceAt = 0.0;
+
+	bool Update(double Position, double SampleAt, double Now)
+	{
+		if(!std::isfinite(Position) || Position < 0.0 || SampleAt <= 0.0 || Now - SampleAt >= 5.0 || Now < SampleAt)
+		{
+			m_Position = -1.0;
+			m_LastAdvanceAt = 0.0;
+			return false;
+		}
+		if(m_Position < 0.0 || std::fabs(Position - m_Position) >= 150.0 || Now < m_LastAdvanceAt)
+		{
+			m_Position = Position;
+			m_LastAdvanceAt = Now;
+		}
+		return Now - m_LastAdvanceAt >= 3.0;
+	}
+};
+
 static std::atomic<uint32_t> g_WatcherFrozen{0};  // watcher 采样连续 ~3s 不前进 = 暂停（环回/LS 都不可用时的兜底，2026-11-18）
 static std::atomic<uint32_t> g_dwWatcherPid{0};   // 本 monitor 亲手拉起的 netease-watcher PID（0=没有）
 
@@ -2109,28 +2138,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 		//    前进：连续 ~3s 采样差都在 ±150ms 内判暂停，t 重新前进（播放/seek）
 		//    立即清零。轮询 300ms 一次，正常播放每次采样差 ≈300ms > 150，不会误判。
 		{
-			static double s_LastWT = -1.0;
-			static int s_FrozenStreak = 0;
-			const double WTnow = g_WatcherTimeMs.load();
-			const double WAge = NowEpochQpc() - g_WatcherAt.load();
-			if(WTnow > 0.0 && WAge < 5.0) // 只在最近有成功轮询时累计，watcher 失联不算冻结
-			{
-				if(s_LastWT > 0.0)
-				{
-					const double D = WTnow - s_LastWT;
-					if(D > -150.0 && D < 150.0)
-						++s_FrozenStreak;
-					else
-						s_FrozenStreak = 0;
-				}
-				s_LastWT = WTnow;
-			}
-			else
-			{
-				s_LastWT = -1.0;
-				s_FrozenStreak = 0;
-			}
-			g_WatcherFrozen = s_FrozenStreak >= 10 ? 1u : 0u; // 300ms 轮询 × 10 ≈ 3s
+			static SWatcherPauseTracker s_PauseTracker;
+			g_WatcherFrozen = s_PauseTracker.Update(g_WatcherTimeMs.load(), g_WatcherAt.load(), NowEpochQpc()) ? 1u : 0u;
 		}
 		// 播放判定，三层优先：
 		// 1) WASAPI 进程环回（最权威）：最近 300ms 有音频帧 = 在播。帧流断 = 暂停（亚秒级、零误判，

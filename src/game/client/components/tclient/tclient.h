@@ -132,6 +132,7 @@ private:
 	// 落水榜（QmClient Gores 组队落水榜移植，默认关闭）：只统计同队玩家冻结次数。
 	CTClientDrownBoard m_DrownBoard;
 	bool m_DrownBoardModeActive = false;
+	int m_DrownBoardLastTick = -1;
 	char m_aDrownBoardMap[128] = "";
 	void UpdateDrownBoard();
 	void ResetDrownBoard();

@@ -2045,6 +2045,7 @@ void CTClient::ResetDrownBoard()
 {
 	m_DrownBoard.Reset();
 	m_DrownBoardModeActive = false;
+	m_DrownBoardLastTick = -1;
 	m_aDrownBoardMap[0] = '\0';
 }
 
@@ -2079,6 +2080,13 @@ void CTClient::UpdateDrownBoard()
 	if(!IsGores)
 		return;
 
+	const int GameTick = Client()->GameTick(g_Config.m_ClDummy);
+	if(GameTick == m_DrownBoardLastTick)
+		return;
+	const int ElapsedTicks = m_DrownBoardLastTick >= 0 && GameTick > m_DrownBoardLastTick ?
+		std::min(GameTick - m_DrownBoardLastTick, Client()->GameTickSpeed()) : 1;
+	m_DrownBoardLastTick = GameTick;
+
 	const CCollision *pCollision = GameClient()->Collision();
 	const bool IncludeTeamZero = g_Config.m_TcDrownBoardIncludeTeam0 != 0;
 	CTClientDrownBoard::SDrownStatTick aStatTicks[MAX_CLIENTS];
@@ -2112,7 +2120,7 @@ void CTClient::UpdateDrownBoard()
 
 	const int LocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy] >= 0 ? GameClient()->m_aLocalIds[g_Config.m_ClDummy] : GameClient()->m_Snap.m_LocalClientId;
 	const int LocalTeam = LocalId >= 0 && LocalId < MAX_CLIENTS ? GameClient()->m_Teams.Team(LocalId) : -1;
-	m_DrownBoard.ObserveStats(aStatTicks, LocalTeam, IncludeTeamZero, g_Config.m_TcDrownBoardResetOnWipe != 0);
+	m_DrownBoard.ObserveStats(aStatTicks, LocalTeam, IncludeTeamZero, g_Config.m_TcDrownBoardResetOnWipe != 0, ElapsedTicks);
 }
 
 constexpr const char STRIP_CHARS[] = {'-', '=', '+', '_', ' '};

@@ -399,7 +399,7 @@ private:
 		// 内存带宽活，分块多线程把主线程停顿压到 ~1/4。
 		{
 			const size_t NumRows = m_TextureDimension;
-			unsigned NumThreads = std::min<unsigned>(4u, std::thread::hardware_concurrency());
+			const unsigned NumThreads = std::clamp(std::thread::hardware_concurrency(), 1u, 4u);
 			std::vector<std::unique_ptr<uint8_t[]>> aNewBuffers;
 			for(auto &pTextureData : m_apTextureData)
 				aNewBuffers.push_back(std::unique_ptr<uint8_t[]>(new uint8_t[NewTextureDimension * NewTextureDimension]));

@@ -53,6 +53,7 @@ class CTClientDrownBoard
 		int m_StatPrevHookState = HOOK_IDLE;
 		int m_StatPrevJumpedTotal = -1;
 		int m_HookFrozenMateTicks = 0; // >0：最近 SAVE_WINDOW_TICKS tick 内钩住过冻结队友
+		int m_HookFrozenMateId = -1;
 		bool m_LastCounted = false; // 本轮“坚持”已计数
 	};
 	std::array<SPlayer, MAX_CLIENTS> m_aPlayers{};
@@ -210,9 +211,9 @@ public:
 
 	// 多列统计：整队批量观测。pTicks 必须按 ClientId 全量给出（与同一 tick 的
 	// Observe 调用同源）。ResetOnTeamWipe：全灭发生时按“离开起点”口径清空统计。
-	void ObserveStats(const SDrownStatTick *pTicks, int LocalTeam, bool IncludeTeamZero, bool ResetOnTeamWipe)
+	void ObserveStats(const SDrownStatTick *pTicks, int LocalTeam, bool IncludeTeamZero, bool ResetOnTeamWipe, int ElapsedTicks = 1)
 	{
-		if(pTicks == nullptr)
+		if(pTicks == nullptr || ElapsedTicks <= 0)
 			return;
 		if(LocalTeam != m_StatsLocalTeam)
 		{
@@ -237,7 +238,7 @@ public:
 			for(int RescuerId = 0; RescuerId < MAX_CLIENTS; ++RescuerId)
 			{
 				SPlayer &Rescuer = m_aPlayers[RescuerId];
-				if(RescuerId == VictimId || Rescuer.m_HookFrozenMateTicks <= 0)
+				if(RescuerId == VictimId || Rescuer.m_HookFrozenMateTicks < ElapsedTicks || Rescuer.m_HookFrozenMateId != VictimId)
 					continue;
 				if(Rescuer.m_Team != Victim.m_Team || !IsTrackedTeam(Rescuer.m_Team, IncludeTeamZero))
 					continue;
@@ -254,8 +255,7 @@ public:
 			const bool Tracked = Player.m_SeenCharacter && IsTrackedTeam(Player.m_Team, IncludeTeamZero);
 			if(!Tracked || !Now.m_Active || !Now.m_HasCharacter)
 			{
-				if(Player.m_HookFrozenMateTicks > 0)
-					--Player.m_HookFrozenMateTicks;
+				Player.m_HookFrozenMateTicks = std::max(0, Player.m_HookFrozenMateTicks - ElapsedTicks);
 				Player.m_StatHasPrev = false;
 				continue;
 			}
@@ -292,18 +292,14 @@ public:
 				Player.m_StatPrevJumpedTotal = Now.m_JumpedTotal;
 			}
 			if(Now.m_Frozen)
-			{
-				if(Player.m_TicksFrozen < std::numeric_limits<int>::max())
-					++Player.m_TicksFrozen;
-			}
-			else if(Player.m_TicksAlive < std::numeric_limits<int>::max())
-				++Player.m_TicksAlive;
+				Player.m_TicksFrozen += std::min(ElapsedTicks, std::numeric_limits<int>::max() - Player.m_TicksFrozen);
+			else
+				Player.m_TicksAlive += std::min(ElapsedTicks, std::numeric_limits<int>::max() - Player.m_TicksAlive);
 
 			Player.m_StatPrevFrozen = Now.m_Frozen;
 			Player.m_StatPrevHookState = Now.m_HookState;
 			Player.m_StatHasPrev = true;
-			if(Player.m_HookFrozenMateTicks > 0)
-				--Player.m_HookFrozenMateTicks;
+			Player.m_HookFrozenMateTicks = std::max(0, Player.m_HookFrozenMateTicks - ElapsedTicks);
 			if(Now.m_HookState == HOOK_FLYING || Now.m_HookState == HOOK_GRABBED)
 			{
 				for(int MateId = 0; MateId < MAX_CLIENTS; ++MateId)
@@ -321,6 +317,7 @@ public:
 					if(DX * DX + DY * DY <= HookHitRadius2)
 					{
 						Player.m_HookFrozenMateTicks = SAVE_WINDOW_TICKS;
+						Player.m_HookFrozenMateId = MateId;
 						break;
 					}
 				}
@@ -408,6 +405,8 @@ private:
 		Player.m_TicksFrozen = 0;
 		Player.m_StatHasPrev = false;
 		Player.m_HookFrozenMateTicks = 0;
+		Player.m_HookFrozenMateId = -1;
+		Player.m_StatPrevJumpedTotal = -1;
 		Player.m_LastCounted = false;
 	}
 

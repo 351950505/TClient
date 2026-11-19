@@ -2240,9 +2240,6 @@ Linear visual interpolation
 Hook pull visual intensity
 == 钩拉视觉强度（100=输入档原生，调整本地飞钩或钩住时的视觉偏移）
 
-Background helper power saving (helpers yield CPU while you play)
-== 后台辅助进程节能降级（你游玩时 monitor/watcher 让出 CPU，防卡顿）
-
 Adaptive jitter
 == 自适应抖动
 

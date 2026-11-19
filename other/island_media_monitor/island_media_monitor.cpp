@@ -1850,48 +1850,6 @@ static void RestartWatcherProcess()
 	Sleep(500);
 }
 
-// TClient: 后台节能降级开关（tc_island_bg_throttle，默认开）。monitor 无控制台
-// 系统，启动时预读 %APPDATA%\DDNet\settings_tclient.cfg（找不到/解析失败按开启
-// 处理）；EnsureWatcherProcess 与自身降级共用这份结果。
-static bool g_BgThrottle = true;
-
-static void TcBgThrottleRead()
-{
-	wchar_t aAppData[MAX_PATH];
-	const DWORD N = GetEnvironmentVariableW(L"APPDATA", aAppData, MAX_PATH);
-	if(N == 0 || N >= MAX_PATH)
-		return;
-	wchar_t aPath[MAX_PATH * 2];
-	_snwprintf(aPath, MAX_PATH * 2 - 1, L"%s\\DDNet\\settings_tclient.cfg", aAppData);
-	aPath[MAX_PATH * 2 - 1] = 0;
-	FILE *pF = _wfopen(aPath, L"rb");
-	if(!pF)
-		return;
-	char aBuf[4096];
-	const size_t NRead = fread(aBuf, 1, sizeof(aBuf) - 1, pF);
-	fclose(pF);
-	aBuf[NRead] = 0;
-	const char *pKey = strstr(aBuf, "tc_island_bg_throttle");
-	if(!pKey)
-		return; // 未写入配置 = 默认开
-	pKey += strlen("tc_island_bg_throttle");
-	while(*pKey == ' ' || *pKey == '\t' || *pKey == '\r' || *pKey == '\n')
-		++pKey;
-	g_BgThrottle = (*pKey != '0');
-}
-
-// TClient: 对进程施加后台降级（BELOW_NORMAL + EcoQoS）；旧系统
-// SetProcessInformation 失败被静默忽略，只剩优先级一层，无副作用。
-static void TcApplyBackgroundPolicy(HANDLE hProcess)
-{
-	SetPriorityClass(hProcess, BELOW_NORMAL_PRIORITY_CLASS);
-	PROCESS_POWER_THROTTLING_STATE Throttle;
-	Throttle.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
-	Throttle.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
-	Throttle.StateMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
-	SetProcessInformation(hProcess, ProcessPowerThrottling, &Throttle, sizeof(Throttle));
-}
-
 static void EnsureWatcherProcess()
 {
 	std::string Dum;
@@ -1930,8 +1888,6 @@ static void EnsureWatcherProcess()
 	if(CreateProcessW(ExePath, Cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, ExeDir, &Si, &Pi))
 	{
 		g_dwWatcherPid = (uint32_t)Pi.dwProcessId;
-		if(g_BgThrottle)
-			TcApplyBackgroundPolicy(Pi.hProcess);
 		CloseHandle(Pi.hThread);
 		CloseHandle(Pi.hProcess);
 		Sleep(1500); // 等它的 HTTP 服务起来
@@ -1992,9 +1948,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 	QueryPerformanceCounter(&g_liEpochCounter);
 	InitializeCriticalSection(&g_LoopCS);
 	g_LoopCSReady = true;
-	TcBgThrottleRead();
-	if(g_BgThrottle)
-		TcApplyBackgroundPolicy(GetCurrentProcess()); // 覆盖手动双击 monitor.exe 的场景
 	CreateThread(NULL, 0, CdpThread, NULL, 0, NULL); // 网易云 CDP 界面时间读取
 	CreateThread(NULL, 0, WatcherThread, NULL, 0, NULL); // netease-watcher 精确播放秒
 

@@ -2908,22 +2908,22 @@ void CHud::RenderDrownBoard()
 	// 设计：深水面板 + 表头一行小字 + 数值列右对齐。首个启用列即排序列，榜首
 	// 用 aqua 水色；标题下一条渐隐"水面线"，仅此一处装饰。右缘贴边 + 左圆角，
 	// 与下方观战名字框同款语言。
-	constexpr float TitleFontSize = 4.5f;
-	constexpr float RowFontSize = 5.5f;
-	constexpr float ValueFontSize = 5.5f;
-	constexpr float MoreFontSize = 5.0f;
-	constexpr float PaddingX = 4.0f;
+	constexpr float TitleFontSize = 4.0f;
+	constexpr float RowFontSize = 5.0f;
+	constexpr float ValueFontSize = 5.0f;
+	constexpr float MoreFontSize = 4.5f;
+	constexpr float PaddingX = 3.0f;
 	constexpr float PaddingY = 3.0f;
 	constexpr float TitleHeight = TitleFontSize + 2.5f;
-	constexpr float IconSize = 6.5f;
+	constexpr float IconSize = 5.5f;
 	constexpr float HeaderHeight = IconSize + 1.0f;
-	constexpr float RowHeight = 7.0f;
+	constexpr float RowHeight = 6.5f;
 	constexpr float MoreHeight = MoreFontSize + 1.5f;
 	constexpr float TeeSize = 6.0f;
-	constexpr float TeeGap = 2.0f;
-	constexpr float ColumnGap = 3.0f;
-	constexpr float NameBudget = 44.0f; // 名字列固定预算：超宽按 UTF-8 边界省略号截断，面板不随名字变宽
-	constexpr float WaterlineWidth = 14.0f;
+	constexpr float TeeGap = 1.5f;
+	constexpr float ColumnGap = 2.0f;
+	constexpr float NameBudget = 34.0f; // 名字列固定预算：超宽按 UTF-8 边界省略号截断，面板不随名字变宽
+	constexpr float WaterlineWidth = 10.0f;
 	const ColorRGBA WaterlineColor(0.247f, 0.776f, 0.831f, 1.0f);
 	const float TeeColumnWidth = ShowTee ? TeeSize + TeeGap : 0.0f;
 
@@ -3029,10 +3029,10 @@ void CHud::RenderDrownBoard()
 	Graphics()->TextureClear();
 	Graphics()->QuadsBegin();
 	Graphics()->DrawRectExt4(BoardX, BoardY, BoardWidth, BoardHeight,
-		ColorRGBA(0.047f, 0.157f, 0.188f, 0.72f * BoardAlpha),
-		ColorRGBA(0.047f, 0.157f, 0.188f, 0.72f * BoardAlpha),
-		ColorRGBA(0.020f, 0.059f, 0.082f, 0.80f * BoardAlpha),
-		ColorRGBA(0.020f, 0.059f, 0.082f, 0.80f * BoardAlpha),
+		ColorRGBA(0.047f, 0.157f, 0.188f, 0.66f * BoardAlpha),
+		ColorRGBA(0.047f, 0.157f, 0.188f, 0.66f * BoardAlpha),
+		ColorRGBA(0.020f, 0.059f, 0.082f, 0.74f * BoardAlpha),
+		ColorRGBA(0.020f, 0.059f, 0.082f, 0.74f * BoardAlpha),
 		5.0f, IGraphics::CORNER_L);
 	const float WaterY = BoardY + PaddingY + TitleFontSize + 1.0f;
 	Graphics()->DrawRectExt4(BoardX + PaddingX, WaterY, WaterlineWidth, 1.2f,

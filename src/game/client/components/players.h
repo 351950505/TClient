@@ -60,6 +60,16 @@ public:
 	void OnInit() override;
 	void OnRender() override;
 	void RenderHookTileHighlight(int ClientId);
+	void HookTileHighlightReset();
+	// 钩住砖块高亮缓存容器：抓住期间零重建，只在选择砖块/钩点/配置变化时重建
+	// （详见 RenderHookTileHighlight 的注释）。
+	int m_HookTileHighlightContainer = -1;
+	int m_HookTileHighlightTileCount = 0;
+	int m_HookTileHighlightTileX[2] = {};
+	int m_HookTileHighlightTileY[2] = {};
+	int m_HookTileHighlightHookX = -1;
+	int m_HookTileHighlightHookY = -1;
+	unsigned long long m_HookTileHighlightKey = 0;
 
 	const std::shared_ptr<CManagedTeeRenderInfo> &NinjaTeeRenderInfo() const { return m_pNinjaTeeRenderInfo; }
 	const std::shared_ptr<CManagedTeeRenderInfo> &SpectatorTeeRenderInfo() const { return m_pSpectatorTeeRenderInfo; }

@@ -4038,7 +4038,10 @@ void CGameClient::UpdateLocalTuning()
 	vec2 LocalPos = m_Snap.m_pLocalCharacter ? vec2(m_Snap.m_pLocalCharacter->m_X, m_Snap.m_pLocalCharacter->m_Y) : vec2(m_Snap.m_pSpectatorInfo->m_X, m_Snap.m_pSpectatorInfo->m_Y);
 
 	// update the tuning at the local position with the latest tunings received before the new snapshot
-	if(m_GameWorld.m_WorldConfig.m_UseTuneZones)
+	// [TClient] 审计修复（2026-11-20 P2，上游 DDNet 同款先行本地加固）：纯观战时
+	// LocalClientId 为 -1，直接索引 m_aCharacters[-1] 会把相邻成员当 TuneZone
+	// 垃圾写进 TuningList() 下标；观战期无本地调参，整体跳过。
+	if(m_GameWorld.m_WorldConfig.m_UseTuneZones && m_Snap.m_LocalClientId >= 0 && m_Snap.m_LocalClientId < MAX_CLIENTS)
 	{
 		int TuneZone =
 			m_Snap.m_aCharacters[m_Snap.m_LocalClientId].m_HasExtendedData &&

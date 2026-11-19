@@ -20,6 +20,7 @@ from collections import Counter
 from pathlib import Path
 
 LANG_RELPATH = Path("data/tclient/languages/simplified_chinese.txt")
+TRADITIONAL_RELPATH = Path("data/tclient/languages/traditional_chinese.txt")
 # 审计修复（2026-11-17）：TCLocalize 调用散布在 chat/console/menus/scoreboard/spectator
 # 等组件文件，原范围只扫 tclient/ 会漏掉 .62 同类事故；整目录递归扫描覆盖全部调用点。
 SCAN_RELDIRS = ("src/game/client/components", "src/game/localization.cpp")
@@ -146,6 +147,26 @@ def main():
         print("  == <chinese translation>")
         return 1
     print("OK: every TCLocalize key has a simplified Chinese translation")
+
+    # 繁体覆盖报告（2026-11-20 审查 P2-8，非致命报警）：繁体 overlay 严重落后
+    # 简体（实测缺 400+ 条），繁体玩家大量回落英文。补齐前先让门禁把缺口
+    # 显性化；反向漂移（繁体有而简体无的词条）一并报警。
+    trad_path = repo / TRADITIONAL_RELPATH
+    if trad_path.is_file():
+        trad_translated = collect_translated(trad_path)
+        missing_trad = sorted(entry for entry in keys if not lookup_hit(entry, trad_translated))
+        extra_trad = sorted(entry for entry in trad_translated if entry not in translated and (entry[0], "") not in translated)
+        print(f"traditional coverage: {len(keys) - len(missing_trad)}/{len(keys)} keys, {len(missing_trad)} missing, {len(extra_trad)} reverse-drift")
+        if missing_trad:
+            print(f"WARNING (non-fatal): traditional Chinese missing {len(missing_trad)} translations in {TRADITIONAL_RELPATH}:")
+            for entry in missing_trad[:20]:
+                print(f"  {label(entry)}")
+            if len(missing_trad) > 20:
+                print(f"  ... and {len(missing_trad) - 20} more")
+        if extra_trad:
+            print(f"WARNING (non-fatal): {len(extra_trad)} traditional entries have no simplified counterpart:")
+            for entry in extra_trad[:10]:
+                print(f"  {label(entry)}")
     return 0
 
 

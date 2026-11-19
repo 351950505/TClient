@@ -52,8 +52,11 @@ void CCommandProcessorFragment_OpenGL::Cmd_Update_Viewport(const CCommandBuffer:
 	m_ViewportHeight = pCommand->m_Height;
 	if(pCommand->m_ByResize)
 	{
-		m_CanvasWidth = (uint32_t)pCommand->m_Width;
-		m_CanvasHeight = (uint32_t)pCommand->m_Height;
+		// [TClient] 审计修复（2026-11-20 P2）：canvas 应为可绘区（全窗口）尺寸，
+		// 而非宽高比裁剪后的视口——否则黑边模式 resize 后 canvas==viewport，
+		// NeedBlackBars 恒 false，黑边永久消失（tc_aspect_ratio 功能回归）。
+		m_CanvasWidth = (uint32_t)pCommand->m_DrawableWidth;
+		m_CanvasHeight = (uint32_t)pCommand->m_DrawableHeight;
 		m_HasDisplayCutout = pCommand->m_Width != pCommand->m_DrawableWidth;
 	}
 	glViewport(m_ViewportX, m_ViewportY, pCommand->m_Width, pCommand->m_Height);

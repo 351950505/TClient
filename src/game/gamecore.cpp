@@ -637,7 +637,9 @@ void CCharacterCore::Read(const CNetObj_CharacterCore *pObjCore)
 	m_HookPos.y = pObjCore->m_HookY;
 	m_HookDir.x = pObjCore->m_HookDx / 256.0f;
 	m_HookDir.y = pObjCore->m_HookDy / 256.0f;
-	SetHookedPlayer(pObjCore->m_HookedPlayer);
+	// [TClient] 审计修复（2026-11-20 P2，上游同款先行本地加固）：网络来的
+	// HookedPlayer 可能越界，钳到 -1（未钩），防 m_apCharacters 越界解引用
+	SetHookedPlayer(pObjCore->m_HookedPlayer >= -1 && pObjCore->m_HookedPlayer < MAX_CLIENTS ? pObjCore->m_HookedPlayer : -1);
 	m_Jumped = pObjCore->m_Jumped;
 	m_Direction = pObjCore->m_Direction;
 	m_Angle = pObjCore->m_Angle;
@@ -710,7 +712,8 @@ void CCharacterCore::SetHookedPlayer(int HookedPlayer)
 {
 	if(HookedPlayer != m_HookedPlayer)
 	{
-		if(m_HookedPlayer != -1 && m_Id != -1 && m_pWorld)
+		// [TClient] 审计修复（2026-11-20 P2）：下标守卫，防越界解引用
+		if(m_HookedPlayer != -1 && m_Id != -1 && m_pWorld && m_HookedPlayer >= 0 && m_HookedPlayer < MAX_CLIENTS)
 		{
 			CCharacterCore *pCharCore = m_pWorld->m_apCharacters[m_HookedPlayer];
 			if(pCharCore)
@@ -718,7 +721,7 @@ void CCharacterCore::SetHookedPlayer(int HookedPlayer)
 				pCharCore->m_AttachedPlayers.erase(m_Id);
 			}
 		}
-		if(HookedPlayer != -1 && m_Id != -1 && m_pWorld)
+		if(HookedPlayer != -1 && m_Id != -1 && m_pWorld && HookedPlayer >= 0 && HookedPlayer < MAX_CLIENTS)
 		{
 			CCharacterCore *pCharCore = m_pWorld->m_apCharacters[HookedPlayer];
 			if(pCharCore)

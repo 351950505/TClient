@@ -574,7 +574,8 @@ void CSpectator::OnRender()
 		}
 
 		// TClient
-		if(pInfo->m_ClientId > 0 && g_Config.m_TcWarList && g_Config.m_TcWarListSpectate && GameClient()->m_WarList.GetAnyWar(pInfo->m_ClientId))
+		// [TClient] 审计修复（2026-11-20 P3）：id=0 的玩家也应有战争名单着色
+		if(pInfo->m_ClientId >= 0 && g_Config.m_TcWarList && g_Config.m_TcWarListSpectate && GameClient()->m_WarList.GetAnyWar(pInfo->m_ClientId))
 		{
 			TextRender()->TextColor(GameClient()->m_WarList.GetPriorityColor(pInfo->m_ClientId));
 		}

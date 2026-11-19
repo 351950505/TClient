@@ -112,6 +112,10 @@ def phase_preflight(spec, paths, state):
     require(changed == set(spec["changed_files"]), "changed-file set differs from the spec (cumulative diff " + spec["parent_commit"][:12] + ".." + spec["target_commit"][:12] + ")")
     version_h = (repo / "src/game/version.h").read_text(encoding="utf-8")
     require(f'#define TCLIENT_APP_VERSION "{spec["version"]}"' in version_h, "version.h does not declare the spec version")
+    # 审计修复（2026-11-20 P2）：data_version.txt 与内嵌版本不一致时客户端运行
+    # 时弹 mismatch 弹窗，链上必须提前拦下
+    data_version_txt = (repo / "data/tclient/data_version.txt").read_text(encoding="utf-8-sig").strip()
+    require(data_version_txt == f'TClient {spec["version"]}', f"data_version.txt says '{data_version_txt}', expected 'TClient {spec['version']}'")
     check_helper_lock(spec)
     translation_gate = Path(__file__).resolve().parent / "check_translations.py"
     require(translation_gate.is_file(), f"translation gate missing: {translation_gate}")
@@ -394,13 +398,21 @@ def phase_publish(spec, paths, state):
     asset_paths = {record["name"]: Path(record["path"]) for record in assets_record["assets"]}
     mirrors = verify_mirror_inputs(spec, paths, state, client=asset_paths["DDNet.exe"].read_bytes(), fresh=True)
     require(assets_record.get("update_mirrors") == mirrors, "packaged assets do not match the frozen mirror probe")
-    release = gh_api_json(paths["root"], "repos/" + GITHUB_REPO + "/releases", token, "POST", {
-        "tag_name": f'v{spec["version"]}',
-        "target_commitish": spec["target_commit"],
-        "name": f'TClient-v{spec["version"]}',
-        "draft": True,
-        "body": release_body(paths["root"], spec["notes_path"]),
-    })
+    # 审计修复（2026-11-20 P2）：幂等——publish 中途失败后 --resume 时复用既有
+    # draft，不再重复建单（旧 draft 残留资产可被误发布）或撞 tag 422。
+    tag = f'v{spec["version"]}'
+    existing = [r for r in json.loads(gh(paths["root"], "api", f"repos/{GITHUB_REPO}/releases?per_page=100", token=token)) if r.get("tag_name") == tag]
+    if existing:
+        release = existing[0]
+        require(bool(release.get("draft")), f"release {tag} already exists and is published")
+    else:
+        release = gh_api_json(paths["root"], "repos/" + GITHUB_REPO + "/releases", token, "POST", {
+            "tag_name": tag,
+            "target_commitish": spec["target_commit"],
+            "name": f'TClient-v{spec["version"]}',
+            "draft": True,
+            "body": release_body(paths["root"], spec["notes_path"]),
+        })
     release_id = release["id"]
     frozen = {record["name"]: record for record in assets_record["assets"]}
     for name, path in asset_paths.items():
@@ -425,11 +437,11 @@ def phase_publish(spec, paths, state):
 
 
 def phase_master_sync(spec, paths, state):
-    # 用仓库内参数化的脚本，不再每版复制一份到 release-<ver>/scripts/。
-    # 脚本自身幂等：master 已带同一对清单/签名时只回读并写记录，不会二次推送。
-    script_path = paths["root"].parent / "TaterClient-src" / "tclient_scripts" / "sync_master_manifest.py"
-    if not script_path.is_file():
-        script_path = Path(spec["repo"]) / "tclient_scripts" / "sync_master_manifest.py"
+    # 用仓库内参数化的脚本；脚本自身幂等：master 已带同一对清单/签名时只回读
+    # 并写记录，不会二次推送。
+    # 审计修复（2026-11-20 P3）：删掉 work_root 下克隆的首选分支——将来出现
+    # 旧克隆会静默用错版本的 sync 脚本。
+    script_path = Path(spec["repo"]) / "tclient_scripts" / "sync_master_manifest.py"
     require(script_path.is_file(), f"missing {script_path}")
     command = [
         sys.executable, "-I", str(script_path),

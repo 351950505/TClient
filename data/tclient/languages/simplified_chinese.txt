@@ -2152,3 +2152,9 @@ NovaPilot input others
 
 Auto margin
 == 自动余量
+
+Fast (JuKKi)
+== 快速（JuKKi）
+
+NovaPilot
+== NovaPilot（新星领航）

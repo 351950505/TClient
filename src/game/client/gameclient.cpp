@@ -4786,7 +4786,7 @@ vec2 CGameClient::GetFreezePos(int ClientId)
 		if(Mode == 14 && Local)
 			return TcBclAncientSamplePos(ClientId, GetAncientInputAmount(ClientId), true);
 		ApplyFastInputOffset(ClientId, Tick, Intra);
-		if(Mode == 16)
+		if(Mode == 16 && FastInputActive(ClientId, !Local))
 		{
 			TcNovaPilotSamplePos(ClientId, Tick, Intra, Pos);
 			return Pos;
@@ -4903,9 +4903,9 @@ vec2 CGameClient::GetFreezePos(int ClientId)
 	int Tick;
 	float Intra;
 	GetFreezeTime(Tick, Intra);
-	if(Active && (Mode == 3 || Mode == 6))
+	if(Active && (Mode == 3 || Mode == 6 || Mode == 15))
 	{
-		// Next 的额外一tick只属于预测上界，Ancient 动态量仅计算一次。
+		// 冻结补偿保留各模式偏移；Next 的额外一 tick 仅扩展预测上界。
 		ApplyFastInputOffset(ClientId, Tick, Intra);
 		ReadFastInputPos(ClientId, Tick, Intra, UpperTick, Pos);
 		return Pos;
@@ -5360,7 +5360,7 @@ bool CGameClient::ReadFastInputPos(int ClientId, int Tick, float Intra, int Uppe
 	const int Prev = (Tick - 1) % 200;
 	const int Cur = Tick % 200;
 	const int Mode = FastInputMode();
-	const bool AuthorityStrictSlots = g_Config.m_TcFastInput && (Mode == 0 || (Mode >= 8 && Mode <= 14));
+	const bool AuthorityStrictSlots = g_Config.m_TcFastInput && (Mode == 0 || (Mode >= 8 && Mode <= 16));
 	const bool StrictSlots = (Mode == 1 && FastInputActive(ClientId, false)) || AuthorityStrictSlots;
 	if(StrictSlots)
 	{

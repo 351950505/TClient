@@ -21,13 +21,14 @@
 #include <game/client/animstate.h>
 #include <game/client/components/scoreboard.h>
 #include <game/client/components/tclient/gradient.h>
+#include <game/client/components/tclient/modern_ui.h>
 #include <game/client/gameclient.h>
 #include <game/client/prediction/entities/character.h>
 #include <game/layers.h>
 #include <game/localization.h>
 
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 CHud::CHud()
@@ -70,7 +71,6 @@ void CHud::ResetHudContainers()
 		TextRender()->DeleteTextContainer(m_aPlayerSpeedTextContainers[i]);
 		m_aPlayerPrevSpeed[i] = -INFINITY;
 		TextRender()->DeleteTextContainer(m_aPlayerPositionContainers[i]);
-		m_aPlayerPrevPosition[i] = -INFINITY;
 	}
 }
 
@@ -1397,6 +1397,17 @@ void CHud::PreparePlayerStateQuads()
 		Array[i] = IGraphics::CQuadItem(x + i * 12, y, 12, 12);
 	m_AirjumpEmptyOffset = Graphics()->QuadContainerAddQuads(m_HudQuadContainerIndex, Array, 10);
 
+	// Quads for the modern jumps row: stored at the origin like the weapon
+	// sprites and positioned explicitly at render time, so the spacing is
+	// independent of the quad geometry.
+	for(int i = 0; i < 10; ++i)
+		Array[i] = IGraphics::CQuadItem(0.0f, 0.0f, 8.0f, 8.0f);
+	m_ModernAirjumpOffset = Graphics()->QuadContainerAddQuads(m_HudQuadContainerIndex, Array, 10);
+
+	for(int i = 0; i < 10; ++i)
+		Array[i] = IGraphics::CQuadItem(0.0f, 0.0f, 8.0f, 8.0f);
+	m_ModernAirjumpEmptyOffset = Graphics()->QuadContainerAddQuads(m_HudQuadContainerIndex, Array, 10);
+
 	// Quads for displaying weapons
 	for(int Weapon = 0; Weapon < NUM_WEAPONS; ++Weapon)
 	{
@@ -1448,6 +1459,9 @@ void CHud::RenderPlayerState(const int ClientId)
 	// pCharacter contains the predicted character for local players or the last snap for players who are spectated
 	CCharacterCore *pCharacter = &GameClient()->m_aClients[ClientId].m_Predicted;
 	CNetObj_Character *pPlayer = &GameClient()->m_aClients[ClientId].m_RenderCur;
+	const bool ModernGuns = g_Config.m_TcModernGuns != 0;
+	const float HudOffsetY = (GameClient()->m_GameInfo.m_HudHealthArmor && g_Config.m_ClShowhudHealthAmmo ? 24.0f : 0.0f) +
+				 (GameClient()->m_GameInfo.m_HudAmmo && g_Config.m_ClShowhudHealthAmmo ? 12.0f : 0.0f);
 	int TotalJumpsToDisplay = 0;
 	if(g_Config.m_ClShowhudJumpsIndicator)
 	{
@@ -1493,7 +1507,39 @@ void CHud::RenderPlayerState(const int ClientId)
 		// render available and used jumps
 		int JumpsOffsetY = ((GameClient()->m_GameInfo.m_HudHealthArmor && g_Config.m_ClShowhudHealthAmmo ? 24 : 0) +
 				    (GameClient()->m_GameInfo.m_HudAmmo && g_Config.m_ClShowhudHealthAmmo ? 12 : 0));
-		if(JumpsOffsetY > 0)
+		if(ModernGuns)
+		{
+			const char *pJumps = TCLocalize("Jumps");
+			const float LabelWidth = TextRender()->TextWidth(6.0f, pJumps);
+			CUIRect Label = {11.0f, HudOffsetY + 39.0f, LabelWidth, 10.0f};
+			TextRender()->TextColor(0.94f, 0.935f, 0.95f, 0.9f);
+			Ui()->DoLabel(&Label, pJumps, 6.0f, TEXTALIGN_ML);
+			TextRender()->TextColor(TextRender()->DefaultTextColor());
+			// 跳跃图标读 HUD 皮肤（hud.png 的 airjump 槽位）：玩家自定义 HUD
+			// 素材（如兔子图标）直接生效，默认皮肤显示原生图标；与量子/非现
+			// 代版共用同一素材来源。
+			constexpr float JumpIconSize = 8.0f;
+			constexpr float JumpIconGap = 1.0f;
+			const float JumpIconY = HudOffsetY + 44.0f - JumpIconSize / 2.0f;
+			for(int Jump = 0; Jump < TotalJumpsToDisplay; ++Jump)
+			{
+				const float IconX = 18.5f + LabelWidth + Jump * (JumpIconSize + JumpIconGap);
+				if(Jump < AvailableJumpsToDisplay)
+				{
+					Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+					Graphics()->TextureSet(GameClient()->m_HudSkin.m_SpriteHudAirjump);
+					Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_ModernAirjumpOffset + Jump, IconX, JumpIconY);
+				}
+				else
+				{
+					Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.6f);
+					Graphics()->TextureSet(GameClient()->m_HudSkin.m_SpriteHudAirjumpEmpty);
+					Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_ModernAirjumpEmptyOffset + Jump, IconX, JumpIconY);
+				}
+			}
+			Graphics()->SetColor(1, 1, 1, 1);
+		}
+		else if(JumpsOffsetY > 0)
 		{
 			Graphics()->TextureSet(GameClient()->m_HudSkin.m_SpriteHudAirjump);
 			Graphics()->RenderQuadContainerEx(m_HudQuadContainerIndex, m_AirjumpOffset, AvailableJumpsToDisplay, 0, JumpsOffsetY);
@@ -1509,9 +1555,17 @@ void CHud::RenderPlayerState(const int ClientId)
 		}
 	}
 
-	float x = 5 + 12;
-	float y = (5 + 12 + (GameClient()->m_GameInfo.m_HudHealthArmor && g_Config.m_ClShowhudHealthAmmo ? 24 : 0) +
-		   (GameClient()->m_GameInfo.m_HudAmmo && g_Config.m_ClShowhudHealthAmmo ? 12 : 0));
+	float x = ModernGuns ? 18.0f : 17.0f;
+	float y = HudOffsetY + (ModernGuns ? 28.0f : 17.0f);
+	if(ModernGuns)
+	{
+		const char *apWeapons[NUM_WEAPONS] = {Localize("Hammer"), Localize("Pistol"), Localize("Shotgun"), Localize("Grenade"), Localize("Laser"), TCLocalize("Ninja")};
+		const int Weapon = std::clamp(pPlayer->m_Weapon, 0, NUM_WEAPONS - 1);
+		CUIRect Name = {11.0f, HudOffsetY + 6.0f, 110.0f, 10.0f};
+		TextRender()->TextColor(0.94f, 0.935f, 0.95f, 1.0f);
+		Ui()->DoLabel(&Name, apWeapons[Weapon], 7.0f, TEXTALIGN_ML);
+		TextRender()->TextColor(TextRender()->DefaultTextColor());
+	}
 
 	// render weapons
 	{
@@ -1524,17 +1578,20 @@ void CHud::RenderPlayerState(const int ClientId)
 				continue;
 			if(!InitialOffsetAdded)
 			{
-				x += aWeaponInitialOffset[Weapon];
+				if(!ModernGuns)
+					x += aWeaponInitialOffset[Weapon];
 				InitialOffsetAdded = true;
 			}
-			if(pPlayer->m_Weapon != Weapon)
-				Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.4f);
+			if(g_Config.m_TcModernGuns && pPlayer->m_Weapon == Weapon)
+				Graphics()->DrawRect(x - 6.0f, y + 8.0f, 12.0f, 1.0f, TClientModernUi::Accent(x, y), IGraphics::CORNER_ALL, 0.5f);
+			Graphics()->SetColor(1.0f, 1.0f, 1.0f, pPlayer->m_Weapon == Weapon ? 1.0f : (ModernGuns ? 0.65f : 0.4f));
 			Graphics()->QuadsSetRotation(pi * 7 / 4);
 			Graphics()->TextureSet(GameClient()->m_GameSkin.m_aSpritePickupWeapons[Weapon]);
-			Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_aWeaponOffset[Weapon], x, y);
+			const float Scale = g_Config.m_TcModernGuns ? 0.85f : 1.0f;
+			Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_aWeaponOffset[Weapon], x, y, Scale, Scale);
 			Graphics()->QuadsSetRotation(0);
 			Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
-			x += aWeaponWidth[Weapon];
+			x += ModernGuns ? 18.0f : aWeaponWidth[Weapon];
 		}
 		if(pCharacter->m_aWeapons[WEAPON_NINJA].m_Got)
 		{
@@ -1549,8 +1606,8 @@ void CHud::RenderPlayerState(const int ClientId)
 
 	// render capabilities
 	x = 5;
-	y += 12;
-	if(TotalJumpsToDisplay > 0)
+	y = ModernGuns ? HudOffsetY + (g_Config.m_TcModernFreezeTimer ? 74.0f : 53.0f) : y + 12.0f;
+	if(!ModernGuns && TotalJumpsToDisplay > 0)
 	{
 		y += 12;
 	}
@@ -1694,6 +1751,49 @@ void CHud::RenderPlayerState(const int ClientId)
 	{
 		Graphics()->TextureSet(GameClient()->m_HudSkin.m_SpriteHudLiveFrozen);
 		Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_LiveFrozenOffset, x, y);
+	}
+
+	if(g_Config.m_TcModernFreezeTimer)
+	{
+		const int FreezeEnd = GameClient()->m_aClients[ClientId].m_FreezeEnd;
+		const bool Permanent = pCharacter->m_DeepFrozen || pCharacter->m_LiveFrozen || FreezeEnd < 0;
+		const int TickSpeed = std::max(1, Client()->GameTickSpeed());
+		const float Duration = std::max(1.0f, (float)(pCharacter->m_FreezeEnd - pCharacter->m_FreezeStart));
+		const float Remaining = pCharacter->m_IsInFreeze && FreezeEnd > 0 ? Duration :
+										    std::max(0.0f, FreezeEnd - Client()->GameTick(g_Config.m_ClDummy) - Client()->IntraGameTick(g_Config.m_ClDummy));
+		if(Permanent || (FreezeEnd > 0 && Remaining > 0.0f))
+		{
+			const float TimerY = ModernGuns ? HudOffsetY + 51.0f : y + 18.0f;
+			const ColorRGBA Foreground(0.94f, 0.935f, 0.95f, 1.0f);
+			char aTime[32];
+			if(Permanent)
+				str_copy(aTime, "∞");
+			else
+				str_format(aTime, sizeof(aTime), "%.1f s", Remaining / TickSpeed);
+			const char *pFrozen = TCLocalize("Frozen");
+			const float LabelWidth = TextRender()->TextWidth(6.0f, pFrozen);
+			// 固定数字区域，避免每次十分之一秒变化都让进度条和秒数跳动。
+			const float TimeWidth = std::max(TextRender()->TextWidth(6.0f, "0.0 s"), TextRender()->TextWidth(6.0f, aTime));
+			const float Right = 26.0f + LabelWidth + TimeWidth;
+			Graphics()->TextureSet(GameClient()->m_GameSkin.m_SpritePickupFreeze);
+			Graphics()->QuadsBegin();
+			Graphics()->SetColor(Foreground);
+			IGraphics::CQuadItem Snowflake(10.0f, TimerY + 2.0f, 8.0f, 8.0f);
+			Graphics()->QuadsDrawTL(&Snowflake, 1);
+			Graphics()->QuadsEnd();
+			TextRender()->TextColor(Foreground);
+			CUIRect Label = {20.0f, TimerY + 1.0f, LabelWidth, 10.0f};
+			CUIRect Value = {26.0f + LabelWidth, TimerY + 1.0f, TimeWidth, 10.0f};
+			Ui()->DoLabel(&Label, pFrozen, 6.0f, TEXTALIGN_ML);
+			Ui()->DoLabel(&Value, aTime, 6.0f, TEXTALIGN_MR);
+			const float BarWidth = Right - 11.0f;
+			Graphics()->DrawRect(11.0f, TimerY + 13.0f, BarWidth, 2.0f, Foreground.WithAlpha(0.12f), IGraphics::CORNER_ALL, 1.0f);
+			const float Progress = Permanent ? 1.0f : std::clamp(Remaining / Duration, 0.0f, 1.0f);
+			if(Progress > 0.0f)
+				Graphics()->DrawRect(11.0f, TimerY + 13.0f, BarWidth * Progress, 2.0f, TClientModernUi::Accent(11.0f, TimerY), IGraphics::CORNER_ALL, 1.0f);
+			Graphics()->SetColor(1, 1, 1, 1);
+			TextRender()->TextColor(TextRender()->DefaultTextColor());
+		}
 	}
 }
 

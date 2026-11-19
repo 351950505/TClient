@@ -117,6 +117,7 @@ public:
 	void OnMessage(int MsgType, void *pRawMsg) override;
 
 	void Ping(int Signal, vec2 WorldPos);
+	void RenderLocatorCursor(vec2 Pos, float Alpha = 1.0f);
 	// 信令广播载荷入口（CRelayClient 收到同服 TClient 的 ping 时调用）
 	void OnRelayPayload(const char *pText);
 	// 从消息解析信号类型（⟨B: 新格式 / ⟨P: 旧格式），失败返回 -1；

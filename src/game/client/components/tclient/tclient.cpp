@@ -352,6 +352,11 @@ void CTClient::OnMessage(int MsgType, void *pRawMsg)
 		if(g_Config.m_TcDrownBoard && m_DrownBoardModeActive)
 			m_DrownBoard.FeedDeath(static_cast<CNetMsg_Sv_KillMsg *>(pRawMsg)->m_Victim);
 	}
+	else if(MsgType == NETMSGTYPE_SV_KILLMSGTEAM)
+	{
+		if(g_Config.m_TcDrownBoard && m_DrownBoardModeActive)
+			m_DrownBoard.FeedTeamDeath(static_cast<CNetMsg_Sv_KillMsgTeam *>(pRawMsg)->m_Team);
+	}
 
 	if(MsgType == NETMSGTYPE_SV_CHAT)
 	{

@@ -490,6 +490,89 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 		RenderSettingsTClientGradient(MainView);
 }
 
+void CMenus::RenderSettingsTClientModern(CUIRect MainView)
+{
+	CUIRect Label, Left, Right, Row;
+	MainView.Margin(Margin, &MainView);
+	MainView.HSplitTop(HeadlineHeight, &Label, &MainView);
+	Ui()->DoLabel(&Label, TCLocalize("Modern UI"), HeadlineFontSize, TEXTALIGN_ML);
+	MainView.HSplitTop(LineSize * 2, &Label, &MainView);
+	Ui()->DoLabel(&Label, TCLocalize("Choose modern or classic weapons, freeze timer, chat and voting."), EditBoxFontSize, TEXTALIGN_ML);
+	MainView.VSplitMid(&Left, &Right, MarginBetweenSections);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernGuns, TCLocalize("Modern Guns"), &g_Config.m_TcModernGuns, &Left, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernFreezeTimer, TCLocalize("Modern Freeze Timer"), &g_Config.m_TcModernFreezeTimer, &Left, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernChat, TCLocalize("Modern Chat"), &g_Config.m_TcModernChat, &Left, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernVote, TCLocalize("Modern Vote"), &g_Config.m_TcModernVote, &Left, LineSize);
+	Left.HSplitTop(LineSize, nullptr, &Left);
+	Left.HSplitTop(LineSize * 3, &Label, &Left);
+	Ui()->DoLabel(&Label, TCLocalize("Hover chat with the menu open to scroll history. Click a message to copy it."), EditBoxFontSize, TEXTALIGN_TL);
+	const char *apStyles[] = {TCLocalize("Solid color"), TCLocalize("Static gradient"), TCLocalize("Animated gradient"), TCLocalize("RGB color cycle")};
+	static CUi::SDropDownState s_StyleState;
+	static CScrollRegion s_StyleScroll;
+	s_StyleState.m_SelectionPopupContext.m_pScrollRegion = &s_StyleScroll;
+	Right.HSplitTop(LineSize, &Label, &Right);
+	Ui()->DoLabel(&Label, TCLocalize("Accent style"), EditBoxFontSize, TEXTALIGN_ML);
+	Right.HSplitTop(LineSize, &Row, &Right);
+	g_Config.m_TcUiAccentMode = Ui()->DoDropDown(&Row, g_Config.m_TcUiAccentMode, apStyles, std::size(apStyles), s_StyleState);
+	static CButtonContainer s_First, s_Second;
+	DoLine_ColorPicker(&s_First, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Right, TCLocalize("First accent color"), &g_Config.m_TcUiAccent, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent)), false);
+	DoLine_ColorPicker(&s_Second, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Right, TCLocalize("Second accent color"), &g_Config.m_TcUiAccent2, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent2)), false);
+	Right.HSplitTop(LineSize, &Row, &Right);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentAngle, &g_Config.m_TcUiAccentAngle, &Row, TCLocalize("Gradient angle"), 0, 360, &CUi::ms_LinearScrollbarScale, 0, "°");
+	Right.HSplitTop(LineSize, &Row, &Right);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentSpeed, &g_Config.m_TcUiAccentSpeed, &Row, TCLocalize("Accent animation speed"), 1, 200);
+	Right.HSplitTop(LineSize, &Row, &Right);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiBackgroundOpacity, &g_Config.m_TcUiBackgroundOpacity, &Row, TCLocalize("Panel background opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+}
+
+void CMenus::RenderSettingsTClientGetAssets(CUIRect MainView)
+{
+	MainView.Margin(Margin, &MainView);
+	CUIRect Label, Left, Right, Row;
+	MainView.HSplitTop(HeadlineHeight, &Label, &MainView);
+	Ui()->DoLabel(&Label, TCLocalize("Get assets"), HeadlineFontSize, TEXTALIGN_ML);
+	MainView.HSplitTop(LineSize * 2, &Label, &MainView);
+	Ui()->DoLabel(&Label, TCLocalize("Download community assets for your game."), EditBoxFontSize, TEXTALIGN_ML);
+	MainView.VSplitMid(&Left, &Right, MarginBetweenSections);
+	static CButtonContainer s_EnableDDStats, s_OpenDDStats, s_EnableDDNet, s_OpenDDNet;
+	const auto Provider = [&](CUIRect View, const char *pTitle, const char *pUrl, CButtonContainer &Enable, CButtonContainer &Open, bool Community) {
+		View.HSplitTop(HeadlineHeight, &Label, &View);
+		Ui()->DoLabel(&Label, pTitle, HeadlineFontSize, TEXTALIGN_ML);
+		View.HSplitTop(LineSize * 3, &Label, &View);
+		Ui()->DoLabel(&Label, TCLocalize("Skins download as tees appear in game and are cached locally."), EditBoxFontSize, TEXTALIGN_TL);
+		View.HSplitTop(LineSize, &Label, &View);
+		Ui()->DoLabel(&Label, pUrl, EditBoxFontSize, TEXTALIGN_ML);
+		View.HSplitTop(LineSize, nullptr, &View);
+		View.HSplitTop(LineSize, &Row, &View);
+		if(DoButton_Menu(&Enable, TCLocalize("Enable skin downloads"), 0, &Row))
+		{
+			Console()->ExecuteLine("cl_download_skins 1", IConsole::CLIENT_ID_UNSPECIFIED);
+			Console()->ExecuteLine("cl_vanilla_skins_only 0", IConsole::CLIENT_ID_UNSPECIFIED);
+			Console()->ExecuteLine(Community ? "cl_download_community_skins 1" : "cl_download_community_skins 0", IConsole::CLIENT_ID_UNSPECIFIED);
+			if(Community)
+				Console()->ExecuteLine("cl_skin_community_download_url \"https://skins.ddstats.tw/\"", IConsole::CLIENT_ID_UNSPECIFIED);
+			GameClient()->m_Skins.Refresh([] {});
+		}
+		View.HSplitTop(MarginSmall, nullptr, &View);
+		View.HSplitTop(LineSize, &Row, &View);
+		if(DoButton_Menu(&Open, TCLocalize("Open provider website"), 0, &Row))
+			Client()->ViewLink(Community ? "https://skins.ddstats.tw/" : "https://ddnet.org/skins/");
+	};
+	Provider(Left, "DDStats Tee Skins", "https://skins.ddstats.tw/", s_EnableDDStats, s_OpenDDStats, true);
+	Provider(Right, "DDNet", "https://ddnet.org/skins/", s_EnableDDNet, s_OpenDDNet, false);
+	MainView.HSplitTop(LineSize * 12, nullptr, &MainView);
+	const auto Stats = GameClient()->m_Skins.DownloadStats();
+	const size_t Total = Stats.m_NumPending + Stats.m_NumLoading + Stats.m_NumLoaded + Stats.m_NumError + Stats.m_NumNotFound;
+	const size_t Complete = Stats.m_NumLoaded + Stats.m_NumError + Stats.m_NumNotFound;
+	char aStatus[256];
+	str_format(aStatus, sizeof(aStatus), TCLocalize("Progress for encountered skins: %d%% (%d requested)"), Total == 0 ? 0 : (int)(100 * Complete / Total), (int)Total);
+	MainView.HSplitTop(LineSize, &Label, &MainView);
+	Ui()->DoLabel(&Label, aStatus, EditBoxFontSize, TEXTALIGN_ML);
+	str_format(aStatus, sizeof(aStatus), TCLocalize("Active downloads: %d / 2   Ready: %d   Failed: %d"), (int)Stats.m_NumLoading, (int)Stats.m_NumLoaded, (int)(Stats.m_NumError + Stats.m_NumNotFound));
+	MainView.HSplitTop(LineSize, &Label, &MainView);
+	Ui()->DoLabel(&Label, aStatus, EditBoxFontSize, TEXTALIGN_ML);
+}
+
 void CMenus::RenderSettingsTClientGradient(CUIRect MainView)
 {
 	CUIRect LeftView, RightView, Button, Label;
@@ -2798,6 +2881,13 @@ void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 	View.HSplitTop(LineSize, &Button, &View);
 	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelMarkerOpacity, &g_Config.m_TcPingwheelMarkerOpacity, &Button, TCLocalize("Marker opacity"), 10, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 	View.HSplitTop(LineSize, &Button, &View);
+	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelCursorOpacity, &g_Config.m_TcPingwheelCursorOpacity, &Button, TCLocalize("Locator cursor opacity (0 = hidden)"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+	View.HSplitTop(LineSize, &Row, &View);
+	Row.VSplitRight(40.0f, &Label, &Button);
+	Ui()->DoLabel(&Label, TCLocalize("Spectator locator cursor preview"), 14.0f, TEXTALIGN_ML);
+	Button.Draw(ColorRGBA(0.12f, 0.15f, 0.18f, 0.8f), IGraphics::CORNER_ALL, 4.0f);
+	GameClient()->m_PingWheel.RenderLocatorCursor(Button.Center());
+	View.HSplitTop(LineSize, &Button, &View);
 	Ui()->DoScrollbarOption(&g_Config.m_TcPingwheelSoundRange, &g_Config.m_TcPingwheelSoundRange, &Button, TCLocalize("Sound audible range (0 = whole map)"), 0, 5000, &CUi::ms_LinearScrollbarScale, 0, "");
 	View.HSplitTop(MarginSmall * 4, nullptr, &View);
 
@@ -4088,6 +4178,31 @@ void CMenus::RenderSettingsTClientConfigs(CUIRect MainView)
 
 void CMenus::RenderSettingsMe(CUIRect MainView)
 {
+	static int s_Page = 0;
+	static CButtonContainer s_aTabs[3];
+	const char *apNames[] = {TCLocalize("Settings"), TCLocalize("Modern UI"), TCLocalize("Get assets")};
+	CUIRect TabBar, TabButton;
+	MainView.HSplitTop(LineSize, &TabBar, &MainView);
+	const float TabWidth = TabBar.w / std::size(apNames);
+	for(size_t Page = 0; Page < std::size(apNames); ++Page)
+	{
+		TabBar.VSplitLeft(TabWidth, &TabButton, &TabBar);
+		const int Corners = Page == 0 ? IGraphics::CORNER_L : Page == std::size(apNames) - 1 ? IGraphics::CORNER_R :
+												       IGraphics::CORNER_NONE;
+		if(DoButton_MenuTab(&s_aTabs[Page], apNames[Page], s_Page == (int)Page, &TabButton, Corners))
+			s_Page = Page;
+	}
+	MainView.HSplitTop(Margin, nullptr, &MainView);
+	if(s_Page == 1)
+	{
+		RenderSettingsTClientModern(MainView);
+		return;
+	}
+	if(s_Page == 2)
+	{
+		RenderSettingsTClientGetAssets(MainView);
+		return;
+	}
 	CUIRect LeftView, RightView, Button, Label;
 	static CScrollRegion s_ScrollRegion;
 	CScrollRegionParams ScrollParams;
@@ -4206,7 +4321,7 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	for(int Bit = 0; Bit < 11; ++Bit)
 		NewColumns |= (aColumnMirror[Bit] & 1) << Bit;
 	g_Config.m_TcDrownBoardColumns = NewColumns == 0 ? 1 : NewColumns;
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoardResetOnWipe, TCLocalize("Reset all stats when the whole team is frozen"), &g_Config.m_TcDrownBoardResetOnWipe, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoardResetOnWipe, TCLocalize("Reset stats after the frozen team has all died"), &g_Config.m_TcDrownBoardResetOnWipe, &LeftView, LineSize);
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("Counts drown deaths for players in your DDRace team. Only shown on Gores maps. All columns except Freezes are client-side estimates."), EditBoxFontSize, TEXTALIGN_TL);
 
@@ -4231,14 +4346,29 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("Unchecking reconnects Steam immediately; if Steam is unavailable, restart the client."), EditBoxFontSize, TEXTALIGN_TL);
 
-		// 地图图层
-		LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
-		LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
-		Ui()->DoLabel(&Label, TCLocalize("Map Layers"), HeadlineFontSize, TEXTALIGN_ML);
-		LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowTuneZoneColors, TCLocalize("Show tune zone colors"), &g_Config.m_TcShowTuneZoneColors, &LeftView, LineSize);
-		LeftView.HSplitTop(LineSize, &Label, &LeftView);
-		Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
+	// 地图图层
+	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Map Layers"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowTuneZoneColors, TCLocalize("Show tune zone colors"), &g_Config.m_TcShowTuneZoneColors, &LeftView, LineSize);
+	LeftView.HSplitTop(LineSize, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlight, TCLocalize("Highlight hooked tiles (both tiles at seams)"), &g_Config.m_TcHookTileHighlight, &LeftView, LineSize);
+		static CButtonContainer s_HookTileColor;
+		DoLine_ColorPicker(&s_HookTileColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Hooked tile color"), &g_Config.m_TcHookTileHighlightColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightColor)), false);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightRgb, TCLocalize("Cycle highlight through RGB colors"), &g_Config.m_TcHookTileHighlightRgb, &LeftView, LineSize);
+		if(g_Config.m_TcHookTileHighlightRgb)
+		{
+			LeftView.HSplitTop(LineSize, &Button, &LeftView);
+			Ui()->DoScrollbarOption(&g_Config.m_TcHookTileHighlightRgbSpeed, &g_Config.m_TcHookTileHighlightRgbSpeed, &Button, TCLocalize("RGB cycle speed"), 1, 200, &CUi::ms_LinearScrollbarScale, 0, "");
+		}
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightGlow, TCLocalize("Glow around the hooked tile"), &g_Config.m_TcHookTileHighlightGlow, &LeftView, LineSize);
+		LeftView.HSplitTop(LineSize, &Button, &LeftView);
+	Ui()->DoScrollbarOption(&g_Config.m_TcHookTileHighlightOpacity, &g_Config.m_TcHookTileHighlightOpacity, &Button, TCLocalize("Hooked tile opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+	LeftView.HSplitTop(LineSize * 2, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Covers the hooked tiles with a soft colored glow. RGB cycling and an outer glow are optional."), EditBoxFontSize, TEXTALIGN_TL);
 
 	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
 	Ui()->DoLabel(&Label, TCLocalize("Message muting"), HeadlineFontSize, TEXTALIGN_ML);

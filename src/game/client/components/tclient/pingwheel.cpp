@@ -594,15 +594,46 @@ void CPingWheel::RenderSpecCursor()
 	if(Alpha <= 0.0f)
 		return;
 	const vec2 Pos = WorldToUi(pGC->m_Controls.m_aTargetPos[g_Config.m_ClDummy]);
+	const CScreenRect PrevRect = Graphics()->GetScreen();
 	Ui()->MapScreen();
-	// 小圆圈光标：淡晕外圈 + 半透明内核，白色低透明度，只标个位置不抢视线
+	RenderLocatorCursor(Pos, Alpha);
+	Graphics()->MapScreen(PrevRect);
+}
+
+void CPingWheel::RenderLocatorCursor(vec2 Pos, float Alpha)
+{
+	Alpha = std::clamp(Alpha, 0.0f, 1.0f) * g_Config.m_TcPingwheelCursorOpacity / 100.0f;
+	if(Alpha <= 0.0f)
+		return;
+
 	Graphics()->TextureClear();
 	Graphics()->QuadsBegin();
-	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.22f * Alpha);
-	Graphics()->DrawCircle(Pos.x, Pos.y, 6.5f, 24);
-	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.55f * Alpha);
-	Graphics()->DrawCircle(Pos.x, Pos.y, 2.8f, 24);
+	// 环带保留中间视野，内外边缘渐隐；暗色底边保证亮色地图上也能定位。
+	const auto Ring = [&](float Inner, float Outer, ColorRGBA InnerColor, ColorRGBA OuterColor) {
+		for(int Segment = 0; Segment < 48; ++Segment)
+		{
+			const vec2 From = direction(2.0f * pi * Segment / 48.0f);
+			const vec2 To = direction(2.0f * pi * (Segment + 1) / 48.0f);
+			Graphics()->SetColor4(InnerColor, InnerColor, OuterColor, OuterColor);
+			IGraphics::CFreeformItem Quad(Pos + From * Inner, Pos + To * Inner, Pos + From * Outer, Pos + To * Outer);
+			Graphics()->QuadsDrawFreeform(&Quad, 1);
+		}
+	};
+	const ColorRGBA Rim(0.94f, 0.97f, 1.0f, Alpha);
+	const ColorRGBA Clear = Rim.WithAlpha(0.0f);
+	const ColorRGBA Shadow(0.03f, 0.05f, 0.08f, Alpha * 0.45f);
+	Ring(3.5f, 4.0f, Shadow.WithAlpha(0.0f), Shadow);
+	Ring(4.0f, 6.0f, Shadow, Shadow);
+	Ring(6.0f, 6.5f, Shadow, Shadow.WithAlpha(0.0f));
+	Ring(4.0f, 4.5f, Clear, Rim);
+	Ring(4.5f, 5.2f, Rim, Rim);
+	Ring(5.2f, 5.8f, Rim, Clear);
+	Graphics()->SetColor(0.03f, 0.05f, 0.08f, Alpha * 0.5f);
+	Graphics()->DrawCircle(Pos.x, Pos.y, 1.8f, 24);
+	Graphics()->SetColor(Rim);
+	Graphics()->DrawCircle(Pos.x, Pos.y, 1.0f, 24);
 	Graphics()->QuadsEnd();
+	Graphics()->SetColor(1, 1, 1, 1);
 }
 
 void CPingWheel::OnRender()

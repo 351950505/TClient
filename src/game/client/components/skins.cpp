@@ -599,6 +599,7 @@ void CSkins::UpdateUnloadSkins(CSkinLoadingStats &Stats)
 
 void CSkins::UpdateStartLoading(CSkinLoadingStats &Stats)
 {
+	size_t DownloadsLoading = DownloadStats().m_NumLoading;
 	for(auto &[_, pSkinContainer] : m_Skins)
 	{
 		if(Stats.m_NumPending == 0 || Stats.m_NumLoading + Stats.m_NumLoaded >= (size_t)g_Config.m_ClSkinsLoadedMax)
@@ -609,12 +610,15 @@ void CSkins::UpdateStartLoading(CSkinLoadingStats &Stats)
 		{
 			continue;
 		}
+		if(pSkinContainer->Type() == CSkinContainer::EType::DOWNLOAD && DownloadsLoading >= 2)
+			continue;
 		switch(pSkinContainer->Type())
 		{
 		case CSkinContainer::EType::LOCAL:
 			pSkinContainer->m_pLoadJob = std::make_shared<CSkinLoadJob>(this, pSkinContainer->Name(), pSkinContainer->StorageType());
 			break;
 		case CSkinContainer::EType::DOWNLOAD:
+			++DownloadsLoading;
 			pSkinContainer->m_pLoadJob = std::make_shared<CSkinDownloadJob>(this, pSkinContainer->Name());
 			break;
 		default:
@@ -744,6 +748,26 @@ CSkins::CSkinLoadingStats CSkins::LoadingStats() const
 		case CSkinContainer::EState::NOT_FOUND:
 			Stats.m_NumNotFound++;
 			break;
+		}
+	}
+	return Stats;
+}
+
+CSkins::CSkinLoadingStats CSkins::DownloadStats() const
+{
+	CSkinLoadingStats Stats;
+	for(const auto &[_, pSkinContainer] : m_Skins)
+	{
+		if(pSkinContainer->Type() != CSkinContainer::EType::DOWNLOAD)
+			continue;
+		switch(pSkinContainer->State())
+		{
+		case CSkinContainer::EState::UNLOADED: ++Stats.m_NumUnloaded; break;
+		case CSkinContainer::EState::PENDING: ++Stats.m_NumPending; break;
+		case CSkinContainer::EState::LOADING: ++Stats.m_NumLoading; break;
+		case CSkinContainer::EState::LOADED: ++Stats.m_NumLoaded; break;
+		case CSkinContainer::EState::ERROR: ++Stats.m_NumError; break;
+		case CSkinContainer::EState::NOT_FOUND: ++Stats.m_NumNotFound; break;
 		}
 	}
 	return Stats;

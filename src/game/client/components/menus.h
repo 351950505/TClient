@@ -676,6 +676,7 @@ public:
 	bool IsInit() const { return m_IsInit; }
 
 	bool IsActive() const { return m_MenuActive; }
+	bool CanInteractWithChat() const { return m_MenuActive && m_GamePage == PAGE_GAME && m_Popup == POPUP_NONE; }
 	void SetActive(bool Active);
 
 	void OnInterfacesInit(CGameClient *pClient) override;
@@ -883,6 +884,8 @@ private:
 	void RenderSettingsTClientStatusBar(CUIRect MainView);
 	void RenderSettingsTClientAssets(CUIRect MainView);
 	void RenderSettingsTClientGradient(CUIRect MainView);
+	void RenderSettingsTClientModern(CUIRect MainView);
+	void RenderSettingsTClientGetAssets(CUIRect MainView);
 	void RenderSettingsTClientPing(CUIRect MainView);
 	void RenderSettingsTClientProfiles(CUIRect MainView);
 	void RenderSettingsTClientConfigs(CUIRect MainView);

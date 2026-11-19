@@ -237,6 +237,7 @@ public:
 	void RefreshEventSkins();
 	void Refresh(TSkinLoadedCallback &&SkinLoadedCallback);
 	CSkinLoadingStats LoadingStats() const;
+	CSkinLoadingStats DownloadStats() const;
 	CSkinList &SkinList();
 
 	const CSkinContainer *FindContainerOrNullptr(const char *pName);

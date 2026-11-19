@@ -473,7 +473,7 @@ TEST(ClientDrownBoard, LastsAndAledsPerTeamEpisode)
 	EXPECT_EQ(Tracker.Stats(2).m_Aleds, 1);
 	EXPECT_EQ(Tracker.Stats(3).m_Aleds, 1);
 	EXPECT_EQ(Tracker.Stats(3).m_Lasts, 1);
-	// 有人解冻 → 轮次结束，再次出现“只剩一人”时可再记坚持。
+	// 有人解冻后再次冻结仍属于同一轮，全队 K 掉前不重复计全灭。
 	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 10.0f, 0.0f));
 	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 20.0f, 0.0f));
 	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 30.0f, 0.0f));
@@ -481,8 +481,52 @@ TEST(ClientDrownBoard, LastsAndAledsPerTeamEpisode)
 	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 10.0f, 0.0f));
 	RunStats(Tracker, aTicks);
 	EXPECT_EQ(Tracker.Stats(2).m_Lasts, 0);
-	// 解冻者随后也冻住，此时 2/3 仍冻结、1 冻结——不，全员冻结只会再记全灭。
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	Tracker.FeedDeath(1);
+	Tracker.FeedDeath(2);
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	Tracker.FeedDeath(3);
+	for(int ClientId = 1; ClientId <= 3; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick());
+	RunStats(Tracker, aTicks);
+	for(int ClientId = 1; ClientId <= 3; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(true));
+	RunStats(Tracker, aTicks);
 	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 2);
+}
+
+TEST(ClientDrownBoard, DisconnectedMemberDoesNotStallWipeResetAndWait)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	for(int ClientId = 1; ClientId <= 3; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 10.0f * ClientId, 0.0f));
+	RunStats(Tracker, aTicks, 1, true, true);
+	// 全队冻结 → 全灭一轮。
+	for(int ClientId = 1; ClientId <= 3; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 10.0f * ClientId, 0.0f));
+	RunStats(Tracker, aTicks, 1, true, true);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	// 成员 1、2 相继死亡，成员 3 不死直接离线（快照无角色）。
+	Tracker.FeedDeath(1);
+	Tracker.FeedDeath(2);
+	CTClientDrownBoard::SDrownStatTick Offline;
+	Offline.m_Active = false;
+	FeedTick(Tracker, aTicks, 3, 1, Offline);
+	RunStats(Tracker, aTicks, 1, true, true);
+	// 离线成员不阻塞本轮重置：计数继续而不是永久暂停。
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 0);
+	// 复活解冻等待也只看仍在服的成员：1、2 复活解冻即恢复计数。
+	for(int ClientId = 1; ClientId <= 2; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 10.0f * ClientId, 0.0f));
+	RunStats(Tracker, aTicks, 1, true, true);
+	// 新一轮：剩下的 1、2 再次全队冻结 → 再次计全灭。
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 10.0f, 0.0f));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 20.0f, 0.0f));
+	RunStats(Tracker, aTicks, 1, true, true);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	EXPECT_EQ(Tracker.Stats(2).m_Aleds, 1);
 }
 
 TEST(ClientDrownBoard, ResetOnWipeClearsAllCountersLikeNewRound)
@@ -494,15 +538,72 @@ TEST(ClientDrownBoard, ResetOnWipeClearsAllCountersLikeNewRound)
 	RunStats(Tracker, aTicks, 1, true, true);
 	Tracker.FeedDeath(1);
 	ASSERT_EQ(Tracker.Stats(1).m_Deaths, 1);
-	// “全灭重置”开启时，全员冻结的那一 tick 记完全灭就把全部统计清零（新开局）。
+	// 全员冻结时保留统计，单人 K 或重复 K 都不能提前重置。
 	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true));
 	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true));
+	RunStats(Tracker, aTicks, 1, true, true);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	EXPECT_EQ(Tracker.Stats(1).m_Deaths, 1);
+	Tracker.FeedDeath(1);
+	RunStats(Tracker, aTicks, 1, true, true);
+	Tracker.FeedDeath(1);
+	RunStats(Tracker, aTicks, 1, true, true);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	EXPECT_EQ(Tracker.Stats(2).m_Aleds, 1);
+	Tracker.FeedDeath(2);
 	RunStats(Tracker, aTicks, 1, true, true);
 	EXPECT_EQ(Tracker.Stats(1).m_Deaths, 0);
 	EXPECT_EQ(Tracker.Stats(1).m_Freezes, 0);
 	EXPECT_EQ(Tracker.Stats(2).m_Freezes, 0);
 	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 0);
 	EXPECT_EQ(Tracker.Stats(2).m_Aleds, 0);
+}
+
+TEST(ClientDrownBoard, TeamDeathWaitsForFreshUnfrozenSnapshot)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	for(int ClientId = 1; ClientId <= 2; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick());
+	RunStats(Tracker, aTicks);
+	for(int ClientId = 1; ClientId <= 2; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(true));
+	RunStats(Tracker, aTicks);
+	Tracker.FeedTeamDeath(2);
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	Tracker.FeedTeamDeath(1);
+	RunStats(Tracker, aTicks);
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	for(int ClientId = 1; ClientId <= 2; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick());
+	RunStats(Tracker, aTicks);
+	for(int ClientId = 1; ClientId <= 2; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(true));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 2);
+}
+
+TEST(ClientDrownBoard, MissingMemberCannotBeCountedAsDead)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	for(int ClientId = 1; ClientId <= 3; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick());
+	RunStats(Tracker, aTicks, 1, true, true);
+	for(int ClientId = 1; ClientId <= 3; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(true));
+	RunStats(Tracker, aTicks, 1, true, true);
+	Tracker.FeedDeath(1);
+	Tracker.FeedDeath(2);
+	aTicks[3].m_HasCharacter = false;
+	RunStats(Tracker, aTicks, 1, true, true);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	EXPECT_EQ(Tracker.Stats(2).m_Aleds, 1);
+	Tracker.FeedDeath(3);
+	RunStats(Tracker, aTicks, 1, true, true);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 0);
 }
 
 TEST(ClientDrownBoard, TickTimeAccumulatesWhileCharacterPresent)

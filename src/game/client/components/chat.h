@@ -66,6 +66,8 @@ class CChat : public CComponent
 		std::shared_ptr<CManagedTeeRenderInfo> m_pManagedTeeRenderInfo;
 
 		float m_TextYOffset;
+		float m_ModernWidth = 0.0f;
+		ColorRGBA m_ModernBorder = ColorRGBA(1, 1, 1, 1);
 
 		int m_TimesRepeated;
 
@@ -74,6 +76,10 @@ class CChat : public CComponent
 
 	bool m_PrevScoreBoardShowed;
 	bool m_PrevShowChat;
+	bool m_PrevModernChat = false;
+	int m_ModernScroll = 0;
+	int m_ModernHoveredLine = -1;
+	bool m_ModernHover = false;
 
 	CLine m_aLines[MAX_LINES];
 	int m_CurrentLine;

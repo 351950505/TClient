@@ -191,6 +191,13 @@ MACRO_CONFIG_INT(TcAntiPingNegativeBuffer, tc_antiping_negative_buffer, 0, 0, 1,
 MACRO_CONFIG_INT(TcAntiPingStableDirection, tc_antiping_stable_direction, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Predicts optimistically along the tees stable axis to reduce delay in gaining overall stability")
 MACRO_CONFIG_INT(TcAntiPingUncertaintyScale, tc_antiping_uncertainty_scale, 150, 25, 400, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Determines uncertainty duration as a factor of ping, 100 = 1.0")
 
+MACRO_CONFIG_INT(TcHookTileHighlight, tc_hook_tile_highlight, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Cover the tile your hook holds with a colored glow, including both tiles at a seam")
+MACRO_CONFIG_COL(TcHookTileHighlightColor, tc_hook_tile_highlight_color, 8435379, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Hooked terrain highlight color")
+MACRO_CONFIG_INT(TcHookTileHighlightOpacity, tc_hook_tile_highlight_opacity, 70, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Hooked terrain highlight opacity (%)")
+MACRO_CONFIG_INT(TcHookTileHighlightRgb, tc_hook_tile_highlight_rgb, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Cycle the hooked tile highlight through RGB colors")
+MACRO_CONFIG_INT(TcHookTileHighlightRgbSpeed, tc_hook_tile_highlight_rgb_speed, 30, 1, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Hooked tile RGB cycle speed (30 ≈ one cycle every 20 s)")
+MACRO_CONFIG_INT(TcHookTileHighlightGlow, tc_hook_tile_highlight_glow, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Glow around the hooked tile")
+
 MACRO_CONFIG_INT(TcColorFreeze, tc_color_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use skin colors for frozen tees")
 MACRO_CONFIG_INT(TcColorFreezeDarken, tc_color_freeze_darken, 90, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Makes color of tees darker when in freeze (0-100)")
 MACRO_CONFIG_INT(TcColorFreezeFeet, tc_color_freeze_feet, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Also use color for frozen tee feet")
@@ -476,6 +483,17 @@ MACRO_CONFIG_INT(TcJitterBufferMax, tc_jitter_buffer_max, 30, 0, 100, CFGFLAG_CL
 // ME page: TClient 企鹅徽标（ddnet-custom-clients 皮肤颜色法）
 // 广播是客户端身份的一部分，始终发送；本开关只控制自己是否显示徽标。
 MACRO_CONFIG_INT(MeClientBadge, me_client_badge, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: show the TClient penguin next to TClient players on the scoreboard (TClient identity is always broadcast)")
+// 现代界面：各项可独立切回经典样式。
+MACRO_CONFIG_INT(TcModernGuns, tc_modern_guns, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use the compact modern weapon and jump HUD")
+MACRO_CONFIG_INT(TcModernFreezeTimer, tc_modern_freeze_timer, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show the modern freeze countdown")
+MACRO_CONFIG_INT(TcModernChat, tc_modern_chat, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show chat cards with message-colored borders and scrollable history")
+MACRO_CONFIG_INT(TcModernVote, tc_modern_vote, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show the modern vote panel")
+MACRO_CONFIG_INT(TcUiAccentMode, tc_ui_accent_mode, 0, 0, 3, CFGFLAG_CLIENT | CFGFLAG_SAVE, "UI accent: 0 solid, 1 static gradient, 2 animated gradient, 3 rainbow")
+MACRO_CONFIG_COL(TcUiAccent, tc_ui_accent, 10286820, CFGFLAG_CLIENT | CFGFLAG_SAVE, "UI primary accent color")
+MACRO_CONFIG_COL(TcUiAccent2, tc_ui_accent_2, 12047336, CFGFLAG_CLIENT | CFGFLAG_SAVE, "UI secondary accent color")
+MACRO_CONFIG_INT(TcUiAccentAngle, tc_ui_accent_angle, 0, 0, 360, CFGFLAG_CLIENT | CFGFLAG_SAVE, "UI accent gradient angle")
+MACRO_CONFIG_INT(TcUiAccentSpeed, tc_ui_accent_speed, 30, 1, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "UI accent animation speed")
+MACRO_CONFIG_INT(TcUiBackgroundOpacity, tc_ui_background_opacity, 80, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Modern UI panel background opacity")
 // ME page: Gores 组队落水榜（QmClient 移植）——统计同队玩家冻结次数，默认关闭。
 MACRO_CONFIG_INT(TcDrownBoard, tc_drown_board, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: show the team drown board on Gores maps")
 MACRO_CONFIG_INT(TcDrownBoardIncludeTeam0, tc_drown_board_include_team0, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: include Team 0")
@@ -486,7 +504,7 @@ MACRO_CONFIG_INT(TcDrownBoardShowTee, tc_drown_board_show_tee, 1, 0, 1, CFGFLAG_
 // bit6 出钩 bit7 钩人 bit8 存活时间 bit9 冻结时间 bit10 效率；默认 133 = 落水+救援+钩人
 //（用户指定）；2047 = 全开。除落水外均为客户端估算（判据见落水榜多列语义 2026-11-19）。
 MACRO_CONFIG_INT(TcDrownBoardColumns, tc_drown_board_columns, 133, 0, 2047, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: column bitmask (1 Freezes, 2 Deaths, 4 Saves, 8 Lasts, 16 Aleds, 32 Jumps, 64 Hooks launched, 128 Player hooks, 256 Time alive, 512 Time frozen, 1024 Eff; default 133 = Freezes+Saves+Player hooks; estimated stats)")
-MACRO_CONFIG_INT(TcDrownBoardResetOnWipe, tc_drown_board_reset_on_wipe, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: reset all stats when the whole team is frozen at once (new round)")
+MACRO_CONFIG_INT(TcDrownBoardResetOnWipe, tc_drown_board_reset_on_wipe, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: after the whole team freezes, reset all stats only once every member has died")
 MACRO_CONFIG_INT(TcIslandOffsetX, tc_island_offset_x, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island horizontal offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandOffsetY, tc_island_offset_y, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island vertical offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandTransparent, tc_island_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode (no black capsule, outlined text)")
@@ -509,6 +527,7 @@ MACRO_CONFIG_INT(TcFontSize, tc_font_size, 100, 50, 200, CFGFLAG_CLIENT | CFGFLA
 MACRO_CONFIG_INT(TcUiScale, tc_ui_scale, 100, 50, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "User interface scale in percent (menus, popups, browser)")
 MACRO_CONFIG_INT(TcPingwheelVolume, tc_pingwheel_volume, 30, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal sound volume (%)")
 MACRO_CONFIG_INT(TcPingwheelMarkerOpacity, tc_pingwheel_marker_opacity, 100, 10, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping marker map overlay opacity (%)")
+MACRO_CONFIG_INT(TcPingwheelCursorOpacity, tc_pingwheel_cursor_opacity, 70, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Spectator locator cursor opacity (0 = hidden, %)")
 MACRO_CONFIG_INT(TcPingwheelSoundRange, tc_pingwheel_sound_range, 600, 0, 10000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel sound audible range in world units (0 = global, no falloff)")
 MACRO_CONFIG_INT(TcPingwheelEmote, tc_pingwheel_emote, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "DEPRECATED: emoticon fallback channel removed, signals always use the relay channel")
 MACRO_CONFIG_INT(TcRelay, tc_relay, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Ping wheel signal relay: send/receive pings via the TClient signal server (works while spectating, invisible to chat)")

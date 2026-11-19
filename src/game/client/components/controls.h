@@ -46,8 +46,8 @@ public:
 	bool m_FastInputFireAction[NUM_DUMMIES] = {};
 
 	// alpha 各模式分别保留两号输入和动作锁存；切换模式不覆盖其他模式缓存。
-	// mode 0~7 = alpha 七模式（4 为历史空位），8~11 = BestClient 四模式（Best/Saiko/Delta/Cloud）。
-	static constexpr int NUM_FAST_INPUT_MODES = 15;
+	// mode 0~16（4 为历史空位），包括 15=JuKKi 和 16=NovaPilot；缓存容量必须覆盖最高模式下标。
+	static constexpr int NUM_FAST_INPUT_MODES = 17;
 	CNetObj_PlayerInput m_aaModeFastInput[NUM_FAST_INPUT_MODES][NUM_DUMMIES] = {};
 	bool m_aModeFastInputHookAction[NUM_FAST_INPUT_MODES][NUM_DUMMIES] = {};
 	bool m_aModeFastInputFireAction[NUM_FAST_INPUT_MODES][NUM_DUMMIES] = {};
@@ -69,8 +69,8 @@ public:
 	void ResetInput(int Dummy);
 	void ResetFastInput(int Dummy);
 	bool CheckNewInput();
-	CNetObj_PlayerInput &GetFastInput(int Dummy) { return m_ActiveFastInputMode == 0 ? m_aFastInput[Dummy] : m_aaModeFastInput[m_ActiveFastInputMode][Dummy]; }
-	const CNetObj_PlayerInput &GetFastInput(int Dummy) const { return m_ActiveFastInputMode == 0 ? m_aFastInput[Dummy] : m_aaModeFastInput[m_ActiveFastInputMode][Dummy]; }
+	CNetObj_PlayerInput &GetFastInput(int Dummy) { return m_ActiveFastInputMode <= 0 || m_ActiveFastInputMode >= NUM_FAST_INPUT_MODES ? m_aFastInput[Dummy] : m_aaModeFastInput[m_ActiveFastInputMode][Dummy]; }
+	const CNetObj_PlayerInput &GetFastInput(int Dummy) const { return m_ActiveFastInputMode <= 0 || m_ActiveFastInputMode >= NUM_FAST_INPUT_MODES ? m_aFastInput[Dummy] : m_aaModeFastInput[m_ActiveFastInputMode][Dummy]; }
 
 private:
 	static void ConKeyInputState(IConsole::IResult *pResult, void *pUserData);

@@ -932,6 +932,12 @@ Unfreeze & undeep
 Tele
 == 传送轮廓
 
+Locator cursor opacity (0 = hidden)
+== 定位光标不透明度（0 为隐藏）
+
+Spectator locator cursor preview
+== 观战定位光标预览
+
 Show ping colored circle in nameplates
 == 在名称前根据延迟显示彩色圆圈
 
@@ -2123,8 +2129,107 @@ Deaths
 Eff
 == 效率
 
-Reset all stats when the whole team is frozen
-== 全队同时冻结时重置全部统计
+Reset stats after the frozen team has all died
+== 全队冻结后，整队 K 回起点再重置统计
+
+Highlight hooked tiles (both tiles at seams)
+== 高亮钩住的砖块（接缝处同时高亮两块）
+
+Hooked tile color
+== 钩住砖块的高亮颜色
+
+Hooked tile opacity
+== 砖块高亮不透明度
+
+Cycle highlight through RGB colors
+== 高亮颜色按 RGB 循环
+
+RGB cycle speed
+== RGB 循环速度
+
+Glow around the hooked tile
+== 钩住砖块的外圈光晕
+
+Covers the hooked tiles with a soft colored glow. RGB cycling and an outer glow are optional.
+== 用柔和的颜色光晕覆盖钩住的砖块；RGB 循环与外圈光晕可选。
+
+Frozen
+== 冻结
+
+Ninja
+== 忍者
+
+Modern UI
+== 现代化界面
+
+Choose modern or classic weapons, freeze timer, chat and voting.
+== 分别选择现代或经典的武器、冻结计时器、聊天和投票样式。
+
+Modern Guns
+== 现代武器与跳跃显示
+
+Modern Freeze Timer
+== 现代冻结计时器
+
+Modern Chat
+== 现代聊天
+
+Modern Vote
+== 现代投票
+
+Hover chat with the menu open to scroll history. Click a message to copy it.
+== 打开菜单后，悬停聊天区域可滚动历史，点击消息可复制。
+
+Solid color
+== 单色
+
+Static gradient
+== 静态渐变
+
+Animated gradient
+== 动态渐变
+
+RGB color cycle
+== 彩虹循环
+
+Accent style
+== 强调色样式
+
+First accent color
+== 第一强调色
+
+Second accent color
+== 第二强调色
+
+Gradient angle
+== 渐变角度
+
+Accent animation speed
+== 强调色动画速度
+
+Panel background opacity
+== 面板背景不透明度
+
+Get assets
+== 获取资源
+
+Download community assets for your game.
+== 为游戏下载社区资源。
+
+Skins download as tees appear in game and are cached locally.
+== 遇到玩家时按需下载皮肤，并缓存到本地。
+
+Enable skin downloads
+== 启用此来源的皮肤下载
+
+Open provider website
+== 打开资源网站
+
+Progress for encountered skins: %d%% (%d requested)
+== 已遇到皮肤的下载进度：%d%%（已请求 %d 个）
+
+Active downloads: %d / 2   Ready: %d   Failed: %d
+== 正在下载：%d / 2　已就绪：%d　失败：%d
 
 Full-distance tee status is requested automatically once per connection (native /showall; requires server support)
 == 全距离 tee 状态会在每次连接时自动请求一次（原生 /showall；需要服务器支持）

@@ -2919,6 +2919,7 @@ if(CLIENT)
     components/tclient/gradient.h
     components/tclient/gradient_math.cpp
     components/tclient/gradient_math.h
+    components/tclient/hook_tile_highlight.h
     components/tclient/island_music.cpp
     components/tclient/island_music.h
     components/tclient/lyric_parser.cpp
@@ -3778,6 +3779,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     tclient_drown_board_test.cpp
     tclient_fastinput_test.cpp
     tclient_gradient_test.cpp
+    tclient_hook_tile_test.cpp
     tclient_jitter_buffer_test.cpp
     tclient_relay_test.cpp
     tclient_skinprofiles_test.cpp

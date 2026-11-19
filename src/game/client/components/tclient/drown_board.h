@@ -112,6 +112,9 @@ public:
 		m_aPlayers = {};
 		m_StatsLocalTeam = -1;
 		m_AledEpisodeDone = false;
+		m_WaitForUnfrozen = false;
+		m_aEpisodeMembers = {};
+		m_aEpisodeDeaths = {};
 	}
 
 	int Count(int ClientId) const
@@ -166,7 +169,7 @@ public:
 			Player.m_Armed = false;
 			return;
 		}
-		if(Player.m_SeenCharacter && Player.m_OnStart && !OnStart)
+		if(Player.m_SeenCharacter && Player.m_OnStart && !OnStart && !(m_AledEpisodeDone && Team == m_StatsLocalTeam))
 		{
 			// 离开起点时只清零该玩家，新一轮落水从当前冻结和出钩状态重新建立基线。
 			ResetCounters(Player);
@@ -207,10 +210,23 @@ public:
 			return;
 		if(m_aPlayers[ClientId].m_Deaths < std::numeric_limits<int>::max())
 			++m_aPlayers[ClientId].m_Deaths;
+		if(m_AledEpisodeDone && m_aEpisodeMembers[ClientId])
+			m_aEpisodeDeaths[ClientId] = true;
+	}
+
+	void FeedTeamDeath(int Team)
+	{
+		if(!IsTrackedTeam(Team, true))
+			return;
+		for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
+		{
+			if(m_aPlayers[ClientId].m_Team == Team)
+				FeedDeath(ClientId);
+		}
 	}
 
 	// 多列统计：整队批量观测。pTicks 必须按 ClientId 全量给出（与同一 tick 的
-	// Observe 调用同源）。ResetOnTeamWipe：全灭发生时按“离开起点”口径清空统计。
+	// Observe 调用同源）。ResetOnTeamWipe：全队冻结后，等本轮全员死亡才清空统计。
 	void ObserveStats(const SDrownStatTick *pTicks, int LocalTeam, bool IncludeTeamZero, bool ResetOnTeamWipe, int ElapsedTicks = 1)
 	{
 		if(pTicks == nullptr || ElapsedTicks <= 0)
@@ -220,8 +236,49 @@ public:
 			// 本地换队：已计入的数字保留（沿用显示过滤），轮次状态全部重来。
 			m_StatsLocalTeam = LocalTeam;
 			m_AledEpisodeDone = false;
+			m_WaitForUnfrozen = false;
+			m_aEpisodeMembers = {};
+			m_aEpisodeDeaths = {};
 			for(SPlayer &Player : m_aPlayers)
 				Player.m_LastCounted = false;
+		}
+		if(m_AledEpisodeDone)
+		{
+			bool AllDead = true;
+			for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
+			{
+				// 永久离线的成员等不到死亡消息：不阻塞本轮重置，计数继续。
+				if(m_aEpisodeMembers[ClientId] && !m_aEpisodeDeaths[ClientId] && pTicks[ClientId].m_Active)
+					AllDead = false;
+			}
+			if(AllDead)
+			{
+				for(SPlayer &Player : m_aPlayers)
+				{
+					if(Player.m_Team != LocalTeam)
+						continue;
+					if(ResetOnTeamWipe)
+						ResetCounters(Player);
+					Player.m_LastCounted = false;
+				}
+				m_AledEpisodeDone = false;
+				m_WaitForUnfrozen = true;
+				m_aEpisodeDeaths = {};
+			}
+		}
+		if(m_WaitForUnfrozen)
+		{
+			// K 消息可能先于重生快照；仍在服的成员全部重新出现并解冻前，
+			// 不把旧冻结状态计作新一轮。永久离线的成员不再阻塞计数。
+			for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
+			{
+				const SDrownStatTick &Now = pTicks[ClientId];
+				if(m_aEpisodeMembers[ClientId] && Now.m_Active && (!Now.m_HasCharacter || Now.m_Frozen))
+					return;
+			}
+			m_WaitForUnfrozen = false;
+			m_aEpisodeMembers = {};
+			return;
 		}
 
 		const float HookHitRadius2 = HOOK_HIT_RADIUS * HOOK_HIT_RADIUS;
@@ -373,20 +430,11 @@ public:
 						continue;
 					if(!Now.m_Active || !Now.m_HasCharacter || Now.m_OnStart)
 						continue;
+					m_aEpisodeMembers[ClientId] = true;
 					if(m_aPlayers[ClientId].m_Aleds < std::numeric_limits<int>::max())
 						++m_aPlayers[ClientId].m_Aleds;
 				}
-				if(ResetOnTeamWipe)
-				{
-					// 全灭即新开局：按“离开起点”同样的口径清空全部统计。
-					for(SPlayer &Player : m_aPlayers)
-						ResetCounters(Player);
-				}
 			}
-		}
-		else if(UnfrozenEligible >= 1)
-		{
-			m_AledEpisodeDone = false;
 		}
 	}
 
@@ -413,6 +461,9 @@ private:
 
 	int m_StatsLocalTeam = -1;
 	bool m_AledEpisodeDone = false;
+	bool m_WaitForUnfrozen = false;
+	std::array<bool, MAX_CLIENTS> m_aEpisodeMembers{};
+	std::array<bool, MAX_CLIENTS> m_aEpisodeDeaths{};
 };
 
 #endif

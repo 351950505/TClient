@@ -540,7 +540,7 @@ bool CControls::CheckNewInput()
 	// BestClient 四模式（8~11）采集对齐其通用路径：Saiko 只更新当前操控号，Saiko/Cloud subtick 开启时用即时鼠标；
 	// BestClient 的按键去抖（m_aInputDebounce）与 SnapTap 方向解析属其独立输入管线，不随本移植引入。
 	int Mode = GameClient()->FastInputMode();
-	if(!GameClient()->FastInputActive(GameClient()->m_Snap.m_LocalClientId, false))
+	if(Mode < 0 || Mode >= NUM_FAST_INPUT_MODES || !GameClient()->FastInputActive(GameClient()->m_Snap.m_LocalClientId, false))
 		Mode = 0;
 	bool NewInput = Mode != m_ActiveFastInputMode;
 	if(Mode >= 12 && Mode != m_ActiveFastInputMode)

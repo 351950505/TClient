@@ -21,6 +21,7 @@
 #include <game/client/components/controls.h>
 #include <game/client/components/effects.h>
 #include <game/client/components/flow.h>
+#include <game/client/components/mapimages.h>
 #include <game/client/components/skins.h>
 #include <game/client/components/sounds.h>
 #include <game/client/gameclient.h>
@@ -30,6 +31,7 @@
 
 // TClient
 #include <game/client/components/tclient/rainbow.h>
+#include <game/client/components/tclient/hook_tile_highlight.h>
 #include <game/client/prediction/entities/character.h>
 
 static float CalculateHandAngle(vec2 Dir, float AngleOffset)
@@ -595,6 +597,160 @@ void CPlayers::RenderHook(
 		Graphics()->SetColor(GameClient()->m_Rainbow.m_RainbowColor.WithAlpha(Alpha));
 
 	RenderHand(&RenderInfo, Position, normalize(HookPos - Pos), -pi / 2, vec2(20, 0), Alpha);
+}
+
+void CPlayers::RenderHookTileHighlight(int ClientId)
+{
+	if(!g_Config.m_TcHookTileHighlight || g_Config.m_TcHookTileHighlightOpacity == 0 ||
+		!in_range(ClientId, MAX_CLIENTS - 1) || !IsPlayerInfoAvailable(ClientId))
+		return;
+	const auto &Data = GameClient()->m_aClients[ClientId];
+	const auto &Character = Data.m_RenderCur;
+	if(Character.m_HookState != HOOK_GRABBED || Character.m_HookedPlayer != -1)
+		return;
+	const CCollision *pCollision = Collision();
+	const auto Selection = tclient_hook_tile::Select(vec2(Character.m_HookX, Character.m_HookY),
+		pCollision->GetWidth(), pCollision->GetHeight(), [&](int X, int Y) {
+			return pCollision->GetTile(X * 32 + 16, Y * 32 + 16) == TILE_SOLID;
+		});
+	if(Selection.m_Count == 0)
+		return;
+
+	// 颜色：RGB 循环开启时按速度旋转色相（对齐 Nova nc_hooked_tile_rgb/speed，
+	// 此时忽略取色器），否则使用配置颜色。
+	const float RgbHue = std::fmod(Client()->LocalTime() * g_Config.m_TcHookTileHighlightRgbSpeed / 600.0f, 1.0f);
+	const ColorRGBA Color = g_Config.m_TcHookTileHighlightRgb ?
+					color_cast<ColorRGBA>(ColorHSLA(RgbHue, 0.75f, 0.62f)) :
+					color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcHookTileHighlightColor));
+	// 接触晕染 × Nova 机制：染色仍只落在被钩 tile 的实体纹理不透明像素上（共用
+	// 实体图集与着色管线）；钩子接触点附近更亮，向外平滑衰减为低强度底染。
+	// 混合模式为加法（BlendAdditive）：普通 alpha 混合下 src = 纹理×顶点色，
+	// 实心砖纹理是深灰(48,48,48)，浅色高亮乘上去只剩 ~18% 亮度，等于隐形——
+	// 加法让所选颜色真正"点亮"砖块纹理，与 Nova 的发光观感一致。
+	const float Alpha = g_Config.m_TcHookTileHighlightOpacity / 100.0f;
+	float MinX = Selection.m_aTiles[0].m_X;
+	float MaxX = MinX;
+	float MinY = Selection.m_aTiles[0].m_Y;
+	float MaxY = MinY;
+	for(int Index = 1; Index < Selection.m_Count; ++Index)
+	{
+		MinX = std::min(MinX, (float)Selection.m_aTiles[Index].m_X);
+		MaxX = std::max(MaxX, (float)Selection.m_aTiles[Index].m_X);
+		MinY = std::min(MinY, (float)Selection.m_aTiles[Index].m_Y);
+		MaxY = std::max(MaxY, (float)Selection.m_aTiles[Index].m_Y);
+	}
+	const vec2 Contact = vec2(
+		std::clamp((float)Character.m_HookX, MinX * 32.0f, (MaxX + 1) * 32.0f),
+		std::clamp((float)Character.m_HookY, MinY * 32.0f, (MaxY + 1) * 32.0f));
+	const float CoreAlpha = std::min(0.42f, Alpha * 0.42f);
+	const float EdgeAlpha = std::max(0.10f, Alpha * 0.14f);
+	// 渐变半径对齐 HTML 设计稿：区域最长边 × 0.75（单砖 24、接缝 48 单位），
+	// 让"钩点聚焦"的比例与预览一致，而不是摊满整砖。
+	const float RegionW = (MaxX - MinX + 1.0f) * 32.0f;
+	const float RegionH = (MaxY - MinY + 1.0f) * 32.0f;
+	const float FalloffRadius = std::max(RegionW, RegionH) * 0.75f;
+	constexpr int SubQuads = 4;
+	constexpr float CellSize = 32.0f / SubQuads;
+	const auto FalloffAlpha = [&](vec2 Point) {
+		const float T = std::clamp(distance(Point, Contact) / FalloffRadius, 0.0f, 1.0f);
+		const float Smooth = T * T * (3.0f - 2.0f * T);
+		return std::max(EdgeAlpha, CoreAlpha + (EdgeAlpha - CoreAlpha) * Smooth);
+	};
+	// 纯色光晕版（用户选定）：不采样实体纹理——tex3d 数组采样与普通 2D 采样在
+	// 部分机器上均不可见（数组层 0 = 空砖），改回与"整砖覆色"相同的无纹理路径，
+	// 必然可见；加法混合 + 接触晕染衰减让所选颜色真正点亮砖块区域。
+	// 光晕与主体合并为单次无纹理批次（开启光晕也不增加绘制调用）。
+	const auto FillRect = [&](float X, float Y, float W, float H, const ColorRGBA &ColorTL, const ColorRGBA &ColorTR, const ColorRGBA &ColorBR, const ColorRGBA &ColorBL) {
+		// 顶点/槽位顺序为 TL, TR, BR, BL（QuadsDrawTLImpl）。
+		Graphics()->SetColor4(ColorTL, ColorTR, ColorBR, ColorBL);
+		IGraphics::CQuadItem Item(X, Y, W, H);
+		Graphics()->QuadsDrawTL(&Item, 1);
+	};
+	Graphics()->BlendAdditive();
+	Graphics()->TextureClear();
+	Graphics()->QuadsBegin();
+	if(g_Config.m_TcHookTileHighlightGlow)
+	{
+		// 外圈光晕：砖块外 14 单位按到砖块矩形的距离柔和衰减。
+		constexpr float GlowRange = 14.0f;
+		constexpr int GlowQuads = 8;
+		const float GlowBase = Alpha * 0.4f;
+		const float TileL = MinX * 32.0f;
+		const float TileT = MinY * 32.0f;
+		const float TileR = (MaxX + 1) * 32.0f;
+		const float TileB = (MaxY + 1) * 32.0f;
+		const float ExpW = (TileR - TileL) + GlowRange * 2.0f;
+		const float ExpH = (TileB - TileT) + GlowRange * 2.0f;
+		const auto GlowAlpha = [&](vec2 Point) {
+			const float DX = std::max(std::max(TileL - Point.x, Point.x - TileR), 0.0f);
+			const float DY = std::max(std::max(TileT - Point.y, Point.y - TileB), 0.0f);
+			const float T = std::clamp(std::sqrt(DX * DX + DY * DY) / GlowRange, 0.0f, 1.0f);
+			const float Smooth = T * T * (3.0f - 2.0f * T);
+			return GlowBase * (1.0f - Smooth);
+		};
+		for(int SubY = 0; SubY < GlowQuads; ++SubY)
+		{
+			for(int SubX = 0; SubX < GlowQuads; ++SubX)
+			{
+				const float CellX = TileL - GlowRange + SubX * ExpW / GlowQuads;
+				const float CellY = TileT - GlowRange + SubY * ExpH / GlowQuads;
+				const float CellW = ExpW / GlowQuads;
+				const float CellH = ExpH / GlowQuads;
+				FillRect(CellX, CellY, CellW, CellH,
+					Color.WithAlpha(GlowAlpha(vec2(CellX, CellY))),
+					Color.WithAlpha(GlowAlpha(vec2(CellX + CellW, CellY))),
+					Color.WithAlpha(GlowAlpha(vec2(CellX + CellW, CellY + CellH))),
+					Color.WithAlpha(GlowAlpha(vec2(CellX, CellY + CellH))));
+			}
+		}
+	}
+	for(int Index = 0; Index < Selection.m_Count; ++Index)
+	{
+		const auto Tile = Selection.m_aTiles[Index];
+		for(int SubY = 0; SubY < SubQuads; ++SubY)
+		{
+			for(int SubX = 0; SubX < SubQuads; ++SubX)
+			{
+				const float CellX = Tile.m_X * 32.0f + SubX * CellSize;
+				const float CellY = Tile.m_Y * 32.0f + SubY * CellSize;
+				// 接触晕染：钩点附近更亮，向外衰减为低强度底染（TL, TR, BR, BL）。
+				FillRect(CellX, CellY, CellSize, CellSize,
+					Color.WithAlpha(FalloffAlpha(vec2(CellX, CellY))),
+					Color.WithAlpha(FalloffAlpha(vec2(CellX + CellSize, CellY))),
+					Color.WithAlpha(FalloffAlpha(vec2(CellX + CellSize, CellY + CellSize))),
+					Color.WithAlpha(FalloffAlpha(vec2(CellX, CellY + CellSize))));
+			}
+		}
+		// 细边框：非共享边描出结构线（接缝处两块共用一条边，不叠加重复描线）。
+		const float BorderW = 1.2f;
+		const float BorderAlpha = Alpha * 0.85f;
+		const auto HasNeighbor = [&](int DX, int DY) {
+			for(int Other = 0; Other < Selection.m_Count; ++Other)
+				if(Selection.m_aTiles[Other].m_X == Tile.m_X + DX && Selection.m_aTiles[Other].m_Y == Tile.m_Y + DY)
+					return true;
+			return false;
+		};
+		const auto Edge = [&](float EX, float EY, float EW, float EH) {
+			Graphics()->SetColor4(
+				Color.WithAlpha(BorderAlpha), Color.WithAlpha(BorderAlpha),
+				Color.WithAlpha(BorderAlpha), Color.WithAlpha(BorderAlpha));
+			IGraphics::CQuadItem Item(EX, EY, EW, EH);
+			Graphics()->QuadsDrawTL(&Item, 1);
+		};
+		const float TileX = Tile.m_X * 32.0f;
+		const float TileY = Tile.m_Y * 32.0f;
+		if(!HasNeighbor(0, -1))
+			Edge(TileX, TileY, 32.0f, BorderW);
+		if(!HasNeighbor(0, 1))
+			Edge(TileX, TileY + 32.0f - BorderW, 32.0f, BorderW);
+		if(!HasNeighbor(-1, 0))
+			Edge(TileX, TileY + BorderW, BorderW, 32.0f - BorderW * 2.0f);
+		if(!HasNeighbor(1, 0))
+			Edge(TileX + 32.0f - BorderW, TileY + BorderW, BorderW, 32.0f - BorderW * 2.0f);
+	}
+	Graphics()->QuadsEnd();
+	Graphics()->BlendNormal();
+	Graphics()->SetColor(1, 1, 1, 1);
 }
 
 void CPlayers::RenderPlayer(

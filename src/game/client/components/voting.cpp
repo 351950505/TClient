@@ -12,6 +12,7 @@
 
 #include <game/client/components/scoreboard.h>
 #include <game/client/components/sounds.h>
+#include <game/client/components/tclient/modern_ui.h>
 #include <game/client/gameclient.h>
 #include <game/localization.h>
 
@@ -347,15 +348,21 @@ void CVoting::Render()
 	}
 
 	// TClient
-	if(g_Config.m_TcMiniVoteHud > 0)
+	if(g_Config.m_TcMiniVoteHud > 0 && !g_Config.m_TcModernVote)
 	{
 		GameClient()->m_TClient.RenderMiniVoteHud();
 		return;
 	}
 
-	CUIRect View = {0.0f, 60.0f, 120.0f, 54.0f};
-	View.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f), IGraphics::CORNER_R, 3.0f);
-	View.Margin(3.0f, &View);
+	const bool Modern = g_Config.m_TcModernVote != 0;
+	CUIRect View = {Modern ? 5.0f : 0.0f, 60.0f, Modern ? 140.0f : 120.0f, Modern ? 60.0f : 54.0f};
+	View.Draw(Modern ? TClientModernUi::Background(0.8f) : ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f), Modern ? IGraphics::CORNER_ALL : IGraphics::CORNER_R, Modern ? 5.0f : 3.0f);
+	if(Modern)
+	{
+		CUIRect Accent = {View.x, View.y + 5.0f, 1.5f, View.h - 10.0f};
+		Accent.Draw(TClientModernUi::Accent(View.x, View.y), IGraphics::CORNER_ALL, 0.75f);
+	}
+	View.Margin(Modern ? 6.0f : 3.0f, &View);
 
 	SLabelProperties Props;
 	Props.m_EllipsisAtEnd = true;
@@ -438,6 +445,23 @@ void CVoting::RenderVoteCounts(CUIRect View, float FontSize) const
 
 void CVoting::RenderBars(CUIRect Bars) const
 {
+	if(g_Config.m_TcModernVote)
+	{
+		Bars.Draw(ColorRGBA(1, 1, 1, 0.12f), IGraphics::CORNER_ALL, Bars.h / 2.0f);
+		const int Total = std::max(0, m_Total);
+		if(Total > 0)
+		{
+			const int Yes = std::clamp(m_Yes, 0, Total);
+			const int No = std::clamp(m_No, 0, Total - Yes);
+			CUIRect YesArea = {Bars.x, Bars.y, Bars.w * Yes / Total, Bars.h};
+			CUIRect NoArea = {Bars.x + Bars.w - Bars.w * No / Total, Bars.y, Bars.w * No / Total, Bars.h};
+			if(Yes > 0)
+				YesArea.Draw(ColorRGBA(0.25f, 0.85f, 0.5f, 0.95f), IGraphics::CORNER_NONE, 0.0f);
+			if(No > 0)
+				NoArea.Draw(ColorRGBA(0.95f, 0.3f, 0.35f, 0.95f), IGraphics::CORNER_NONE, 0.0f);
+		}
+		return;
+	}
 	Bars.Draw(ColorRGBA(0.8f, 0.8f, 0.8f, 0.5f), IGraphics::CORNER_ALL, Bars.h / 2.0f);
 
 	CUIRect Splitter;

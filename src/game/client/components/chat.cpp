@@ -3,8 +3,6 @@
 
 #include "chat.h"
 
-#include <game/client/components/tclient/pingwheel.h>
-
 #include <base/color.h>
 #include <base/io.h>
 #include <base/log.h>
@@ -28,6 +26,8 @@
 #include <game/client/components/skins.h>
 #include <game/client/components/sounds.h>
 #include <game/client/components/tclient/colored_parts.h>
+#include <game/client/components/tclient/modern_ui.h>
+#include <game/client/components/tclient/pingwheel.h>
 #include <game/client/gameclient.h>
 #include <game/localization.h>
 
@@ -126,6 +126,9 @@ void CChat::ClearLines()
 		Line.Reset(*this);
 	m_PrevScoreBoardShowed = false;
 	m_PrevShowChat = false;
+	m_ModernScroll = 0;
+	m_ModernHover = false;
+	m_ModernHoveredLine = -1;
 }
 
 void CChat::OnWindowResize()
@@ -256,6 +259,25 @@ void CChat::OnInit()
 
 bool CChat::OnInput(const IInput::CEvent &Event)
 {
+	if(g_Config.m_TcModernChat && m_ModernHover && (Event.m_Flags & IInput::FLAG_PRESS))
+	{
+		if(Event.m_Key == KEY_MOUSE_WHEEL_UP || Event.m_Key == KEY_MOUSE_WHEEL_DOWN)
+		{
+			m_ModernScroll = std::clamp(m_ModernScroll + (Event.m_Key == KEY_MOUSE_WHEEL_UP ? 2 : -2), 0, MAX_LINES - 1);
+			return true;
+		}
+		if(Event.m_Key == KEY_MOUSE_1 && m_ModernHoveredLine >= 0)
+		{
+			const CLine &Line = m_aLines[m_ModernHoveredLine];
+			if(!(Config()->m_ClStreamerMode && Line.m_ClientId == SERVER_MSG))
+			{
+				char aCopy[MAX_CHAT_LENGTH + 128];
+				str_format(aCopy, sizeof(aCopy), "%s%s%s", Line.m_aName, Line.m_aName[0] ? ": " : "", Line.m_aText);
+				Input()->SetClipboardText(aCopy);
+			}
+			return true;
+		}
+	}
 	if(m_Mode == MODE_NONE)
 		return false;
 
@@ -984,7 +1006,7 @@ void CChat::OnPrepareLines(float y)
 	float FontSize = this->FontSize();
 
 	const bool IsScoreBoardOpen = GameClient()->m_Scoreboard.IsActive() && (Graphics()->ScreenAspect() > 1.7f); // only assume scoreboard when screen ratio is widescreen(something around 16:9)
-	const bool ShowLargeArea = m_Show || (m_Mode != MODE_NONE && g_Config.m_ClShowChat == 1) || g_Config.m_ClShowChat == 2;
+	const bool ShowLargeArea = (g_Config.m_TcModernChat && m_ModernHover) || m_Show || (m_Mode != MODE_NONE && g_Config.m_ClShowChat == 1) || g_Config.m_ClShowChat == 2;
 	const bool ForceRecreate = IsScoreBoardOpen != m_PrevScoreBoardShowed || ShowLargeArea != m_PrevShowChat;
 	m_PrevScoreBoardShowed = IsScoreBoardOpen;
 	m_PrevShowChat = ShowLargeArea;
@@ -994,7 +1016,7 @@ void CChat::OnPrepareLines(float y)
 	float RealMsgPaddingY = MessagePaddingY();
 	float RealMsgPaddingTee = TeeSize + MESSAGE_TEE_PADDING_RIGHT;
 
-	if(g_Config.m_ClChatOld)
+	if(g_Config.m_ClChatOld && !g_Config.m_TcModernChat)
 	{
 		RealMsgPaddingX = 0;
 		RealMsgPaddingY = 0;
@@ -1110,7 +1132,7 @@ void CChat::OnPrepareLines(float y)
 
 			CTextCursor AppendCursor = MeasureCursor;
 			AppendCursor.m_LongestLineWidth = 0.0f;
-			if(!IsScoreBoardOpen && !g_Config.m_ClChatOld)
+			if(!IsScoreBoardOpen && (!g_Config.m_ClChatOld || g_Config.m_TcModernChat))
 			{
 				AppendCursor.m_StartX = MeasureCursor.m_X;
 				AppendCursor.m_LineWidth -= MeasureCursor.m_LongestLineWidth;
@@ -1148,8 +1170,8 @@ void CChat::OnPrepareLines(float y)
 
 		y -= Line.m_aYOffset[OffsetType];
 
-		// cut off if msgs waste too much space
-		if(y < HeightLimit)
+		// 展开现代聊天时准备全部历史布局，滚动到旧行也能直接复用。
+		if(y < HeightLimit && !(g_Config.m_TcModernChat && m_PrevShowChat))
 			break;
 
 		// the position the text was created
@@ -1228,11 +1250,12 @@ void CChat::OnPrepareLines(float y)
 			Color = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClMessageTeamColor));
 		else // regular message
 			Color = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_ClMessageColor));
+		Line.m_ModernBorder = Color;
 		TextRender()->TextColor(Color);
 
 		CTextCursor AppendCursor = LineCursor;
 		AppendCursor.m_LongestLineWidth = 0.0f;
-		if(!IsScoreBoardOpen && !g_Config.m_ClChatOld)
+		if(!IsScoreBoardOpen && (!g_Config.m_ClChatOld || g_Config.m_TcModernChat))
 		{
 			AppendCursor.m_StartX = LineCursor.m_X;
 			AppendCursor.m_LineWidth -= LineCursor.m_LongestLineWidth;
@@ -1284,10 +1307,10 @@ void CChat::OnPrepareLines(float y)
 			AppendCursor.m_vColorSplits.clear();
 		}
 
-		if(!g_Config.m_ClChatOld && (Line.m_aText[0] != '\0' || Line.m_aName[0] != '\0'))
+		if((!g_Config.m_ClChatOld || g_Config.m_TcModernChat) && (Line.m_aText[0] != '\0' || Line.m_aName[0] != '\0'))
 		{
 			float FullWidth = RealMsgPaddingX * 1.5f;
-			if(!IsScoreBoardOpen && !g_Config.m_ClChatOld)
+			if(!IsScoreBoardOpen && (!g_Config.m_ClChatOld || g_Config.m_TcModernChat))
 			{
 				FullWidth += LineCursor.m_LongestLineWidth + AppendCursor.m_LongestLineWidth;
 			}
@@ -1295,6 +1318,7 @@ void CChat::OnPrepareLines(float y)
 			{
 				FullWidth += std::max(LineCursor.m_LongestLineWidth, AppendCursor.m_LongestLineWidth);
 			}
+			Line.m_ModernWidth = FullWidth;
 			Graphics()->SetColor(1, 1, 1, 1);
 			Line.m_QuadContainerIndex = Graphics()->CreateRectQuadContainer(Begin, y, FullWidth, Line.m_aYOffset[OffsetType], MessageRounding(), IGraphics::CORNER_ALL);
 		}
@@ -1414,6 +1438,19 @@ void CChat::OnRender()
 		return;
 
 	y -= ScaledFontSize;
+	if(m_PrevModernChat != (g_Config.m_TcModernChat != 0))
+	{
+		m_PrevModernChat = g_Config.m_TcModernChat != 0;
+		RebuildChat();
+		m_ModernScroll = 0;
+	}
+	const vec2 Mouse = Ui()->MousePos();
+	const CUIRect Screen = *Ui()->Screen();
+	const vec2 ChatMouse((Mouse.x - Screen.x) * Width / Screen.w, (Mouse.y - Screen.y) * Height / Screen.h);
+	m_ModernHover = g_Config.m_TcModernChat && GameClient()->m_Menus.CanInteractWithChat() && !Ui()->IsPopupOpen() && ChatMouse.x >= 5.0f && ChatMouse.x <= 5.0f + g_Config.m_ClChatWidth && ChatMouse.y >= 50.0f && ChatMouse.y <= y;
+	m_ModernHoveredLine = -1;
+	if(!m_ModernHover && m_Mode == MODE_NONE && !m_Show)
+		m_ModernScroll = 0;
 
 	OnPrepareLines(y);
 
@@ -1426,15 +1463,76 @@ void CChat::OnRender()
 	float RealMsgPaddingX = MessagePaddingX();
 	float RealMsgPaddingY = MessagePaddingY();
 
-	if(g_Config.m_ClChatOld)
+	if(g_Config.m_ClChatOld && !g_Config.m_TcModernChat)
 	{
 		RealMsgPaddingX = 0;
 		RealMsgPaddingY = 0;
 	}
 
-	for(int i = 0; i < MAX_LINES; i++)
+	int AvailableLines = 0;
+	while(AvailableLines < MAX_LINES && m_aLines[(m_CurrentLine - AvailableLines + MAX_LINES) % MAX_LINES].m_Initialized)
+		++AvailableLines;
+	m_ModernScroll = std::clamp(m_ModernScroll, 0, std::max(0, AvailableLines - 1));
+	const int FirstLine = g_Config.m_TcModernChat && m_PrevShowChat ? m_ModernScroll : 0;
+
+	// 现代聊天卡片合并为单次批次：原来每条消息各发两次完整绘制批次，消息多时
+	// 每帧几十次管线提交；先收集再统一绘制，文字仍按原顺序画在卡片之上。
+	m_ModernHoveredLine = -1;
+	struct SChatCard
 	{
-		CLine &Line = m_aLines[((m_CurrentLine - i) + MAX_LINES) % MAX_LINES];
+		float m_Y;
+		float m_Blend;
+		float m_Width;
+		float m_Height;
+		int m_LineIndex;
+	};
+	SChatCard aCards[MAX_LINES];
+	int CardCount = 0;
+	if(g_Config.m_TcModernChat)
+	{
+		float ScanY = y;
+		for(int i = FirstLine; i < MAX_LINES; i++)
+		{
+			const int LineIndex = (m_CurrentLine - i + MAX_LINES) % MAX_LINES;
+			const CLine &Line = m_aLines[LineIndex];
+			if(!Line.m_Initialized)
+				break;
+			if(Now > Line.m_Time + 16 * time_freq() && !m_PrevShowChat)
+				break;
+			ScanY -= Line.m_aYOffset[OffsetType];
+			if(ScanY < HeightLimit && !(g_Config.m_TcModernChat && m_PrevShowChat))
+				break;
+			float CardBlend = Now > Line.m_Time + 14 * time_freq() && !m_PrevShowChat ? 1.0f - (Now - Line.m_Time - 14 * time_freq()) / (2.0f * time_freq()) : 1.0f;
+			CardBlend *= std::clamp((ScanY - HeightLimit) / 12.0f, 0.0f, 1.0f);
+			aCards[CardCount] = {ScanY, CardBlend, std::max(Line.m_ModernWidth, 10.0f), Line.m_aYOffset[OffsetType], LineIndex};
+			if(m_ModernHover && ChatMouse.x <= x + aCards[CardCount].m_Width && ChatMouse.y >= aCards[CardCount].m_Y && ChatMouse.y < aCards[CardCount].m_Y + aCards[CardCount].m_Height)
+				m_ModernHoveredLine = LineIndex;
+			++CardCount;
+		}
+		if(CardCount > 0)
+		{
+			Graphics()->TextureClear();
+			Graphics()->QuadsBegin();
+			for(int Card = 0; Card < CardCount; ++Card)
+			{
+				const SChatCard &Entry = aCards[Card];
+				const ColorRGBA BackgroundColor = TClientModernUi::Background(Entry.m_Blend * 0.65f);
+				Graphics()->DrawRectExt4(x, Entry.m_Y, Entry.m_Width, Entry.m_Height,
+					BackgroundColor, BackgroundColor, BackgroundColor, BackgroundColor,
+					MessageRounding(), IGraphics::CORNER_ALL);
+				const ColorRGBA BorderColor = m_aLines[Entry.m_LineIndex].m_ModernBorder.WithMultipliedAlpha(Entry.m_Blend);
+				Graphics()->DrawRectExt4(x, Entry.m_Y + 1.0f, 1.0f, std::max(0.0f, Entry.m_Height - 2.0f),
+					BorderColor, BorderColor, BorderColor, BorderColor,
+					0.5f, IGraphics::CORNER_ALL);
+			}
+			Graphics()->QuadsEnd();
+		}
+	}
+
+	for(int i = FirstLine; i < MAX_LINES; i++)
+	{
+		const int LineIndex = (m_CurrentLine - i + MAX_LINES) % MAX_LINES;
+		CLine &Line = m_aLines[LineIndex];
 		if(!Line.m_Initialized)
 			break;
 		if(Now > Line.m_Time + 16 * time_freq() && !m_PrevShowChat)
@@ -1447,9 +1545,11 @@ void CChat::OnRender()
 			break;
 
 		float Blend = Now > Line.m_Time + 14 * time_freq() && !m_PrevShowChat ? 1.0f - (Now - Line.m_Time - 14 * time_freq()) / (2.0f * time_freq()) : 1.0f;
+		if(g_Config.m_TcModernChat)
+			Blend *= std::clamp((y - HeightLimit) / 12.0f, 0.0f, 1.0f); // 卡片已在上方单批绘制，这里只保留文字/tee 的淡出
 
 		// Draw backgrounds for messages in one batch
-		if(!g_Config.m_ClChatOld)
+		if(!g_Config.m_ClChatOld && !g_Config.m_TcModernChat)
 		{
 			Graphics()->TextureClear();
 			if(Line.m_QuadContainerIndex != -1)
@@ -1461,7 +1561,7 @@ void CChat::OnRender()
 
 		if(Line.m_TextContainerIndex.Valid())
 		{
-			if(!g_Config.m_ClChatOld && Line.m_pManagedTeeRenderInfo != nullptr)
+			if((!g_Config.m_ClChatOld || g_Config.m_TcModernChat) && Line.m_pManagedTeeRenderInfo != nullptr)
 			{
 				CTeeRenderInfo &TeeRenderInfo = Line.m_pManagedTeeRenderInfo->TeeRenderInfo();
 				const int TeeSize = MessageTeeSize();

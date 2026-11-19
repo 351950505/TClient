@@ -4483,11 +4483,12 @@ void CGameClient::UpdateRenderedCharacters()
 			(m_Snap.m_aCharacters[i].m_Cur.m_HookState == HOOK_GRABBED ||
 				m_Snap.m_aCharacters[i].m_Cur.m_HookState == HOOK_FLYING))
 		{
-			vec2 Base;
-			const int Tick = Client()->PredGameTick(g_Config.m_ClDummy);
-			const float Intra = Client()->PredIntraGameTick(g_Config.m_ClDummy);
-			if(ReadFastInputPos(i, Tick, Intra, Tick, Base))
-				Pos = Base + (Pos - Base) * (g_Config.m_TcHookPullVisual / 100.0f);
+			// 锚定预测位置而不是输入档严格槽位：模式 0 的严格槽位在出钩/重预测
+			// 期间会间歇性读取失败，渲染位置在"缩放/不缩放"两档之间来回跳，
+			// 玩家感知为"出钩就卡"。预测位置每帧必然可用，缩放连续无抖动。
+			// tc_hook_pull_visual = 100 时整个块短路（原生），语义不变。
+			const vec2 PredPos = m_aClients[i].m_Predicted.m_Pos;
+			Pos = PredPos + (Pos - PredPos) * (g_Config.m_TcHookPullVisual / 100.0f);
 		}
 		m_aClients[i].m_RenderPos = Pos;
 		if(Predict() && i == m_Snap.m_LocalClientId)

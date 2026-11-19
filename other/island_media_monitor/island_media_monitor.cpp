@@ -1754,6 +1754,13 @@ struct SWatcherPauseTracker
 	}
 };
 
+static bool ResolveFallbackPlaying(bool Playing, bool LsPaused, bool LsStalled, bool WatcherValid, bool WatcherFrozen)
+{
+	if(LsPaused || LsStalled)
+		return false;
+	return WatcherValid ? !WatcherFrozen : Playing;
+}
+
 static std::atomic<uint32_t> g_WatcherFrozen{0};  // watcher 采样连续 ~3s 不前进 = 暂停（环回/LS 都不可用时的兜底，2026-11-18）
 static std::atomic<uint32_t> g_dwWatcherPid{0};   // 本 monitor 亲手拉起的 netease-watcher PID（0=没有）
 
@@ -2171,14 +2178,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 		}
 		else
 		{
-			if(g_LsHave && g_LsPaused)
-				Playing = false;
-			if(g_LsHave && g_LsLastProgressAt > 0.0 && (double)time(NULL) - g_LsLastProgressAt > 15.0)
-				Playing = false;
-			// 2026-11-18：环回/LS 都没有的机器上，watcher 冻结是唯一可用的暂停信号；
-			// 不加这条，外部暂停永远不被发现（见上面第 4) 层的注释）。
-			if(g_WatcherFrozen)
-				Playing = false;
+			const double WatcherAt = g_WatcherAt.load();
+			const double WatcherPosition = g_WatcherTimeMs.load();
+			const bool WatcherValid = std::isfinite(WatcherPosition) && WatcherPosition >= 0.0 &&
+				WatcherAt > 0.0 && NowEp >= WatcherAt && NowEp - WatcherAt < 5.0;
+			Playing = ResolveFallbackPlaying(Playing, g_LsHave && g_LsPaused,
+				g_LsHave && g_LsLastProgressAt > 0.0 && (double)time(NULL) - g_LsLastProgressAt > 15.0,
+				WatcherValid, g_WatcherFrozen.load() != 0);
 		}
 		if(Playing && g_NumMeters > 0)
 			ElapsedMs += (int64_t)DtMs;

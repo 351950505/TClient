@@ -547,6 +547,24 @@ TEST(ClientDrownBoard, NewRoundClearsJumpBaseline)
 	EXPECT_EQ(Tracker.Stats(1).m_Jumps, 0);
 }
 
+TEST(ClientDrownBoard, MissingCharacterClearsJumpBaseline)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, 2));
+	RunStats(Tracker, aTicks);
+	auto Missing = MakeStatTick();
+	Missing.m_HasCharacter = false;
+	FeedTick(Tracker, aTicks, 1, 1, Missing);
+	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, 8));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Jumps, 0);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, 9));
+	RunStats(Tracker, aTicks);
+	EXPECT_EQ(Tracker.Stats(1).m_Jumps, 1);
+}
+
 TEST(ClientDrownBoard, LocalTeamChangeRestartsEpisodesOnly)
 {
 	CTClientDrownBoard Tracker;

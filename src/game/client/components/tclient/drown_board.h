@@ -257,6 +257,7 @@ public:
 			{
 				Player.m_HookFrozenMateTicks = std::max(0, Player.m_HookFrozenMateTicks - ElapsedTicks);
 				Player.m_StatHasPrev = false;
+				Player.m_StatPrevJumpedTotal = -1;
 				continue;
 			}
 

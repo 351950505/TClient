@@ -140,6 +140,11 @@ static void TestHandlerRefCount()
 
 static void TestWatcherPauseTiming()
 {
+	Check(!ResolveFallbackPlaying(true, false, false, true, true), "watcher pause stops fallback playback");
+	Check(ResolveFallbackPlaying(false, false, false, true, false), "watcher resume restores fallback playback");
+	Check(!ResolveFallbackPlaying(false, false, false, false, false), "missing watcher preserves prior paused state");
+	Check(!ResolveFallbackPlaying(true, true, false, true, false), "LS pause retains priority over watcher");
+	Check(!ResolveFallbackPlaying(true, false, true, true, false), "LS stalled position retains priority over watcher");
 	SWatcherPauseTracker Tracker;
 	bool PausedWhilePlaying = false;
 	for(int i = 0; i < 200; ++i)

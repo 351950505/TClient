@@ -4786,6 +4786,11 @@ vec2 CGameClient::GetFreezePos(int ClientId)
 		if(Mode == 14 && Local)
 			return TcBclAncientSamplePos(ClientId, GetAncientInputAmount(ClientId), true);
 		ApplyFastInputOffset(ClientId, Tick, Intra);
+		if(Mode == 16)
+		{
+			TcNovaPilotSamplePos(ClientId, Tick, Intra, Pos);
+			return Pos;
+		}
 		const int Ticks = (Mode == 12 || Local) ? GetFastInputPredictionTicks() : GetFastInputOtherTicks();
 		ReadFastInputPos(ClientId, Tick, Intra, Client()->PredGameTick(g_Config.m_ClDummy) + Ticks, Pos);
 		return Pos;
@@ -5534,8 +5539,7 @@ float CGameClient::TcNovaPilotTickOffset() const
 void CGameClient::TcNovaPilotSamplePos(int ClientId, int Tick, float Intra, vec2 &Pos) const
 {
 	const auto &Data = m_aClients[ClientId];
-	const vec2 Base = mix(Data.m_PrevPredicted.m_Pos, Data.m_Predicted.m_Pos, Client()->PredIntraGameTick(g_Config.m_ClDummy));
-	Pos = Base;
+	const vec2 Base = Pos;
 	if(!SnapshotTryGetPredPos(ClientId, Tick, Intra, Pos))
 		return;
 	if(g_Config.m_TcNovapilotCurved && Tick >= 2)

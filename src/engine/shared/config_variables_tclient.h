@@ -175,11 +175,11 @@ MACRO_CONFIG_INT(TcLightAncientInputOthersAmount, tc_light_ancient_input_others_
 // 2026-11-19 对齐 Nova 独有三件（bc_inputs=13 的 JuKKi、隐藏 mode 16 的 NovaPilot、bc_auto_margin）。
 // 公式与常数依据：modes-15对拍-20261119.md §9（BestClient-Light 公开源码 + Nova 机器码复核）。
 // Fast (JuKKi)：量千分之一 tick（Nova bc_jukki_input_amount def=1000 max=5000）；他人恒 +1 整 tick。
-MACRO_CONFIG_INT(TcJukkiInput, tc_jukki_input, 0, 0, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Fast (JuKKi) 预测量（千分之一 tick，0~5000）")
+MACRO_CONFIG_INT(TcJukkiInput, tc_jukki_input, 1000, 0, 5000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Fast (JuKKi) 预测量（千分之一 tick，0~5000）")
 MACRO_CONFIG_INT(TcJukkiInputOthers, tc_jukki_input_others, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Fast (JuKKi) 应用到其他玩家（开启=他人恒 +1 整 tick）")
 // NovaPilot：量百分之一 tick（Nova nc_novapilot_input_amount def=100 max=300）；三个增强开关 def=1 对齐 Nova。
 MACRO_CONFIG_INT(TcNovapilotInput, tc_novapilot_input, 100, 0, 300, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 预测量（百分之一 tick，0~300）")
-MACRO_CONFIG_INT(TcNovapilotInputOthers, tc_novapilot_input_others, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 应用到其他玩家")
+MACRO_CONFIG_INT(TcNovapilotInputOthers, tc_novapilot_input_others, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 应用到其他玩家")
 MACRO_CONFIG_INT(TcNovapilotJitter, tc_novapilot_jitter, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 自适应 jitter（16 槽延迟样本 population 方差，clamp(0.05·std, 0, 0.35) tick，样本 >4 生效）")
 MACRO_CONFIG_INT(TcNovapilotCurved, tc_novapilot_curved, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 渲染 Catmull-Rom 插值（相邻预测段 >256 单元回退线性）")
 MACRO_CONFIG_INT(TcNovapilotClamp, tc_novapilot_clamp, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "NovaPilot 钳制：拒绝游戏层/前景层冻结地块内、非有限或距基准 >300 / <=1 单元的预测位置")

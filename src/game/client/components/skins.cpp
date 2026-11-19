@@ -1010,6 +1010,8 @@ void CSkins::CSkinLoadJob::Run()
 CSkins::CSkinDownloadJob::CSkinDownloadJob(CSkins *pSkins, const char *pName) :
 	CAbstractSkinLoadJob(pSkins, pName)
 {
+	// 主线程构造时快照，工作线程只读副本（2026-11-20 审查 P3-8）。
+	m_BaseUrl = g_Config.m_ClDownloadCommunitySkins != 0 ? g_Config.m_ClSkinCommunityDownloadUrl : g_Config.m_ClSkinDownloadUrl;
 }
 
 bool CSkins::CSkinDownloadJob::Abort()
@@ -1030,7 +1032,7 @@ bool CSkins::CSkinDownloadJob::Abort()
 
 void CSkins::CSkinDownloadJob::Run()
 {
-	const char *pBaseUrl = g_Config.m_ClDownloadCommunitySkins != 0 ? g_Config.m_ClSkinCommunityDownloadUrl : g_Config.m_ClSkinDownloadUrl;
+	const char *pBaseUrl = m_BaseUrl.c_str();
 
 	char aEscapedName[256];
 	EscapeUrl(aEscapedName, m_aName);

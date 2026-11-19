@@ -2145,9 +2145,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 			const double WatcherPosition = g_WatcherTimeMs.load();
 			const bool WatcherValid = std::isfinite(WatcherPosition) && WatcherPosition >= 0.0 &&
 				WatcherAt > 0.0 && NowEp >= WatcherAt && NowEp - WatcherAt < 5.0;
-			Playing = ResolveFallbackPlaying(Playing, g_LsHave && g_LsPaused,
-				g_LsHave && g_LsLastProgressAt > 0.0 && (double)time(NULL) - g_LsLastProgressAt > 15.0,
-				WatcherValid, g_WatcherFrozen.load() != 0);
+			// P3-4a（2026-11-20 审查）：曲终时网易云撤掉窗口标题（上方标题消失
+			// 路径已置 Playing=false 并钉尾进度）。watcher 分不清"暂停"和"曲终"，
+			// 判冻需要 ~3s，该窗口内不允许兜底把 Playing 翻回 true——标题撤除
+			// 本身就是曲终信号；正常播放/暂停时 HaveWnd=true，兜底不受影响。
+			if(!HaveWnd && wszCurTitle[0] != 0)
+				Playing = false;
+			else
+				Playing = ResolveFallbackPlaying(Playing, g_LsHave && g_LsPaused,
+					g_LsHave && g_LsLastProgressAt > 0.0 && (double)time(NULL) - g_LsLastProgressAt > 15.0,
+					WatcherValid, g_WatcherFrozen.load() != 0);
 		}
 		if(Playing && g_NumMeters > 0)
 			ElapsedMs += (int64_t)DtMs;

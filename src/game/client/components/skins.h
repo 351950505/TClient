@@ -15,6 +15,7 @@
 #include <list>
 #include <optional>
 #include <set>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -292,6 +293,9 @@ private:
 	private:
 		CLock m_Lock;
 		std::shared_ptr<IHttpRequest> m_pGetRequest GUARDED_BY(m_Lock);
+		// 审计修复（2026-11-20 P3-8）：构造时（主线程）快照下载 URL——Run 在
+		// 工作线程直读 g_Config 字符串会与主线程 ExecuteLine 写回并发撕裂。
+		std::string m_BaseUrl;
 	};
 
 	std::unordered_map<std::string_view, std::unique_ptr<CSkinContainer>> m_Skins;

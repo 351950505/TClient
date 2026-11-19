@@ -97,6 +97,10 @@ static bool IsFlagSet(int32_t Flags, int n)
 bool CMenus::DoLine_KeyReader(CUIRect &View, CButtonContainer &ReaderButton, CButtonContainer &ClearButton, const char *pName, const char *pCommand)
 {
 	CBindSlot Bind(0, 0);
+	// 审计修复（2026-11-20 P3-5）：同一命令可能绑了多把键。旧扫描只保留
+	// "最后一个 modifier 档里最先命中的那把"，改绑后其余旧键残留仍会触发
+	// 同一命令；现在全部记下，改绑/清除时一并处理。
+	std::vector<CBindSlot> vOldBinds;
 	for(int Mod = 0; Mod < KeyModifier::COMBINATION_COUNT; Mod++)
 	{
 		for(int KeyId = 0; KeyId < KEY_LAST; KeyId++)
@@ -107,9 +111,12 @@ bool CMenus::DoLine_KeyReader(CUIRect &View, CButtonContainer &ReaderButton, CBu
 
 			if(str_comp(pBind, pCommand) == 0)
 			{
-				Bind.m_Key = KeyId;
-				Bind.m_ModifierMask = Mod;
-				break;
+				if(vOldBinds.empty())
+				{
+					Bind.m_Key = KeyId;
+					Bind.m_ModifierMask = Mod;
+				}
+				vOldBinds.push_back(CBindSlot(KeyId, Mod));
 			}
 		}
 	}
@@ -127,8 +134,8 @@ bool CMenus::DoLine_KeyReader(CUIRect &View, CButtonContainer &ReaderButton, CBu
 	const auto Result = GameClient()->m_KeyBinder.DoKeyReader(&ReaderButton, &ClearButton, &KeyButton, Bind, false);
 	if(Result.m_Bind != Bind)
 	{
-		if(Bind.m_Key != KEY_UNKNOWN)
-			GameClient()->m_Binds.Bind(Bind.m_Key, "", false, Bind.m_ModifierMask);
+		for(const CBindSlot &Old : vOldBinds)
+			GameClient()->m_Binds.Bind(Old.m_Key, "", false, Old.m_ModifierMask);
 		if(Result.m_Bind.m_Key != KEY_UNKNOWN)
 			GameClient()->m_Binds.Bind(Result.m_Bind.m_Key, pCommand, false, Result.m_Bind.m_ModifierMask);
 		return true;

@@ -826,17 +826,25 @@ IGraphics::CTextureHandle CHud::EnsureCapsuleMask(int W, int H, float Rounding, 
 	const SCapsuleMaskKey Key{W, H, (int)std::lround(R * 100.0f), Sheen};
 	auto It = m_aCapsuleMaskCache.find(Key);
 	if(It != m_aCapsuleMaskCache.end())
-		return It->second;
+		return It->second.m_Tex;
 
-	// 长会话防积累：冲掉重来，代价只是下一帧重烤一次
+	// 长会话防积累：冲掉重来，代价只是下一帧重烤一次。
+	// 本 tick 内插入的条目不冲（见 hud.h SCapsuleMaskEntry 注释），其余照常
+	// 卸载——跨 tick 的句柄其绘制早已提交，按既有行为失效是安全的。
 	if(m_aCapsuleMaskCache.size() > 64)
 	{
-		for(auto &Entry : m_aCapsuleMaskCache)
+		const int CurTick = Client()->GameTick(g_Config.m_ClDummy);
+		for(auto It = m_aCapsuleMaskCache.begin(); It != m_aCapsuleMaskCache.end();)
 		{
-			if(Entry.second.IsValid())
-				Graphics()->UnloadTexture(&Entry.second);
+			if(It->second.m_Tick != CurTick)
+			{
+				if(It->second.m_Tex.IsValid())
+					Graphics()->UnloadTexture(&It->second.m_Tex);
+				It = m_aCapsuleMaskCache.erase(It);
+			}
+			else
+				++It;
 		}
-		m_aCapsuleMaskCache.clear();
 	}
 
 	CImageInfo Image;
@@ -894,7 +902,7 @@ IGraphics::CTextureHandle CHud::EnsureCapsuleMask(int W, int H, float Rounding, 
 
 	const IGraphics::CTextureHandle Tex = Graphics()->LoadTextureRawMove(Image, 0, "capsule-shape");
 	if(Tex.IsValid())
-		m_aCapsuleMaskCache[Key] = Tex;
+		m_aCapsuleMaskCache[Key] = {Tex, Client()->GameTick(g_Config.m_ClDummy)};
 	return Tex;
 }
 
@@ -1758,9 +1766,13 @@ void CHud::RenderPlayerState(const int ClientId)
 		const int FreezeEnd = GameClient()->m_aClients[ClientId].m_FreezeEnd;
 		const bool Permanent = pCharacter->m_DeepFrozen || pCharacter->m_LiveFrozen || FreezeEnd < 0;
 		const int TickSpeed = std::max(1, Client()->GameTickSpeed());
-		const float Duration = std::max(1.0f, (float)(pCharacter->m_FreezeEnd - pCharacter->m_FreezeStart));
-		const float Remaining = pCharacter->m_IsInFreeze && FreezeEnd > 0 ? Duration :
-										    std::max(0.0f, FreezeEnd - Client()->GameTick(g_Config.m_ClDummy) - Client()->IntraGameTick(g_Config.m_ClDummy));
+		// 倒计时一律以快照 FreezeEnd 为准，本地/远程同源（2026-11-20 审查 P3-2）：
+		// 旧写法冻结中取"总时长"当剩余，秒数钉死在总时长且进度恒 1。
+		const float Remaining = std::max(0.0f, FreezeEnd - Client()->GameTick(g_Config.m_ClDummy) - Client()->IntraGameTick(g_Config.m_ClDummy));
+		// 总时长只做进度分母：m_FreezeStart 快照未提供（-1/0）时退化为满条。
+		const float Duration = pCharacter->m_FreezeStart > 0 && pCharacter->m_FreezeEnd > pCharacter->m_FreezeStart ?
+			(float)(pCharacter->m_FreezeEnd - pCharacter->m_FreezeStart) :
+			std::max(1.0f, Remaining);
 		if(Permanent || (FreezeEnd > 0 && Remaining > 0.0f))
 		{
 			const float TimerY = ModernGuns ? HudOffsetY + 51.0f : y + 18.0f;

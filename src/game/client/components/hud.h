@@ -119,7 +119,15 @@ class CHud : public CComponent
 			return m_Sheen < Other.m_Sheen;
 		}
 	};
-	std::map<SCapsuleMaskKey, IGraphics::CTextureHandle> m_aCapsuleMaskCache;
+	// 缓存值带插入 tick：全量冲刷时跳过本 tick 插入的条目——调用方同帧先后取
+	// Plate/Sheen 两张（hud.cpp EnsureCapsuleMask 调用点），若第二张触发冲刷，
+	// 第一张刚返回、尚未上屏，卸载即悬垂句柄（2026-11-20 审查 P3-1）。
+	struct SCapsuleMaskEntry
+	{
+		IGraphics::CTextureHandle m_Tex;
+		int m_Tick;
+	};
+	std::map<SCapsuleMaskKey, SCapsuleMaskEntry> m_aCapsuleMaskCache;
 	IGraphics::CTextureHandle EnsureCapsuleMask(int W, int H, float Rounding, bool Sheen);
 	void RenderDummyActions();
 	void RenderMovementInformation();

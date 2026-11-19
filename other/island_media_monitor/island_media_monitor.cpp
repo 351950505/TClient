@@ -48,6 +48,9 @@ static const wchar_t SHM_NAME[] = L"Local\\TClientIslandMedia";
 // 独立映射而不是加进 IslandMediaShared：旧 monitor 没有该映射时客户端自动退回单次 memcpy，
 // 新 monitor 配旧客户端也只是多建一个没人读的映射，双方都不因 SHM_VERSION 不符而断链。
 static const wchar_t SHM_SEQ_NAME[] = L"Local\\TClientIslandMediaSeq";
+// P2-2（2026-11-20 审查）：网易云"进程已退出"信号。独立小映射而不是扩
+// IslandMediaShared——旧客户端不开它也不受影响，新旧版本结构尺寸永不冲突。
+static const wchar_t SHM_GONE_NAME[] = L"Local\\TClientIslandMediaGone";
 // 客户端判定实例僵死后先 SetEvent 让 monitor 走正常退出；2 秒不退才 TerminateProcess。
 static const wchar_t STOP_EVENT_NAME[] = L"Local\\TClientIslandMonitorStop";
 static const wchar_t MUTEX_NAME[] = L"Local\\TClientIslandMonitorMutex";
@@ -81,6 +84,8 @@ static HANDLE g_hShm = NULL;
 static IslandMediaShared *g_pShm = nullptr;
 static HANDLE g_hSeq = NULL;
 static volatile LONG64 *g_pSeq = nullptr;
+static HANDLE g_hGone = NULL;
+static volatile uint32_t *g_pGone = nullptr;
 static HANDLE g_hStop = NULL; // 客户端判死时置位，主循环看到后走正常清理退出
 
 // ---------- 进程 PID 收集（cloudmusic.exe） ----------
@@ -2012,6 +2017,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 			*g_pSeq = 0;
 	}
 
+	// 可选"网易云已退出"信号映射：建不出来就退化为无该信号，客户端维持旧行为。
+	g_hGone = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(uint32_t), SHM_GONE_NAME);
+	if(g_hGone)
+		g_pGone = (volatile uint32_t *)MapViewOfFile(g_hGone, FILE_MAP_WRITE, 0, 0, sizeof(uint32_t));
+
 	// WASAPI 初始化（失败无所谓，没有电表就当一直“播放”）
 	IMMDeviceEnumerator *pDevEnum = nullptr;
 	CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void **)&pDevEnum);
@@ -2225,6 +2235,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 		// Liveness 用"是否有当前歌"判断，而不是"这一刻窗口在不在" —— 歌放完标题消失时岛应保持。
 		const bool HasTrack = HaveWnd ? (wszLastTitle[0] != 0) : (wszCurTitle[0] != 0);
 		g_pShm->Playing = Playing && HasTrack ? 1 : 0;
+		// P2-2：窗口标题消失且 cloudmusic.exe 进程也没了 = 网易云真的退出
+		//（歌放完只撤标题、进程还在，不置位）。单字段对齐写，无需 seqlock。
+		if(g_pGone)
+			*g_pGone = (!HaveWnd && g_NumPids == 0) ? 1u : 0u;
 		g_pShm->ElapsedMs = ElapsedMs;
 		g_pShm->LastUpdate = (double)time(NULL);
 		g_pShm->Peak = g_deafPeak;
@@ -2317,6 +2331,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 	{
 		CloseHandle(g_hSeq);
 		g_hSeq = NULL;
+	}
+	if(g_pGone)
+	{
+		UnmapViewOfFile((LPCVOID)g_pGone);
+		g_pGone = nullptr;
+	}
+	if(g_hGone)
+	{
+		CloseHandle(g_hGone);
+		g_hGone = NULL;
 	}
 	if(g_hStop)
 	{

@@ -165,6 +165,9 @@ public:
 		// "会话已停止/播放器已退出"分开：SMTC 在播放器退出后仍会挂着上一条
 		// 元数据，只看标题非空的话岛会永远停在那首死歌上。
 		bool m_Paused = false;
+		// monitor 侧确认网易云进程已退出（2026-11-20 审查 P2-2）：标题是滞留的
+		// 旧歌，此时不能再并入"暂停"，要让收岛判据成立。旧 monitor 无此信号。
+		bool m_PlayerGone = false;
 	};
 
 	// ---------------- SMTC worker (Windows) ----------------
@@ -1099,6 +1102,9 @@ public:
 	// 可选 seqlock 序号（monitor 新版本才建）；没有时退回单次整块 memcpy。
 	HANDLE m_hIslandSeq = nullptr;
 	volatile LONG64 *m_pIslandSeq = nullptr;
+	// 可选"网易云已退出"信号（monitor 新版本才建）；没有时视为未退出。
+	HANDLE m_hIslandGone = nullptr;
+	volatile uint32_t *m_pIslandGone = nullptr;
 	int64_t m_NextShmTry = 0;
 	int64_t m_NextMonitorTry = 0;
 
@@ -1118,6 +1124,16 @@ public:
 		{
 			UnmapViewOfFile(m_pIslandView);
 			m_pIslandView = nullptr;
+		}
+		if(m_pIslandGone)
+		{
+			UnmapViewOfFile((LPCVOID)m_pIslandGone);
+			m_pIslandGone = nullptr;
+		}
+		if(m_hIslandGone)
+		{
+			CloseHandle(m_hIslandGone);
+			m_hIslandGone = nullptr;
 		}
 		if(m_hIslandMap)
 		{
@@ -1149,11 +1165,25 @@ public:
 				hSeq = nullptr;
 			}
 		}
+		// 可选"网易云已退出"信号映射：monitor 新版本才建，缺失视为未退出。
+		HANDLE hGone = OpenFileMappingW(FILE_MAP_READ, FALSE, L"Local\\TClientIslandMediaGone");
+		volatile uint32_t *pGone = nullptr;
+		if(hGone)
+		{
+			pGone = (volatile uint32_t *)MapViewOfFile(hGone, FILE_MAP_READ, 0, 0, sizeof(uint32_t));
+			if(!pGone)
+			{
+				CloseHandle(hGone);
+				hGone = nullptr;
+			}
+		}
 		CloseIslandMap();
 		m_hIslandMap = hMap;
 		m_pIslandView = pView;
 		m_hIslandSeq = hSeq;
 		m_pIslandSeq = pSeq;
+		m_hIslandGone = hGone;
+		m_pIslandGone = pGone;
 	}
 
 	// monitor 发布时序号先奇后偶；读到奇数或前后不一致就重试，避免多字段更新读到撕裂组合。
@@ -1392,6 +1422,7 @@ public:
 		// LS pauseStatus 明确暂停时强制暂停：双保险，monitor 旧版未重启或电表误判时兜底。
 		Out.m_Playing = Snap.Playing != 0 && Snap.Paused == 0;
 		Out.m_Paused = Snap.Paused != 0;
+		Out.m_PlayerGone = m_pIslandGone != nullptr && *m_pIslandGone != 0u;
 
 		// 位置来源（v7.1）：
 		//  1) watcher（WatcherMs，最权威）：netease-watcher hook 的网易云内部真实位置，
@@ -3161,7 +3192,16 @@ public:
 			{
 				Track.m_Playing = Monitor.m_Playing;
 				if(!Track.m_Playing)
-					Track.m_Paused = true; // monitor 判停即"有歌没在播"，不要当成停止把岛收起
+				{
+					// monitor 判停即"有歌没在播"，不要当成停止把岛收起；
+					// 但网易云进程已真退出（monitor 侧 PlayerGone，2026-11-20 审查
+					// P2-2）时标题只是滞留旧歌，不再并入暂停——让 :3615 的
+					// Stopped 判据成立，岛正常收起（对齐 :3607 注释自述需求）。
+					if(Monitor.m_PlayerGone)
+						Track.m_Paused = false;
+					else
+						Track.m_Paused = true;
+				}
 			}
 			return Track;
 		}

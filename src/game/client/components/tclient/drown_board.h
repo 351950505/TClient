@@ -268,12 +268,25 @@ public:
 		}
 		if(m_WaitForUnfrozen)
 		{
+			// 等待期照常推进衰减，解锁首 tick 才不会拿旧钩冻/旧冻结基线虚记。
+			for(SPlayer &Player : m_aPlayers)
+			{
+				Player.m_HookFrozenMateTicks = std::max(0, Player.m_HookFrozenMateTicks - ElapsedTicks);
+				Player.m_StatHasPrev = false;
+				Player.m_StatPrevJumpedTotal = -1;
+			}
 			// K 消息可能先于重生快照；仍在服的成员全部重新出现并解冻前，
-			// 不把旧冻结状态计作新一轮。永久离线的成员不再阻塞计数。
+			// 不把旧冻结状态计作新一轮。永久离线的成员不再阻塞计数；
+			// 转观战/转队的成员同样不阻塞——Observe 换队或清槽后 m_Team 已
+			// 不是本轮队伍，永远等不到"重新出现并解冻"（2026-11-20 审查 P2-1）。
 			for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
 			{
 				const SDrownStatTick &Now = pTicks[ClientId];
-				if(m_aEpisodeMembers[ClientId] && Now.m_Active && (!Now.m_HasCharacter || Now.m_Frozen))
+				if(!m_aEpisodeMembers[ClientId] || !Now.m_Active)
+					continue;
+				if(m_aPlayers[ClientId].m_Team != m_StatsLocalTeam)
+					continue;
+				if(!Now.m_HasCharacter || Now.m_Frozen)
 					return;
 			}
 			m_WaitForUnfrozen = false;

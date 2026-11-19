@@ -33,6 +33,9 @@ public:
 		const char *m_pTitle;
 		CBind m_Bind;
 		CLineInput m_LineInput;
+		// 未绑定行的独立输入缓冲（2026-11-20 审查 P3-7）：此前渲染层多行共用
+		// 一个 static，任一行输入会让所有未绑定行同显同改。
+		char m_aTempName[BINDCHAT_MAX_NAME] = {0};
 	};
 	static std::vector<std::pair<const char *, std::vector<CBindDefault>>> BIND_DEFAULTS;
 

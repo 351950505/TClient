@@ -430,17 +430,29 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 	for(int Tab = 0; Tab < NUMBER_OF_TCLIENT_TABS; ++Tab)
 	{
 		if(IsFlagSet(g_Config.m_TcTClientSettingsTabs, Tab))
-		{
 			TabCount--;
-			if(s_CurCustomTab == Tab)
-				s_CurCustomTab++;
-		}
 	}
 	// 全部隐藏等于把自己锁在 TClient 设置外面(隐藏列表就在这排标签里):
 	// 整排都藏时忽略掩码,强制全显
 	const bool IgnoreTabMask = TabCount <= 0;
 	if(IgnoreTabMask)
 		TabCount = NUMBER_OF_TCLIENT_TABS;
+	// 选中的页签被隐藏时跳到下一个可见页签（环绕）。原先只 ++ 的写法在隐藏
+	// 最后一个页签（或级联全藏）时会把选中项推出数组末端，正文永久空白
+	//（2026-11-20 审查 P3-6）。
+	if(!IgnoreTabMask && (s_CurCustomTab < 0 || s_CurCustomTab >= NUMBER_OF_TCLIENT_TABS ||
+		IsFlagSet(g_Config.m_TcTClientSettingsTabs, s_CurCustomTab)))
+	{
+		for(int Off = 1; Off <= NUMBER_OF_TCLIENT_TABS; ++Off)
+		{
+			const int Tab = ((s_CurCustomTab < 0 ? 0 : s_CurCustomTab) + Off) % NUMBER_OF_TCLIENT_TABS;
+			if(!IsFlagSet(g_Config.m_TcTClientSettingsTabs, Tab))
+			{
+				s_CurCustomTab = Tab;
+				break;
+			}
+		}
+	}
 
 	MainView.HSplitTop(LineSize, &TabBar, &MainView);
 	const float TabWidth = TabBar.w / TabCount;
@@ -2285,10 +2297,11 @@ void CMenus::RenderSettingsTClientChatBinds(CUIRect MainView)
 		Column.HSplitTop(MarginSmall, nullptr, &Column);
 		Column.HSplitTop(LineSize, &Button, &Column);
 		CBindChat::CBind *pOldBind = GameClient()->m_BindChat.GetBind(BindDefault.m_Bind.m_aCommand);
-		static char s_aTempName[BINDCHAT_MAX_NAME] = "";
+		// 未绑定行各自持有缓冲（2026-11-20 审查 P3-7）：此前全部默认行共用一个
+		// static，任一行输入会让所有未绑定行同显同改。
 		char *pName;
 		if(pOldBind == nullptr)
-			pName = s_aTempName;
+			pName = BindDefault.m_aTempName;
 		else
 			pName = pOldBind->m_aName;
 		if(DoEditBoxWithLabel(&BindDefault.m_LineInput, &Button, TCLocalize(BindDefault.m_pTitle), BindDefault.m_Bind.m_aName, pName, BINDCHAT_MAX_NAME) && BindDefault.m_LineInput.IsActive())
@@ -2299,7 +2312,7 @@ void CMenus::RenderSettingsTClientChatBinds(CUIRect MainView)
 				str_copy(BindNew.m_aName, pName);
 				GameClient()->m_BindChat.RemoveBind(pName); // Prevent duplicates
 				GameClient()->m_BindChat.AddBind(BindNew);
-				s_aTempName[0] = '\0';
+				BindDefault.m_aTempName[0] = '\0';
 			}
 			if(pOldBind && pName[0] == '\0')
 			{

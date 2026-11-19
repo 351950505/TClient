@@ -678,9 +678,8 @@ void CHud::RenderTextInfo()
 		Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_aCursorOffset[CurWeapon], m_Width / 2.0f, m_Height / 2.0f, 0.36f, 0.36f);
 	}
 	// render team in freeze text and last notify
-	const bool ShowFrozenText = g_Config.m_TcShowFrozenText > 0;
 	const bool ShowFrozenHud = g_Config.m_TcShowFrozenHud > 0;
-	if((ShowFrozenText || ShowFrozenHud || g_Config.m_TcNotifyWhenLast) && GameClient()->m_GameInfo.m_EntitiesDDRace)
+	if((ShowFrozenHud || g_Config.m_TcNotifyWhenLast) && GameClient()->m_GameInfo.m_EntitiesDDRace)
 	{
 		STcFrozenHudFrame<MAX_CLIENTS> Frame;
 		const int TeamClientId = TcFrozenHudTeamClientId(GameClient()->m_Snap.m_LocalClientId,
@@ -712,7 +711,7 @@ void CHud::RenderTextInfo()
 				TextRender()->TextColor(TextRender()->DefaultTextColor());
 			}
 		}
-		if(ShowFrozenText || ShowFrozenHud)
+		if(ShowFrozenHud)
 		{
 			m_FrozenHudPending = true;
 			m_FrozenHudTeam = LocalTeamID;
@@ -904,6 +903,8 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 	if(!m_FrozenHudPending)
 		return;
 	m_FrozenHudPending = false;
+	if(!g_Config.m_TcShowFrozenHud)
+		return;
 	const int LocalTeamID = m_FrozenHudTeam;
 	const auto &Counts = m_FrozenHudFrame.m_Counts;
 	const int NumInTeam = Counts.m_NumInTeam;
@@ -920,31 +921,8 @@ void CHud::RenderFrozenHud(const CUIRect &Island)
 	TextRender()->TextColor(m_FrozenHudTextColor);
 	TextRender()->TextOutlineColor(m_FrozenHudTextOutlineColor);
 
-	// Show freeze text
-	char aBuf[64] = {};
 	const int NumShown = g_Config.m_TcShowFrozenText == 1 ? Counts.m_KnownUnfrozen : Counts.m_Frozen;
-	if(Counts.m_Unknown > 0)
-		str_format(aBuf, sizeof(aBuf), "%d / %d  ? %d", NumShown, NumInTeam, Counts.m_Unknown);
-	else
-		str_format(aBuf, sizeof(aBuf), "%d / %d", NumShown, NumInTeam);
-
 	const bool CapsuleShown = ShowFrozenHud && !GameClient()->m_Scoreboard.IsActive() && !(LocalTeamID == 0 && g_Config.m_TcFrozenHudTeamOnly);
-
-	// Text-only mode is for users who disabled the tee capsule. Do not fall
-	// back to the plain count when the capsule is merely suppressed (scoreboard
-	// open, team-only without a team): the floating "alive / total" text would
-	// linger over the scoreboard even though the HUD is supposed to be hidden.
-	if(ShowFrozenText && !ShowFrozenHud && !GameClient()->m_Scoreboard.IsActive())
-	{
-		// Text-only mode keeps the plain centered float (no capsule to merge into).
-		float TextHeight = 0.0f;
-		STextSizeProperties TextSizeProps;
-		TextSizeProps.m_pHeight = &TextHeight;
-		const float TextWidth = TextRender()->TextWidth(10.0f, aBuf, -1, -1.0f, 0, TextSizeProps);
-		CUIRect CountRow = {m_Width / 2.0f - TextWidth / 2.0f, 12.0f, TextWidth, TextHeight};
-		CountRow.y = FrozenHudRowY(CountRow, Island, m_Height);
-		TextRender()->Text(CountRow.x, CountRow.y, 10.0f, aBuf);
-	}
 
 	if(CapsuleShown && (NumDrawn > 0 || ShowFrozenText))
 	{

@@ -512,7 +512,41 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 {
 	CUIRect Label, Left, Right, Row;
+
+	// 与设置页同款：滚动容器 + 分节底色，Modern UI 与地图图层两个分节区分开。
+	static CScrollRegion s_ScrollRegion;
+	CScrollRegionParams ScrollParams;
+	ScrollParams.m_ScrollUnit = 60.0f;
+	ScrollParams.m_ForceShowScrollbar = true;
+	ScrollParams.m_ScrollbarMargin = 5.0f;
+	s_ScrollRegion.Begin(&MainView, &ScrollParams);
+
+	static std::vector<CUIRect> s_SectionBoxes;
+	const float ScrollOffset = MainView.y;
+	static float s_PrevScrollOffset = 0.0f;
+
+	MainView.VSplitRight(5.0f, &MainView, nullptr); // Padding for scrollbar
+	MainView.VSplitLeft(5.0f, nullptr, &MainView);
+
+	for(CUIRect &Section : s_SectionBoxes)
+	{
+		float Padding = MarginBetweenViews * 0.6666f;
+		Section.w += Padding;
+		Section.h += Padding;
+		Section.x -= Padding * 0.5f;
+		Section.y -= Padding * 0.5f;
+		Section.y -= s_PrevScrollOffset - ScrollOffset;
+		Section.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f), IGraphics::CORNER_ALL, 10.0f);
+	}
+	s_PrevScrollOffset = ScrollOffset;
+	s_SectionBoxes.clear();
+
 	MainView.Margin(Margin, &MainView);
+
+	// ***** 分节一：Modern UI 原有内容 ***** //
+	CUIRect ModernBox = MainView;
+	s_SectionBoxes.push_back(ModernBox);
+	MainView.HSplitTop(Margin, nullptr, &MainView);
 	MainView.HSplitTop(HeadlineHeight, &Label, &MainView);
 	Ui()->DoLabel(&Label, TCLocalize("Modern UI"), HeadlineFontSize, TEXTALIGN_ML);
 	MainView.HSplitTop(LineSize * 2, &Label, &MainView);
@@ -543,8 +577,11 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	Right.HSplitTop(LineSize, &Row, &Right);
 	Ui()->DoScrollbarOption(&g_Config.m_TcUiBackgroundOpacity, &g_Config.m_TcUiBackgroundOpacity, &Row, TCLocalize("Panel background opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 
-	// 地图图层（自 ME 设置页迁入，含全部钩砖高亮开关与颜色控件）。
+	// ***** 分节二：地图图层（自 ME 设置页迁入，含全部钩砖高亮开关与颜色控件）***** //
 	MainView.HSplitTop(MarginBetweenSections, nullptr, &MainView);
+	CUIRect MapLayersBox = MainView;
+	s_SectionBoxes.push_back(MapLayersBox);
+	MainView.HSplitTop(Margin, nullptr, &MainView);
 	MainView.HSplitTop(HeadlineHeight, &Label, &MainView);
 	Ui()->DoLabel(&Label, TCLocalize("Map Layers"), HeadlineFontSize, TEXTALIGN_ML);
 	MainView.HSplitTop(MarginSmall, nullptr, &MainView);
@@ -610,6 +647,10 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	}
 	MainView.HSplitTop(LineSize * 2, &Label, &MainView);
 	Ui()->DoLabel(&Label, TCLocalize("Tile highlight, landing preview and frozen-tee tint are independent toggles."), EditBoxFontSize, TEXTALIGN_TL);
+
+	CUIRect EndPad{MainView.x, MainView.y, MainView.w, 5.0f};
+	s_ScrollRegion.AddRect(EndPad);
+	s_ScrollRegion.End();
 }
 
 void CMenus::RenderSettingsTClientGetAssets(CUIRect MainView)

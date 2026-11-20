@@ -536,6 +536,23 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernVote, TCLocalize("Modern Vote"), &g_Config.m_TcModernVote, &Column, LineSize);
 	Column.HSplitTop(LineSize * 2, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("Hover chat with the menu open to scroll history. Click a message to copy it."), EditBoxFontSize, TEXTALIGN_TL);
+	const char *apStyles[] = {TCLocalize("Solid color"), TCLocalize("Static gradient"), TCLocalize("Animated gradient"), TCLocalize("RGB color cycle")};
+	static CUi::SDropDownState s_StyleState;
+	static CScrollRegion s_StyleScroll;
+	s_StyleState.m_SelectionPopupContext.m_pScrollRegion = &s_StyleScroll;
+	Column.HSplitTop(LineSize, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Accent style"), EditBoxFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	g_Config.m_TcUiAccentMode = Ui()->DoDropDown(&Row, g_Config.m_TcUiAccentMode, apStyles, std::size(apStyles), s_StyleState);
+	static CButtonContainer s_First, s_Second;
+	DoLine_ColorPicker(&s_First, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("First accent color"), &g_Config.m_TcUiAccent, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent)), false);
+	DoLine_ColorPicker(&s_Second, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Second accent color"), &g_Config.m_TcUiAccent2, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent2)), false);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentAngle, &g_Config.m_TcUiAccentAngle, &Row, TCLocalize("Gradient angle"), 0, 360, &CUi::ms_LinearScrollbarScale, 0, "°");
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentSpeed, &g_Config.m_TcUiAccentSpeed, &Row, TCLocalize("Accent animation speed"), 1, 200);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiBackgroundOpacity, &g_Config.m_TcUiBackgroundOpacity, &Row, TCLocalize("Panel background opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 	// ***** 左列 · 地图图层 ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
 	Column.HSplitTop(HeadlineHeight, &Label, &Column);
@@ -608,30 +625,8 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	Column.HSplitTop(LineSize * 2, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("Tile highlight, landing preview and frozen-tee tint are independent toggles."), EditBoxFontSize, TEXTALIGN_TL);
 
-	// ***** 右列 · 强调色 ***** //
-	Column = Right;
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Accent"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
-	const char *apStyles[] = {TCLocalize("Solid color"), TCLocalize("Static gradient"), TCLocalize("Animated gradient"), TCLocalize("RGB color cycle")};
-	static CUi::SDropDownState s_StyleState;
-	static CScrollRegion s_StyleScroll;
-	s_StyleState.m_SelectionPopupContext.m_pScrollRegion = &s_StyleScroll;
-	Column.HSplitTop(LineSize, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Accent style"), EditBoxFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(LineSize, &Row, &Column);
-	g_Config.m_TcUiAccentMode = Ui()->DoDropDown(&Row, g_Config.m_TcUiAccentMode, apStyles, std::size(apStyles), s_StyleState);
-	static CButtonContainer s_First, s_Second;
-	DoLine_ColorPicker(&s_First, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("First accent color"), &g_Config.m_TcUiAccent, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent)), false);
-	DoLine_ColorPicker(&s_Second, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Second accent color"), &g_Config.m_TcUiAccent2, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent2)), false);
-	Column.HSplitTop(LineSize, &Row, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentAngle, &g_Config.m_TcUiAccentAngle, &Row, TCLocalize("Gradient angle"), 0, 360, &CUi::ms_LinearScrollbarScale, 0, "°");
-	Column.HSplitTop(LineSize, &Row, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentSpeed, &g_Config.m_TcUiAccentSpeed, &Row, TCLocalize("Accent animation speed"), 1, 200);
-	Column.HSplitTop(LineSize, &Row, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_TcUiBackgroundOpacity, &g_Config.m_TcUiBackgroundOpacity, &Row, TCLocalize("Panel background opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
-
 	// ***** 右列 · 冻结卡锤/卡钩高亮（自 ME 设置页迁入）***** //
+	Column = Right;
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
 	Column.HSplitTop(HeadlineHeight, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("Frozen hammer/hook highlight"), HeadlineFontSize, TEXTALIGN_ML);

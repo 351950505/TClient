@@ -56,11 +56,11 @@ class CTClientDrownBoard
 		int m_StatPrevJumpedTotal = -1;
 		int m_HookFrozenMateTicks = 0; // >0：最近 SAVE_WINDOW_TICKS tick 内钩住过冻结队友
 		int m_HookFrozenMateId = -1;
-		// 救援待确认（2026-11-21 用户口径）：解冻瞬间收集 25 tick 内钩住过它的
-		// 本队成员；被救者 1 秒内进入活的状态（自己出钩或明显移动）才给钩手 +1，
-		// 自然解冻不虚记。
+		// 救援待确认（2026-11-21 用户口径）：解冻只是第一阶段，被救的 tee 要
+		// 恢复行动（自己出钩/被钩/明显移动）才算“活”；锤/激光击打可跳过恢复期。
+		// 确认不设时限，死亡/再次冻结/角色消失/轮次重置才作废——覆盖“钩住吊在
+		// 平台上等自然解冻”的救援手法。
 		unsigned long long m_PendingRescuers = 0;
-		int m_PendingSaveTicks = 0;
 		float m_PendingSaveX = 0.0f;
 		float m_PendingSaveY = 0.0f;
 		bool m_LastCounted = false; // 本轮“坚持”已计数
@@ -219,6 +219,7 @@ public:
 			return;
 		if(m_aPlayers[ClientId].m_Deaths < std::numeric_limits<int>::max())
 			++m_aPlayers[ClientId].m_Deaths;
+		m_aPlayers[ClientId].m_PendingRescuers = 0; // 死亡：救援确认作废
 		if(m_AledEpisodeDone && m_aEpisodeMembers[ClientId])
 			m_aEpisodeDeaths[ClientId] = true;
 	}
@@ -284,7 +285,6 @@ public:
 				Player.m_StatHasPrev = false;
 				Player.m_StatPrevJumpedTotal = -1;
 				Player.m_PendingRescuers = 0; // 旧轮次的救援待确认一并作废
-				Player.m_PendingSaveTicks = 0;
 			}
 			// K 消息可能先于重生快照；仍在服的成员全部重新出现并解冻前，
 			// 不把旧冻结状态计作新一轮。永久离线的成员不再阻塞计数；
@@ -307,8 +307,11 @@ public:
 
 		const float HookHitRadius2 = HOOK_HIT_RADIUS * HOOK_HIT_RADIUS;
 
-	// 1) 救援归因（解冻 tick）：收集 25 tick 窗口内钩住过该冻结 tee 的本队成员
-	// 到被救者的待确认集；真正计数在被救者「进入活的状态」时（见第 2 段）。
+	// 1) 救援归因（解冻 tick）：解冻瞬间 25 tick 窗口内钩住过它的本队成员
+	// 记入待确认集；真正计数在被救者「进入活的状态」时（见第 2 段，不设时限）
+	// （2026-11-21 用户口径：把 tee 从冻结状态救活就算一次，锤/激光击打可让
+	// 被救者跳过恢复期立刻行动，同样落入触发条件）。覆盖：拉出冻结砖、钩住
+	// 吊到平台上等自然解冻、空中反复拉活、锤救、钩拽加速融化。
 	for(int VictimId = 0; VictimId < MAX_CLIENTS; ++VictimId)
 	{
 		SPlayer &Victim = m_aPlayers[VictimId];
@@ -330,7 +333,6 @@ public:
 		if(Mask)
 		{
 			Victim.m_PendingRescuers = Mask;
-			Victim.m_PendingSaveTicks = SERVER_TICK_SPEED; // 1 秒确认期
 			Victim.m_PendingSaveX = VictimTick.m_X;
 			Victim.m_PendingSaveY = VictimTick.m_Y;
 		}
@@ -347,8 +349,7 @@ public:
 				Player.m_HookFrozenMateTicks = std::max(0, Player.m_HookFrozenMateTicks - ElapsedTicks);
 				Player.m_StatHasPrev = false;
 				Player.m_StatPrevJumpedTotal = -1;
-				Player.m_PendingRescuers = 0; // 离线/转观战时放弃待确认的救援
-				Player.m_PendingSaveTicks = 0;
+				Player.m_PendingRescuers = 0; // 角色消失/离线：救援确认作废
 				continue;
 			}
 
@@ -388,19 +389,17 @@ public:
 			else
 				Player.m_TicksAlive += std::min(ElapsedTicks, std::numeric_limits<int>::max() - Player.m_TicksAlive);
 
-			// 救援确认：解冻后 1 秒内自己出钩或明显移动（≥半砖）= 进入活的状态，
-			// 待确认集里的钩手各 +1；超时、再次冻结或离开则放弃。
-			if(Player.m_PendingSaveTicks > 0)
+			// 救援确认：待确认的被救者进入活的状态（自己出钩、被钩或累计移动
+			// ≥半砖——锤/激光击打会让它立刻恢复行动自然落入触发），钩手各 +1；
+			// 再次冻结或死亡（由 FeedDeath 清）则作废。
+			if(Player.m_PendingRescuers != 0)
 			{
-				Player.m_PendingSaveTicks = std::max(0, Player.m_PendingSaveTicks - ElapsedTicks);
 				const float PendingDX = Now.m_X - Player.m_PendingSaveX;
 				const float PendingDY = Now.m_Y - Player.m_PendingSaveY;
-				const bool EnteredAlive = Now.m_HookState == HOOK_FLYING || PendingDX * PendingDX + PendingDY * PendingDY >= 16.0f * 16.0f;
-				if(Now.m_Frozen || Player.m_PendingSaveTicks == 0)
-				{
+				const bool EnteredAlive = Now.m_HookState == HOOK_FLYING || Now.m_HookState == HOOK_GRABBED ||
+					PendingDX * PendingDX + PendingDY * PendingDY >= 16.0f * 16.0f;
+				if(Now.m_Frozen)
 					Player.m_PendingRescuers = 0;
-					Player.m_PendingSaveTicks = 0;
-				}
 				else if(EnteredAlive)
 				{
 					for(int RescuerId = 0; RescuerId < MAX_CLIENTS; ++RescuerId)
@@ -412,7 +411,6 @@ public:
 							++Rescuer.m_Saves;
 					}
 					Player.m_PendingRescuers = 0;
-					Player.m_PendingSaveTicks = 0;
 				}
 			}
 
@@ -518,7 +516,6 @@ private:
 		Player.m_HookFrozenMateTicks = 0;
 		Player.m_HookFrozenMateId = -1;
 		Player.m_PendingRescuers = 0;
-		Player.m_PendingSaveTicks = 0;
 		Player.m_StatPrevJumpedTotal = -1;
 		Player.m_LastCounted = false;
 	}

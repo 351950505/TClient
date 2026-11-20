@@ -352,7 +352,7 @@ static constexpr const char *NET_LINES = R"({"lrc":{"lyric":"[00:01.00]Net lyric
 static constexpr const char *DETAIL_FOUND = R"({"songs":[{"album":{"picUrl":"https://cover.invalid/detail.png"}}]})";
 static constexpr const char *QQ_FOUND = R"({"code":0,"data":{"song":{"list":[{"songmid":"midA","songname":"TrackA","albumname":"Album","interval":120,"singer":[{"name":"Artist"}]}]}}})";
 static constexpr const char *QQ_LINES = R"({"code":0,"lyric":"[00:01.00]QQ lyric\n[00:03.00]next"})";
-static constexpr const char *LRC_LINES = R"([{"syncedLyrics":"[00:01.00]lrclib lyric\n[00:03.00]next"}])";
+static constexpr const char *LRC_LINES = R"([{"trackName":"TrackA","artistName":"Artist","duration":120,"syncedLyrics":"[00:01.00]lrclib lyric\n[00:03.00]next"}])";
 
 static CMusic::STrack Track(const char *pTitle = "TrackA", const char *pServiceId = "netease-title")
 {
@@ -954,7 +954,7 @@ int main()
 	Tests.Group("lrclib terminal failures and array/object response formats", [&] {
 		for(const auto &Failure : FAILURES)
 			Tests.Case(Failure.m_pName, [&] { TestLrclibFailure(Failure); });
-		for(const char *pBody : {LRC_LINES, R"({"syncedLyrics":"[00:01.00]lrclib lyric"})", R"([null,{}, {"plainLyrics":"untimed"}, {"syncedLyrics":"[00:01.00]lrclib lyric"}])"})
+		for(const char *pBody : {LRC_LINES, R"({"syncedLyrics":"[00:01.00]lrclib lyric"})", R"([null,{}, {"plainLyrics":"untimed"}, {"trackName":"TrackA","artistName":"Artist","duration":120,"syncedLyrics":"[00:01.00]lrclib lyric"}])"})
 			Tests.Case("synced lyric format", [&] {
 				CFixture Fixture;
 				Prepare(Fixture, EStage::LRCLIB);
@@ -1009,6 +1009,44 @@ int main()
 			Last(QQ_LYRIC)->Complete(QQ_LINES);
 			CheckReady(Fixture, "QQ lyric");
 			Check(Count(QQ_SEARCH) == 1 && Count(QQ_LYRIC) == 1 && Count(LRCLIB) == 0, "successful QQ chain created extra requests");
+		});
+	});
+	Tests.Group("duration-anchored matching for cloud-disk fallback", [&] {
+		Tests.Case("unified scoring gates on duration when both sides know it", [&] {
+			const auto Score = [](int64_t WantMs, int64_t CandMs) {
+				return CMusic::TcScoreSongMatch("TrackA", "Artist", "", WantMs, "TrackA", "Artist", "", CandMs);
+			};
+			const int NoSignal = Score(0, 0);
+			Check(Score(120000, 120000) > NoSignal, "matching duration did not add confidence");
+			Check(Score(120000, 0) == NoSignal && Score(0, 120000) == NoSignal, "a missing duration shifted the score");
+			Check(Score(120000, 121000) >= CMusic::TC_MATCH_ACCEPT_SCORE, "same song within rounding drift was rejected");
+			Check(Score(120000, 124000) < Score(120000, 121000), "a closer duration did not outrank a drifted one");
+			Check(Score(120000, 190000) < CMusic::TC_MATCH_ACCEPT_SCORE, "a version ten seconds off still matched");
+			Check(Score(120000, 180000) < CMusic::TC_MATCH_ACCEPT_SCORE, "a version a minute off still matched");
+		});
+		Tests.Case("lrclib array candidates are scored instead of taking the first synced hit", [&] {
+			const char *pBody = R"([{"trackName":"TrackA","artistName":"Artist","duration":190,"syncedLyrics":"[00:01.00]wrong version"},{"trackName":"TrackA","artistName":"Artist","duration":120,"syncedLyrics":"[00:01.00]right version"}])";
+			json_value *pRoot = json_parse(pBody, strlen(pBody));
+			Check(pRoot != nullptr && pRoot != &json_value_none, "fixture JSON failed to parse");
+			Check(std::string(CMusic::TcPickLrclibSynced(pRoot, "TrackA", "Artist", "", 120000)).find("right version") != std::string::npos, "lrclib picked the wrong-duration version");
+			json_value_free(pRoot);
+			const char *pUnrelated = R"([{"trackName":"Other","artistName":"Someone","duration":120,"syncedLyrics":"[00:01.00]other song"}])";
+			json_value *pWrong = json_parse(pUnrelated, strlen(pUnrelated));
+			Check(pWrong != nullptr && pWrong != &json_value_none, "fixture JSON failed to parse");
+			Check(CMusic::TcPickLrclibSynced(pWrong, "TrackA", "Artist", "", 120000)[0] == '\0', "an unrelated lrclib entry was accepted");
+			json_value_free(pWrong);
+		});
+		Tests.Case("cloud-disk song seeds the fallback duration and QQ picks the same-length version", [&] {
+			CFixture Fixture;
+			Tick(Fixture); // starts the NetEase search
+			Last(NET_SEARCH)->Complete(R"({"result":{"songs":[]}})"); // cloud-disk song is not in the library
+			Tick(Fixture); // search settles, QQ search starts
+			auto &Meta = Fixture.Music().m_NeteaseData.at(Fixture.Music().m_ActiveKey);
+			Check(Meta.m_DurationMs == 120000, "playing duration was not seeded for fallback scoring");
+			Check(!Meta.m_Resolved && Meta.m_TriedLyric && Count(QQ_SEARCH) == 1, "empty NetEase search did not hand over to QQ");
+			Last(QQ_SEARCH)->Complete(R"({"code":0,"data":{"song":{"list":[{"songmid":"midWrong","songname":"TrackA","albumname":"","interval":200,"singer":[{"name":"Artist"}]},{"songmid":"midRight","songname":"TrackA","albumname":"","interval":120,"singer":[{"name":"Artist"}]}]}}})");
+			Tick(Fixture);
+			Check(Last(QQ_LYRIC)->m_Url.find("songmid=midRight") != std::string::npos, "QQ fallback ignored the duration anchor");
 		});
 	});
 	Tests.Group("real YRC priority and LRC degradation", [&] {

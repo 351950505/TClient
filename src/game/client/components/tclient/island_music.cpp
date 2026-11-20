@@ -1547,6 +1547,13 @@ public:
 	{
 		ELyricsState m_State = ELyricsState::NOTFOUND;
 		std::vector<SLyricLine> m_vLines;
+		// Track identity for ParseLrclibResponse: parsing runs on a worker
+		// thread, so ProcessRequest freezes these before enqueueing instead of
+		// letting the parser touch render-thread state.
+		std::string m_Title;
+		std::string m_Artist;
+		std::string m_Album;
+		int64_t m_DurationMs = 0;
 	};
 
 	static constexpr int64_t LYRICS_MAX_BYTES = 4 * 1024 * 1024;
@@ -1915,6 +1922,11 @@ public:
 		if(!m_pRequestJob)
 		{
 			m_pRequestJob = std::make_shared<CResponseJob<SCacheEntry>>(m_pRequest, ParseLrclibResponse);
+			// Freeze the identity at enqueue time; the parser runs on a worker.
+			m_pRequestJob->m_Result.m_Title = m_LyricsIdentity.m_Title;
+			m_pRequestJob->m_Result.m_Artist = m_LyricsIdentity.m_Artist;
+			m_pRequestJob->m_Result.m_Album = m_LyricsIdentity.m_Album;
+			m_pRequestJob->m_Result.m_DurationMs = m_LyricsIdentity.m_DurationMs;
 			m_pEngine->AddJob(m_pRequestJob);
 			return;
 		}
@@ -1926,6 +1938,39 @@ public:
 		const std::string FinishedKey = std::move(m_RequestKey);
 		m_RequestKey.clear();
 		StoreLrclibResult(FinishedKey, pFinished->m_Result);
+	}
+
+	// lrclib /api/search 数组候选走统一评分：歌名/歌手/专辑/曲长(云盘歌只能靠
+	// "时间一样"认歌)都达标才采信，否则宁可没有歌词也不串别的版本的词。
+	// 独立成函数供离线夹具直接喂 JSON 验证。
+	static const char *TcPickLrclibSynced(const json_value *pRoot, const std::string &WantTitle, const std::string &WantArtist, const std::string &WantAlbum, int64_t WantDurationMs)
+	{
+		const char *pBestText = "";
+		int BestScore = -1000000;
+		for(int i = 0; i < json_array_length(pRoot); ++i)
+		{
+			const json_value *pItem = json_array_get(pRoot, i);
+			if(pItem == nullptr || pItem->type != json_object)
+				continue;
+			const json_value *pSyncedValue = json_object_get(pItem, "syncedLyrics");
+			if(pSyncedValue == nullptr || pSyncedValue->type != json_string || pSyncedValue->u.string.ptr[0] == '\0')
+				continue;
+			const json_value *pName = json_object_get(pItem, "trackName");
+			const json_value *pArtist = json_object_get(pItem, "artistName");
+			const json_value *pAlbum = json_object_get(pItem, "albumName");
+			const json_value *pDur = json_object_get(pItem, "duration");
+			const int Score = TcScoreSongMatch(WantTitle, WantArtist, WantAlbum, WantDurationMs,
+				pName != nullptr && pName->type == json_string ? pName->u.string.ptr : "",
+				pArtist != nullptr && pArtist->type == json_string ? pArtist->u.string.ptr : "",
+				pAlbum != nullptr && pAlbum->type == json_string ? pAlbum->u.string.ptr : "",
+				pDur != nullptr && pDur->type == json_integer ? pDur->u.integer * 1000 : 0);
+			if(Score > BestScore)
+			{
+				BestScore = Score;
+				pBestText = pSyncedValue->u.string.ptr;
+			}
+		}
+		return BestScore >= TC_MATCH_ACCEPT_SCORE ? pBestText : "";
 	}
 
 	static void ParseLrclibResponse(const std::shared_ptr<IHttpRequest> &pFinished, SCacheEntry &Entry)
@@ -1943,24 +1988,15 @@ public:
 			if(pRoot != nullptr && pRoot != &json_value_none)
 			{
 				// /api/search returns a JSON array of candidate entries; /api/get
-				// returns a single object. Pick the best entry that actually has
-				// synced lyrics (fall back to plain lyrics are not used here).
+				// returns a single object. Array candidates are scored with the
+				// unified matcher (title/artist/album/duration) so the lyrics come
+				// from the version whose length actually matches the playing track;
+				// the old "first entry with synced lyrics" could pick another
+				// version and desync the whole line timing. /api/get already
+				// matched server-side, so its object is accepted without scoring.
 				const char *pSyncedText = "";
 				if(pRoot->type == json_array)
-				{
-					for(int i = 0; i < json_array_length(pRoot); ++i)
-					{
-						const json_value *pItem = json_array_get(pRoot, i);
-						if(pItem == nullptr || pItem->type != json_object)
-							continue;
-						const json_value *pSyncedValue = json_object_get(pItem, "syncedLyrics");
-						if(pSyncedValue != nullptr && pSyncedValue->type == json_string && pSyncedValue->u.string.ptr[0] != '\0')
-						{
-							pSyncedText = pSyncedValue->u.string.ptr;
-							break;
-						}
-					}
-				}
+					pSyncedText = TcPickLrclibSynced(pRoot, Entry.m_Title, Entry.m_Artist, Entry.m_Album, Entry.m_DurationMs);
 				else if(pRoot->type == json_object)
 				{
 					const json_value *pSyncedValue = json_object_get(pRoot, "syncedLyrics");
@@ -2204,7 +2240,8 @@ public:
 			EscapeUrl(aEscT, Meta.m_Title.c_str());
 			EscapeUrl(aEscA, Meta.m_Artist.c_str());
 			str_format(aUrl, sizeof(aUrl),
-				"https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&n=3&w=%s%%20%s", aEscT, aEscA);
+				// n=10:候选要够评分挑"时间一样"的版本,n=3 池子太小经常漏掉正确版本
+				"https://c.y.qq.com/soso/fcgi-bin/client_search_cp?format=json&n=10&w=%s%%20%s", aEscT, aEscA);
 		}
 		else
 		{
@@ -2270,6 +2307,13 @@ public:
 		// Keep search/ranking metadata even when the title-monitor identity has
 		// no album. Filling it is not a reason to invalidate an in-flight key.
 		if(!Track.m_Album.empty()) Meta.m_Album = Track.m_Album;
+		// 曲库搜不到的歌(典型:云盘上传)网易云侧永远 resolve 不了,Meta 曲长一直是
+		// 0,后续 QQ/酷狗/lrclib 的"曲长一致"评分就没有输入。用 SMTC/monitor 的曲长
+		// 补种;已 resolve(拿到曲库时长)不再覆盖,切歌瞬间的旧值残留按 2.5s 阈值在
+		// 真曲长落定后自动纠正。
+		if(!Meta.m_Resolved && Track.m_DurationMs > 0 &&
+			(Meta.m_DurationMs <= 0 || std::llabs((long long)(Track.m_DurationMs - Meta.m_DurationMs)) > 2500))
+			Meta.m_DurationMs = Track.m_DurationMs;
 		// v6: 单字段原子回传曲长给 monitor（seek 重锚把 Fraction 换算成秒用）。
 		// 必须只写这一个字段——整结构回写会与 monitor 50ms 一次的 SHM 刷新竞争、覆盖它的数据。
 		if(m_pIslandView && Meta.m_DurationMs > 0)
@@ -2611,12 +2655,18 @@ public:
 				Score -= 200;
 		}
 
+		// 曲长是"云盘歌搜不到"这类弱元数据场景的身份锚点(用户口径:拿时间一样的歌)。
+		// ±2.5s 内视为同一首加分;2.5s~6s 按差距递增扣分;>6s 重罚——以前最多扣 300,
+		// 时长差 30 秒的 Live/翻唱版凭歌名子串+同歌手也能过 700 阈值,串词就是这么来的。
 		if(WantDurationMs > 0 && DurationMs > 0)
 		{
-			int64_t DurDiff = std::llabs((long long)(DurationMs - WantDurationMs)) / 10;
-			if(DurDiff > 300)
-				DurDiff = 300;
-			Score -= (int)DurDiff;
+			const int64_t DurDiffMs = std::llabs((long long)(DurationMs - WantDurationMs));
+			if(DurDiffMs <= 2500)
+				Score += 300;
+			else if(DurDiffMs <= 6000)
+				Score -= (int)(DurDiffMs / 10);
+			else
+				Score -= 1200;
 		}
 		return Score;
 	}

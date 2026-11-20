@@ -239,6 +239,13 @@ int CSound::Init()
 	m_MaxFrames = std::max(m_MaxFrames, 1024u * 2u); // make the buffer bigger just in case
 #endif
 	m_pMixBuffer = (int *)calloc(m_MaxFrames * 2, sizeof(int));
+	// Keep audio disabled if the mixing buffer cannot be allocated.
+	if(!m_pMixBuffer)
+	{
+		log_error("sound", "failed to allocate mix buffer for %u frames", m_MaxFrames);
+		m_SoundEnabled = false;
+		return -1;
+	}
 
 	m_SoundEnabled = true;
 	UpdateVolume();

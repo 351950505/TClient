@@ -333,7 +333,8 @@ void CBindWheel::ConfigSaveCallback(IConfigManager *pConfigManager, void *pUserD
 
 	for(CBind &Bind : pThis->m_vBinds)
 	{
-		char aBuf[BINDWHEEL_MAX_CMD * 2] = "";
+		// [TClient] 审计修复（2026-11-20 P3）：缓冲按 name+command 满转义 sizing
+		char aBuf[BINDWHEEL_MAX_CMD * 2 + BINDWHEEL_MAX_NAME * 2 + 64] = "";
 		char *pEnd = aBuf + sizeof(aBuf);
 		char *pDst;
 		str_append(aBuf, "add_bindwheel \"");

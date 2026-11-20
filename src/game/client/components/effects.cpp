@@ -219,7 +219,8 @@ void CEffects::PlayerDeath(vec2 Pos, int ClientId, float Alpha)
 {
 	ColorRGBA BloodColor(1.0f, 1.0f, 1.0f);
 
-	if(ClientId >= 0)
+	// [TClient] 审计修复（2026-11-20 P3，上游同款）：ClientId 来自网络死亡事件，补上界
+	if(ClientId >= 0 && ClientId < MAX_CLIENTS)
 	{
 		// Use m_RenderInfo.m_CustomColoredSkin instead of m_UseCustomColor
 		// m_UseCustomColor says if the player's skin has a custom color (value sent from the client side)

@@ -310,6 +310,13 @@ GfxOpenGLMessageCallback(GLenum Source,
 }
 #endif
 
+bool CCommandProcessorFragment_OpenGL::GetPresentedImageSize(uint32_t &Width, uint32_t &Height)
+{
+	Width = m_CanvasWidth;
+	Height = m_CanvasHeight;
+	return Width > 0 && Height > 0;
+}
+
 bool CCommandProcessorFragment_OpenGL::GetPresentedImageData(uint32_t &Width, uint32_t &Height, CImageInfo::EImageFormat &Format, std::vector<uint8_t> &vDstData)
 {
 	if(m_CanvasWidth == 0 || m_CanvasHeight == 0)
@@ -326,7 +333,8 @@ bool CCommandProcessorFragment_OpenGL::GetPresentedImageData(uint32_t &Width, ui
 		GLint Alignment;
 		glGetIntegerv(GL_PACK_ALIGNMENT, &Alignment);
 		glPixelStorei(GL_PACK_ALIGNMENT, 1);
-		glReadPixels(m_ViewportX, m_ViewportY, m_CanvasWidth, m_CanvasHeight, GL_RGBA, GL_UNSIGNED_BYTE, vDstData.data());
+		// The canvas includes the bars; viewport offsets only apply to cropped screenshots.
+		glReadPixels(0, 0, m_CanvasWidth, m_CanvasHeight, GL_RGBA, GL_UNSIGNED_BYTE, vDstData.data());
 		glPixelStorei(GL_PACK_ALIGNMENT, Alignment);
 
 		uint8_t *pTempRow = vDstData.data() + Width * Height * 4;

@@ -324,7 +324,9 @@ void CBindChat::ConfigSaveCallback(IConfigManager *pConfigManager, void *pUserDa
 			}
 		}
 
-		char aBuf[BINDCHAT_MAX_CMD * 2] = "";
+		// [TClient] 审计修复（2026-11-20 P3）：name+command 双双满转义时
+		// 2*CMD 缓冲不够，行会被 str_escape 静默截断、重载后命令变形
+		char aBuf[BINDCHAT_MAX_CMD * 2 + BINDCHAT_MAX_NAME * 2 + 64] = "";
 		char *pEnd = aBuf + sizeof(aBuf);
 		char *pDst;
 		str_append(aBuf, "bindchat \"");

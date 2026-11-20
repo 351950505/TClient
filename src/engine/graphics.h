@@ -591,6 +591,10 @@ public:
 	virtual void SetWindowGrab(bool Grab) = 0;
 	virtual void NotifyWindow() = 0;
 
+	// Synchronously query the dimensions returned by presented-image readback.
+	// Returns false with zero dimensions if the backend cannot capture an image.
+	virtual bool ReadPresentedImageSize(uint32_t &Width, uint32_t &Height) = 0;
+
 	// be aware that this function should only be called from the graphics thread, and even then you should really know what you are doing
 	// this function always returns the pixels in RGB
 	virtual TGLBackendReadPresentedImageData &GetReadPresentedImageDataFuncUnsafe() = 0;

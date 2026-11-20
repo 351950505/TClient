@@ -773,6 +773,64 @@ int main()
 {
 	setvbuf(stdout, nullptr, _IONBF, 0);
 	CTests Tests;
+	Tests.Group("production Gone v2 reader", [&] {
+		Tests.Case("current paired producer and heartbeat accepted", [&] {
+			CMusic::SIslandGoneV2 Gone{2, 0x324E4F47, 42, 9001, 10000, 1763660000.125, 55, 1};
+			Check(CMusic::ReadGoneV2(&Gone, 55, 1763660000.125, 10050), "paired Gone rejected");
+			Check(CMusic::ReadGoneV2(&Gone, 55, 1763660000.125, 11999), "fresh signal rejected");
+		});
+		Tests.Case("retained side view ignored after legacy monitor takes main SHM", [&] {
+			CMusic::SIslandGoneV2 Gone{2, 0x324E4F47, 42, 9001, 10000, 1763660000.125, 55, 1};
+			Check(!CMusic::ReadGoneV2(&Gone, 0, 1763660000.0, 10001), "old monitor's memset and integer heartbeat accepted old Gone");
+			Check(!CMusic::ReadGoneV2(&Gone, 55, 1763660001.0, 10001), "old writer's changed heartbeat accepted retained side");
+		});
+		Tests.Case("expired missing and in-progress signals are unknown", [&] {
+			CMusic::SIslandGoneV2 Gone{2, 0x324E4F47, 42, 9001, 10000, 1763660000.125, 55, 1};
+			Check(!CMusic::ReadGoneV2(&Gone, 55, Gone.MainHeartbeat, 12000), "expired signal accepted");
+			Check(!CMusic::ReadGoneV2(&Gone, 55, Gone.MainHeartbeat, 9999), "future tick accepted");
+			Gone.Seq = 3;
+			Check(!CMusic::ReadGoneV2(&Gone, 55, Gone.MainHeartbeat, 10001), "odd sequence accepted");
+			Check(!CMusic::ReadGoneV2(nullptr, 55, Gone.MainHeartbeat, 10001), "missing mapping accepted");
+		});
+		Tests.Case("new instance or unpublished side cannot inherit old exit", [&] {
+			CMusic::SIslandGoneV2 Gone{2, 0x324E4F47, 42, 9001, 10000, 1763660000.125, 55, 1};
+			Check(!CMusic::ReadGoneV2(&Gone, 56, Gone.MainHeartbeat, 10001), "different producer inherited old exit");
+			Gone.Instance = 0;
+			Check(!CMusic::ReadGoneV2(&Gone, 55, Gone.MainHeartbeat, 10001), "uninitialized instance accepted");
+			Gone.Instance = 9002; Gone.Gone = 0;
+			Check(!CMusic::ReadGoneV2(&Gone, 55, Gone.MainHeartbeat, 10001), "present player reported Gone");
+		});
+	});
+	Tests.Group("LRC timestamp ranges", [&] {
+		for(const char *pInput : {
+			    "[2147483648:00]line",
+			    "[999999999999999999999999:00]line",
+			    "[00:2147483648]line",
+			    "[00:999999999999999999999999]line"})
+			Tests.Case(pInput, [&] {
+				std::vector<SLyricLine> Lines;
+				Check(!ParseSyncedLyrics(pInput, Lines), "overflowing timestamp was accepted");
+				Check(Lines.empty(), "overflowing timestamp produced lyrics");
+			});
+
+		const struct
+		{
+			const char *m_pInput;
+			int64_t m_ExpectedMs;
+		} aValid[] = {
+			{"[01:23.45]line", 83450},
+			{"[00:00,007]line", 7},
+			{"[12345:67.890]line", 740767890},
+			{"[2147483647:2147483647.999]line", 130996502467999LL},
+		};
+		for(const auto &Test : aValid)
+			Tests.Case(Test.m_pInput, [&] {
+				std::vector<SLyricLine> Lines;
+				Check(ParseSyncedLyrics(Test.m_pInput, Lines), "valid timestamp was rejected");
+				Check(Lines.size() == 1 && Lines[0].m_Text == "line", "valid timestamp changed lyric text");
+				Check(Lines[0].m_StartMs == Test.m_ExpectedMs, "timestamp milliseconds are incorrect");
+			});
+	});
 	Tests.Group("production text width cache invalidation", [&] {
 		Tests.Case("font changes invalidate and stable fonts reuse widths", [&] {
 			CMusic Music;

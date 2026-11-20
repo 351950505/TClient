@@ -87,7 +87,8 @@ private:
 			const NETADDR *pAddress = nullptr;
 			if(Client()->State() == IClient::STATE_ONLINE)
 				pAddress = &Client()->ServerAddress();
-			else if(GameClient()->m_ConnectServerInfo)
+			// [TClient] 审计修复（2026-11-20 P3）：地址列表可能为空，先查数量
+			else if(GameClient()->m_ConnectServerInfo && GameClient()->m_ConnectServerInfo->m_NumAddresses > 0)
 				pAddress = &GameClient()->m_ConnectServerInfo->m_aAddresses[0];
 			else
 				return nullptr;

@@ -115,7 +115,10 @@ static int Utf8CharLen(unsigned char c);
 
 		while(isdigit((unsigned char)*p))
 		{
-			Minutes = Minutes * 10 + (*p - '0');
+			const int Digit = *p - '0';
+			if(Minutes > (std::numeric_limits<int>::max() - Digit) / 10)
+				return false;
+			Minutes = Minutes * 10 + Digit;
 			++p;
 		}
 		if(*p != ':')
@@ -125,7 +128,10 @@ static int Utf8CharLen(unsigned char c);
 			return false;
 		while(isdigit((unsigned char)*p))
 		{
-			Seconds = Seconds * 10 + (*p - '0');
+			const int Digit = *p - '0';
+			if(Seconds > (std::numeric_limits<int>::max() - Digit) / 10)
+				return false;
+			Seconds = Seconds * 10 + Digit;
 			++p;
 		}
 		if(*p == '.' || *p == ',')

@@ -1604,6 +1604,16 @@ protected:
 		}
 	}
 
+	bool GetPresentedImageSize(uint32_t &Width, uint32_t &Height) override
+	{
+		if(m_VKSurfFormat.format != VK_FORMAT_R8G8B8A8_UNORM && m_VKSurfFormat.format != VK_FORMAT_B8G8R8A8_UNORM)
+			return false;
+		const auto Viewport = m_VKSwapImgAndViewportExtent.GetPresentedImageViewport();
+		Width = Viewport.width;
+		Height = Viewport.height;
+		return Width > 0 && Height > 0;
+	}
+
 	[[nodiscard]] bool GetPresentedImageData(uint32_t &Width, uint32_t &Height, CImageInfo::EImageFormat &Format, std::vector<uint8_t> &vDstData) override
 	{
 		return GetPresentedImageDataImpl(Width, Height, Format, vDstData, false, {});

@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstddef>
 #include <audiopolicy.h>
 #include <tlhelp32.h>
 #include <shellapi.h>
@@ -63,6 +64,7 @@ struct IslandMediaShared
 	uint32_t Magic;      // SHM_MAGIC
 	uint32_t Version;    // SHM_VERSION
 	uint32_t Playing;    // 1 = 累计判断为播放
+	uint32_t Producer;   // v7 原有对齐填充，v2 Gone 的实例标记；不改变布局
 	int64_t ElapsedMs;   // 当前标题开始以来累计播放毫秒（暂停冻结，切歌归零）
 	double LastUpdate;   // 最近写入时间（epoch 秒，探活用）
 	wchar_t Title[256];  // 最近一次窗口标题 "歌名 - 歌手"
@@ -79,6 +81,43 @@ struct IslandMediaShared
 	double WatcherDurMs; // 【monitor 写】netease-watcher 的曲长毫秒
 };
 #pragma pack(pop)
+
+// Gone v2 不更改 v7 主结构大小。实例标记及精确心跳绑定当前发布；
+// 旧 v7 正常启动清空填充，新心跳也不会匹配已停止的 side 发布。
+struct alignas(8) SIslandGoneV2
+{
+	volatile LONG64 Seq;
+	uint32_t Magic;
+	uint32_t WriterPid;
+	uint64_t Instance;
+	uint64_t UpdatedTick;
+	double MainHeartbeat;
+	uint32_t Producer;
+	uint32_t Gone;
+};
+static_assert(sizeof(SIslandGoneV2) == 48 && offsetof(SIslandGoneV2, MainHeartbeat) == 32, "Gone v2 layout");
+static_assert(offsetof(IslandMediaShared, ElapsedMs) == 16, "v7 layout");
+static_assert(offsetof(IslandMediaShared, LastUpdate) == 24, "v7 layout");
+static_assert(sizeof(IslandMediaShared) == 624, "v7 layout");
+static HANDLE g_hGoneV2 = NULL;
+static SIslandGoneV2 *g_pGoneV2 = nullptr;
+static uint64_t g_MonitorInstance = 0;
+static uint32_t g_Producer = 0;
+
+static void PublishGoneV2(SIslandGoneV2 *pOut, uint32_t WriterPid, uint64_t Instance, uint32_t Producer, uint64_t Tick, double Heartbeat, bool Gone)
+{
+	if(!pOut)
+		return;
+	InterlockedIncrement64(&pOut->Seq);
+	pOut->Magic = 0x324E4F47; // GON2
+	pOut->WriterPid = WriterPid;
+	pOut->Instance = Instance;
+	pOut->UpdatedTick = Tick;
+	pOut->MainHeartbeat = Heartbeat;
+	pOut->Producer = Producer;
+	pOut->Gone = Gone ? 1u : 0u;
+	InterlockedIncrement64(&pOut->Seq);
+}
 
 static HANDLE g_hShm = NULL;
 static IslandMediaShared *g_pShm = nullptr;
@@ -98,38 +137,59 @@ static uint32_t g_aPidParents[MAX_PIDS]; // 父进程 PID，用于识别根进�
 // 都走 g_LoopCS（与环回流共用），刷新先写局部数组再整块发布。
 static CRITICAL_SECTION g_LoopCS;
 static bool g_LoopCSReady = false;
+// 整个采样串行化；g_LoopCS 只保护发布，不能阻止旧快照晚发布。
+static SRWLOCK g_PidRefreshLock = SRWLOCK_INIT;
+static uint64_t g_PidGeneration = 0; // g_LoopCS 保护；失败也推进代次
+static bool g_PidSampleValid = false;
 
-static void RefreshPids()
+// 返回本次采样计数；失败不能发布为空表。
+static int SampleTargetPids(uint32_t *pPids, uint32_t *pParents)
 {
+	HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if(hSnap == INVALID_HANDLE_VALUE)
+		return -1;
+	int NumPids = 0;
+	PROCESSENTRY32W Pe;
+	Pe.dwSize = sizeof(Pe);
+	BOOL HaveEntry = Process32FirstW(hSnap, &Pe);
+	while(HaveEntry)
+	{
+		if(_wcsicmp(Pe.szExeFile, L"cloudmusic.exe") == 0 && NumPids < MAX_PIDS)
+		{
+			pPids[NumPids] = Pe.th32ProcessID;
+			pParents[NumPids] = Pe.th32ParentProcessID;
+			++NumPids;
+		}
+		HaveEntry = Process32NextW(hSnap, &Pe);
+	}
+	const DWORD Error = GetLastError();
+	CloseHandle(hSnap);
+	return Error == ERROR_NO_MORE_FILES ? NumPids : -1;
+}
+
+static int RefreshPids(int (*pSample)(uint32_t *, uint32_t *) = SampleTargetPids, uint64_t *pGeneration = nullptr)
+{
+	AcquireSRWLockExclusive(&g_PidRefreshLock);
 	uint32_t aPids[MAX_PIDS];
 	uint32_t aParents[MAX_PIDS];
-	int NumPids = 0;
-	HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	if(hSnap != INVALID_HANDLE_VALUE)
-	{
-		PROCESSENTRY32W Pe;
-		Pe.dwSize = sizeof(Pe);
-		if(Process32FirstW(hSnap, &Pe))
-		{
-			do
-			{
-				if(_wcsicmp(Pe.szExeFile, L"cloudmusic.exe") == 0 && NumPids < MAX_PIDS)
-				{
-					aPids[NumPids] = Pe.th32ProcessID;
-					aParents[NumPids] = Pe.th32ParentProcessID;
-					++NumPids;
-				}
-			} while(Process32NextW(hSnap, &Pe));
-		}
-		CloseHandle(hSnap);
-	}
+	const int NumPids = pSample(aPids, aParents);
 	if(g_LoopCSReady)
 		EnterCriticalSection(&g_LoopCS);
-	memcpy(g_aPids, aPids, sizeof(uint32_t) * (size_t)NumPids);
-	memcpy(g_aPidParents, aParents, sizeof(uint32_t) * (size_t)NumPids);
-	g_NumPids = NumPids;
+	++g_PidGeneration;
+	g_PidSampleValid = NumPids >= 0 && NumPids <= MAX_PIDS;
+	if(g_PidSampleValid)
+	{
+		memcpy(g_aPids, aPids, sizeof(uint32_t) * (size_t)NumPids);
+		memcpy(g_aPidParents, aParents, sizeof(uint32_t) * (size_t)NumPids);
+		g_NumPids = NumPids;
+	}
+	if(pGeneration)
+		*pGeneration = g_PidGeneration;
+	const int Result = g_PidSampleValid ? NumPids : -1;
 	if(g_LoopCSReady)
 		LeaveCriticalSection(&g_LoopCS);
+	ReleaseSRWLockExclusive(&g_PidRefreshLock);
+	return Result;
 }
 
 static bool IsTargetPid(uint32_t Pid)
@@ -158,6 +218,38 @@ static int TargetPidCount()
 		LeaveCriticalSection(&g_LoopCS);
 	return Count;
 }
+
+struct SPlayerGoneTracker
+{
+	double m_ConfirmAt = -1.0;
+	bool m_Gone = false;
+	uint64_t m_Generation = 0;
+
+	// 调用者在发布期间持有 g_LoopCS，确认结果不能跨过新的成功/失败采样。
+	bool ConfirmedForPublication() const
+	{
+		return m_Gone && g_PidSampleValid && g_NumPids == 0 && m_Generation == g_PidGeneration;
+	}
+
+	bool Update(bool HaveWnd, int CachedPidCount, double Now, int (*pSample)(uint32_t *, uint32_t *) = SampleTargetPids)
+	{
+		if(HaveWnd || CachedPidCount > 0)
+		{
+			m_ConfirmAt = -1.0;
+			m_Gone = false;
+			return false;
+		}
+		if(m_ConfirmAt < 0.0)
+			m_ConfirmAt = Now + 2.0;
+		if(Now >= m_ConfirmAt)
+		{
+			const int FreshPidCount = RefreshPids(pSample, &m_Generation);
+			m_Gone = FreshPidCount == 0;
+			m_ConfirmAt = FreshPidCount == 0 ? Now + 0.5 : -1.0;
+		}
+		return m_Gone;
+	}
+};
 
 // ---------- 窗口标题探测 ----------
 static wchar_t g_wszBestTitle[256];
@@ -910,7 +1002,10 @@ static void ParseLSFile(const wchar_t *pPath, const FILETIME *pWrite)
 		return;
 	DWORD Hi = 0;
 	DWORD Size = GetFileSize(h, &Hi);
-	if(Size == INVALID_FILE_SIZE || (Hi != 0 && Size > (32u << 20)))
+	// [TClient] 审计修复（2026-11-20 P3）：32MB 门控按 64 位总大小判断——
+	// 原条件 (Hi!=0 && Size>32MB) 对 <4GB 文件恒假，33MB~4GB 会整份读入
+	const int64_t TotalSize = (((int64_t)Hi) << 32) | (int64_t)Size;
+	if(Size == INVALID_FILE_SIZE || TotalSize > (32ll << 20))
 	{
 		CloseHandle(h);
 		return;
@@ -1766,7 +1861,39 @@ static bool ResolveFallbackPlaying(bool Playing, bool LsPaused, bool LsStalled, 
 	return WatcherValid ? !WatcherFrozen : Playing;
 }
 
-static std::atomic<uint32_t> g_WatcherFrozen{0};  // watcher 采样连续 ~3s 不前进 = 暂停（环回/LS 都不可用时的兜底，2026-11-18）
+// 生产播放决策：标题缺失只是弱证据；只有可信位置到终点才锁住曲终。
+struct SPlaybackDecision
+{
+	SWatcherPauseTracker m_Pause;
+	bool m_Ended = false;
+	double m_EndPosition = -1.0;
+
+	bool Update(bool TitleChanged, bool HaveWnd, bool HaveAudio, bool AudioActive, bool PreviousPlaying,
+		bool LsPaused, bool LsStalled, bool LsAtEnd, double Position, double Duration, double SampleAt, double Now, bool LsAdvancing = false)
+	{
+		const bool Valid = std::isfinite(Position) && Position >= 0.0 && SampleAt > 0.0 && Now >= SampleAt && Now - SampleAt < 5.0;
+		if(TitleChanged)
+		{
+			m_Pause = {};
+			m_Ended = false;
+		}
+		const bool Frozen = m_Pause.Update(Position, SampleAt, Now);
+		if(AudioActive || LsAdvancing || (Valid && m_Ended && std::fabs(Position - m_EndPosition) >= 150.0))
+			m_Ended = false; // 音频恢复、seek 或同歌重播，均优先于旧曲终锁
+		const bool AtEnd = Valid && std::isfinite(Duration) && Duration > 0.0 && Position >= Duration && Position <= Duration + 1500.0;
+		if(!HaveWnd && !AudioActive && (AtEnd || (!Valid && LsAtEnd)))
+		{
+			m_Ended = true;
+			m_EndPosition = Valid ? Position : -1.0;
+		}
+		if(HaveAudio)
+			return AudioActive;
+		if(m_Ended)
+			return false;
+		return ResolveFallbackPlaying(LsAdvancing ? true : PreviousPlaying, LsPaused, LsStalled, Valid, Frozen);
+	}
+};
+
 static std::atomic<uint32_t> g_dwWatcherPid{0};   // 本 monitor 亲手拉起的 netease-watcher PID（0=没有）
 
 // 取某进程的可执行文件全路径。失败返回 false。
@@ -1850,11 +1977,24 @@ static void RestartWatcherProcess()
 	Sleep(500);
 }
 
-static void EnsureWatcherProcess()
+struct SWatcherStartBackoff
 {
-	std::string Dum;
-	if(HttpGetPort(3574, "/", Dum))
-		return; // 已在跑
+	double m_NextTryAt = -1.0;
+
+	template<typename TStart>
+	bool TryStart(double Now, TStart Start)
+	{
+		if(Now < m_NextTryAt)
+			return false;
+		// 尝试前进入退避，路径检查或 CreateProcess 失败也不密集重试。
+		m_NextTryAt = Now + 30.0;
+		Start();
+		return true;
+	}
+};
+
+static void StartWatcherProcess()
+{
 	wchar_t ExeDir[MAX_PATH];
 	GetModuleFileNameW(NULL, ExeDir, MAX_PATH);
 	wchar_t *pSlash = wcsrchr(ExeDir, L'\\');
@@ -1892,6 +2032,16 @@ static void EnsureWatcherProcess()
 		CloseHandle(Pi.hProcess);
 		Sleep(1500); // 等它的 HTTP 服务起来
 	}
+}
+
+static void EnsureWatcherProcess()
+{
+	std::string Dum;
+	if(HttpGetPort(3574, "/", Dum))
+		return;
+	// 仅由 WatcherThread 调用；NowEpochQpc 的墙钟锚点固定，不受校时影响。
+	static SWatcherStartBackoff s_Backoff;
+	s_Backoff.TryStart(NowEpochQpc(), StartWatcherProcess);
 }
 
 static DWORD WINAPI WatcherThread(LPVOID)
@@ -1974,6 +2124,24 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 	g_hGone = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(uint32_t), SHM_GONE_NAME);
 	if(g_hGone)
 		g_pGone = (volatile uint32_t *)MapViewOfFile(g_hGone, FILE_MAP_WRITE, 0, 0, sizeof(uint32_t));
+	if(g_pGone)
+		*g_pGone = 0;
+	LARGE_INTEGER InstanceCounter;
+	QueryPerformanceCounter(&InstanceCounter);
+	g_MonitorInstance = (uint64_t)InstanceCounter.QuadPart;
+	g_Producer = (uint32_t)(g_MonitorInstance ^ (g_MonitorInstance >> 32) ^ GetCurrentProcessId()) | 1u;
+	g_hGoneV2 = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(SIslandGoneV2), L"Local\\TClientIslandMediaGoneV2");
+	if(g_hGoneV2)
+		g_pGoneV2 = (SIslandGoneV2 *)MapViewOfFile(g_hGoneV2, FILE_MAP_WRITE, 0, 0, sizeof(SIslandGoneV2));
+	if(g_pGoneV2)
+	{
+		// 已有视图可能被其它客户端持有；先使旧发布失效再初始化新实例。
+		InterlockedExchange64(&g_pGoneV2->Seq, 1);
+		g_pGoneV2->Magic = 0;
+		g_pGoneV2->Gone = 0;
+		g_pGoneV2->Producer = 0;
+		InterlockedExchange64(&g_pGoneV2->Seq, 2);
+	}
 
 	// WASAPI 初始化（失败无所谓，没有电表就当一直“播放”）
 	IMMDeviceEnumerator *pDevEnum = nullptr;
@@ -2006,7 +2174,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 
 		// 刷新 pid（每 3 秒）
 		static LARGE_INTEGER liLastPid = {0};
-		if(liLastPid.QuadPart == 0 || (liNow.QuadPart - liLastPid.QuadPart) / g_qpcFreq.QuadPart > 3)
+		if(liLastPid.QuadPart == 0 || (liNow.QuadPart - liLastPid.QuadPart) / (double)g_qpcFreq.QuadPart >= 3.0)
 		{
 			liLastPid = liNow;
 			RefreshPids();
@@ -2089,28 +2257,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 			wszCurTitle[255] = 0;
 			TitleChanged = true;
 		}
-		else if(!HaveWnd && wszLastTitle[0])
-		{
-			// 网易云一首歌播完后会撤掉窗口标题（EnumWindows 找不到），此时不能把岛清空，
-			// 继续用上一首标题、并把进度钉在末尾。等真切歌（标题变化）时再更新。
-			ElapsedMs = 0;
-			Playing = false;
-			g_LsPaused = true;
-			if(g_LsHave && g_LsFraction < 0.995)
-				g_LsFraction = 1.0; // 钉到末尾
-			g_LsCapturedAt = (double)time(NULL); // 刷新新鲜度，客户端才会用 100% 锚点
-		}
+		// 标题缺失保留上一首身份；不能修改 LS 的真实暂停、位置或采样时刻。
 
-		// 4) watcher 冻结判暂停（2026-11-18 新增）：环回激活失败的机器（本机实测
-		//    FAILED hr=0x80004005）+ 新版网易云 LS playPostion 加密不可读时，上面
-		//    三层全部没有信号 —— 外部点暂停后 monitor 永远报"播放中"，歌词一路走
-		//    到曲尾（用户复现）。watcher 的 time 暂停时冻结、播放时每个采样都在
-		//    前进：连续 ~3s 采样差都在 ±150ms 内判暂停，t 重新前进（播放/seek）
-		//    立即清零。轮询 300ms 一次，正常播放每次采样差 ≈300ms > 150，不会误判。
-		{
-			static SWatcherPauseTracker s_PauseTracker;
-			g_WatcherFrozen = s_PauseTracker.Update(g_WatcherTimeMs.load(), g_WatcherAt.load(), NowEpochQpc()) ? 1u : 0u;
-		}
 		// 播放判定，三层优先：
 		// 1) WASAPI 进程环回（最权威）：最近 300ms 有音频帧 = 在播。帧流断 = 暂停（亚秒级、零误判，
 		//    静音片段的 SILENT 帧也推进位置）。AudioMs 即精确"播到哪一秒"。
@@ -2135,27 +2283,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 				AudioActive = true;
 		}
 		LeaveCriticalSection(&g_LoopCS);
-		if(g_HaveAudio)
-		{
-			Playing = AudioActive;
-		}
-		else
-		{
-			const double WatcherAt = g_WatcherAt.load();
-			const double WatcherPosition = g_WatcherTimeMs.load();
-			const bool WatcherValid = std::isfinite(WatcherPosition) && WatcherPosition >= 0.0 &&
-				WatcherAt > 0.0 && NowEp >= WatcherAt && NowEp - WatcherAt < 5.0;
-			// P3-4a（2026-11-20 审查）：曲终时网易云撤掉窗口标题（上方标题消失
-			// 路径已置 Playing=false 并钉尾进度）。watcher 分不清"暂停"和"曲终"，
-			// 判冻需要 ~3s，该窗口内不允许兜底把 Playing 翻回 true——标题撤除
-			// 本身就是曲终信号；正常播放/暂停时 HaveWnd=true，兜底不受影响。
-			if(!HaveWnd && wszCurTitle[0] != 0)
-				Playing = false;
-			else
-				Playing = ResolveFallbackPlaying(Playing, g_LsHave && g_LsPaused,
-					g_LsHave && g_LsLastProgressAt > 0.0 && (double)time(NULL) - g_LsLastProgressAt > 15.0,
-					WatcherValid, g_WatcherFrozen.load() != 0);
-		}
+		static SPlaybackDecision s_Playback;
+		const double LsAge = (double)time(NULL) - g_LsCapturedAt;
+		Playing = s_Playback.Update(TitleChanged, HaveWnd, g_HaveAudio, AudioActive, Playing,
+			g_LsHave && g_LsPaused,
+			g_LsHave && g_LsLastProgressAt > 0.0 && (double)time(NULL) - g_LsLastProgressAt > 15.0,
+			g_LsHave && LsAge >= 0.0 && LsAge < 5.0 && g_LsFraction >= 1.0,
+			g_WatcherTimeMs.load(), g_WatcherDurMs.load(), g_WatcherAt.load(), NowEp,
+			g_LsHave && !g_LsPaused && g_LsFraction < 1.0 &&
+			(double)time(NULL) >= g_LsLastProgressAt && (double)time(NULL) - g_LsLastProgressAt < 2.0);
 		if(Playing && g_NumMeters > 0)
 			ElapsedMs += (int64_t)DtMs;
 		else if(g_NumMeters == 0 && HaveWnd && Playing && !g_LsPaused)
@@ -2188,6 +2324,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 			g_WatcherStale = s_StaleSince != 0.0;
 		}
 
+		// 采样可能较慢，放在共享内存写入区间之前。
+		static SPlayerGoneTracker s_GoneTracker;
+		s_GoneTracker.Update(HaveWnd, TargetPidCount(), NowEpochQpc());
+
+		// 确认代次的核对和发布共用 PID 表锁，期间不能插入另一轮采样发布。
+		EnterCriticalSection(&g_LoopCS);
+		const bool PlayerGone = s_GoneTracker.ConfirmedForPublication();
 		if(g_pSeq)
 			InterlockedIncrement64(g_pSeq); // 奇 = 正在写，客户端据此重试
 		g_pShm->Magic = SHM_MAGIC;
@@ -2198,9 +2341,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 		// P2-2：窗口标题消失且 cloudmusic.exe 进程也没了 = 网易云真的退出
 		//（歌放完只撤标题、进程还在，不置位）。单字段对齐写，无需 seqlock。
 		if(g_pGone)
-			*g_pGone = (!HaveWnd && g_NumPids == 0) ? 1u : 0u;
+			*g_pGone = PlayerGone ? 1u : 0u;
 		g_pShm->ElapsedMs = ElapsedMs;
-		g_pShm->LastUpdate = (double)time(NULL);
+		g_pShm->Producer = g_Producer;
+		g_pShm->LastUpdate = NowEpochQpc();
 		g_pShm->Peak = g_deafPeak;
 		g_pShm->Meters = (uint32_t)g_NumMeters;
 		// LS 进度的可信期：只在最近一次写入后 LS_WRITE_GRACE 秒内相信 playPostion；
@@ -2210,7 +2354,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 		// 客户端优先用 LS 锚点，仅在锚点缺失/不可信时回退到标题 elapsed；两者都在下面分别给出。
 		g_pShm->Fraction = g_LsFraction;
 		g_pShm->FractionAt = g_LsCapturedAt;
-		g_pShm->Paused = (g_LsHave && g_LsPaused) ? 1 : 0;
+		g_pShm->Paused = (!Playing && g_LsHave && g_LsPaused) ? 1 : 0;
 		// 曲长兜底链：netease-watcher → LS → 客户端回传 → CDP 界面总长
 		const double WDur = g_WatcherDurMs;
 		const double CDur = g_CdpTotalSec;
@@ -2261,13 +2405,26 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 			wcsncpy(g_pShm->Title, pShown, 255);
 			g_pShm->Title[255] = 0;
 		}
+		PublishGoneV2(g_pGoneV2, GetCurrentProcessId(), g_MonitorInstance, g_Producer, GetTickCount64(), g_pShm->LastUpdate, PlayerGone);
 		if(g_pSeq)
 			InterlockedIncrement64(g_pSeq); // 偶 = 稳定，整块更新结束
+		LeaveCriticalSection(&g_LoopCS);
 
 		(void)TitleChanged;
 		Sleep(50);
 	}
 
+	if(g_pGoneV2)
+	{
+		PublishGoneV2(g_pGoneV2, 0, 0, 0, 0, 0.0, false);
+		UnmapViewOfFile(g_pGoneV2);
+		g_pGoneV2 = nullptr;
+	}
+	if(g_hGoneV2)
+	{
+		CloseHandle(g_hGoneV2);
+		g_hGoneV2 = NULL;
+	}
 	// 正常退出（收到 STOP_EVENT）：清 SHM 标记并释放句柄，让下一实例能立刻接管。
 	if(g_pSeq)
 		*g_pSeq = 0;

@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from urllib.parse import quote
 
 DEFAULT_REPO = Path("D:/TaterClient-src")
 DEFAULT_WORK_ROOT = Path("D:/kehuduan")
@@ -183,7 +184,7 @@ def phase_build(spec, paths, state):
     verify_mirror_inputs(spec, paths, state, fresh=True)
     build_dir = Path(spec["build_dir"])
     subprocess.run([str(cmake), "-S", str(spec["repo"]), "-B", str(build_dir), "-DTCLIENT_RELEASE_MIRRORS=ON"], check=True, timeout=600)
-    subprocess.run([str(cmake), "--build", str(build_dir), "--config", "Release", "--target", "game-client", "--target", "TClientUpdater", "--parallel"], check=True, timeout=3600)
+    subprocess.run([str(cmake), "--build", str(build_dir), "--config", "Release", "--target", "game-client", "TClientUpdater", "testrunner", "--parallel"], check=True, timeout=3600)
     repo = Path(spec["repo"])
     libs = repo / "ddnet-libs"
     env = dict(os.environ)
@@ -392,47 +393,118 @@ def gh_api_json(repo, endpoint, token, method, payload):
     return json.loads(out) if out.strip() else {}
 
 
-def phase_publish(spec, paths, state):
-    token = github_token(Path(spec["repo"]))
-    assets_record = json.loads((paths["root"] / "local-assets.json").read_text(encoding="utf-8-sig"))
-    asset_paths = {record["name"]: Path(record["path"]) for record in assets_record["assets"]}
-    mirrors = verify_mirror_inputs(spec, paths, state, client=asset_paths["DDNet.exe"].read_bytes(), fresh=True)
-    require(assets_record.get("update_mirrors") == mirrors, "packaged assets do not match the frozen mirror probe")
-    # 审计修复（2026-11-20 P2）：幂等——publish 中途失败后 --resume 时复用既有
-    # draft，不再重复建单（旧 draft 残留资产可被误发布）或撞 tag 422。
+def gh_api_pages(root, endpoint, token):
+    items = []
+    page = 1
+    while True:
+        batch = json.loads(gh(root, "api", f"{endpoint}?per_page=100&page={page}", token=token))
+        require(isinstance(batch, list), "unexpected GitHub list response: " + endpoint)
+        items.extend(batch)
+        if len(batch) < 100:
+            return items
+        page += 1
+
+
+def remote_tag_commit(root, tag, token):
+    base = f"repos/{GITHUB_REPO}/git/"
+    refs = gh_api_pages(root, base + "matching-refs/tags/" + quote(tag, safe=""), token)
+    matches = [ref for ref in refs if ref.get("ref") == "refs/tags/" + tag]
+    require(len(matches) <= 1, "multiple refs for tag " + tag)
+    if not matches:
+        return None
+    obj = matches[0]["object"]
+    seen = set()
+    while obj.get("type") == "tag":
+        sha = obj["sha"]
+        require(sha not in seen and len(seen) < 32, "invalid annotated tag chain: " + tag)
+        seen.add(sha)
+        obj = json.loads(gh(root, "api", base + "tags/" + sha, token=token))["object"]
+    require(obj.get("type") == "commit", "tag does not resolve to a commit: " + tag)
+    return obj["sha"]
+
+
+def verify_release_target(spec, root, release, token, tag_required=False):
     tag = f'v{spec["version"]}'
-    existing = [r for r in json.loads(gh(paths["root"], "api", f"repos/{GITHUB_REPO}/releases?per_page=100", token=token)) if r.get("tag_name") == tag]
-    if existing:
-        release = existing[0]
-        require(bool(release.get("draft")), f"release {tag} already exists and is published")
+    require(release.get("tag_name") == tag, "release tag differs from the spec")
+    commit = remote_tag_commit(root, tag, token)
+    if commit is not None:
+        require(commit == spec["target_commit"], "tag commit differs from the frozen target: " + tag)
     else:
-        release = gh_api_json(paths["root"], "repos/" + GITHUB_REPO + "/releases", token, "POST", {
+        require(not tag_required, "release tag is missing: " + tag)
+        target = quote(release.get("target_commitish", ""), safe="")
+        require(bool(target), "draft release target is missing")
+        resolved = json.loads(gh(root, "api", f"repos/{GITHUB_REPO}/commits/{target}", token=token))
+        require(resolved.get("sha") == spec["target_commit"], "draft target differs from the frozen target")
+
+
+def verify_remote_assets(root, release_id, frozen, token, complete):
+    endpoint = f"repos/{GITHUB_REPO}/releases/{release_id}/assets"
+    assets = gh_api_pages(root, endpoint, token)
+    names = [asset["name"] for asset in assets]
+    require(len(names) == len(set(names)), "duplicate remote asset names")
+    require(set(names).issubset(frozen), "unexpected remote assets: " + ", ".join(sorted(set(names) - frozen.keys())))
+    if complete:
+        require(set(names) == set(frozen), "remote asset set differs from the frozen package")
+    for asset in assets:
+        record = frozen[asset["name"]]
+        require(asset["size"] == record["size"], "remote asset size differs: " + asset["name"])
+        digest = asset.get("digest")
+        if not digest:
+            # Older GitHub assets may lack digest metadata; hash the bytes instead.
+            result = subprocess.run([str(GH_EXE), "api", f'repos/{GITHUB_REPO}/releases/assets/{asset["id"]}', "-H", "Accept: application/octet-stream"], env=dict(os.environ, GH_TOKEN=token, GH_HOST="github.com"), capture_output=True, timeout=1800)
+            require(result.returncode == 0, "remote asset download failed: " + asset["name"])
+            require(len(result.stdout) == record["size"], "remote asset download size differs: " + asset["name"])
+            digest = "sha256:" + hashlib.sha256(result.stdout).hexdigest()
+        require(digest == "sha256:" + record["sha256"], "remote asset digest differs: " + asset["name"])
+    return set(names)
+
+
+def phase_publish(spec, paths, state):
+    root = paths["root"]
+    assets_record = json.loads((root / "local-assets.json").read_text(encoding="utf-8-sig"))
+    require(assets_record.get("version") == spec["version"] and assets_record.get("source_commit") == spec["target_commit"], "frozen package belongs to a different release or commit")
+    records = assets_record["assets"]
+    frozen = {record["name"]: record for record in records}
+    require(bool(frozen) and len(frozen) == len(records), "empty or duplicate frozen asset names")
+    asset_paths = {name: Path(record["path"]) for name, record in frozen.items()}
+    require("DDNet.exe" in asset_paths, "frozen package lacks DDNet.exe")
+    for name, path in asset_paths.items():
+        require(path.name == name and path.is_file(), "packaged asset path differs or is missing: " + name)
+        require(path.stat().st_size == frozen[name]["size"] and sha256_of(path) == frozen[name]["sha256"], "packaged asset differs from the frozen package record: " + name)
+    mirrors = verify_mirror_inputs(spec, paths, state, client=asset_paths["DDNet.exe"].read_bytes(), fresh=False)
+    require(assets_record.get("update_mirrors") == mirrors, "packaged assets do not match the frozen mirror probe")
+    token = github_token(Path(spec["repo"]))
+    tag = f'v{spec["version"]}'
+    endpoint = f"repos/{GITHUB_REPO}/releases"
+    existing = [release for release in gh_api_pages(root, endpoint, token) if release.get("tag_name") == tag]
+    require(len(existing) <= 1, "multiple releases for tag " + tag)
+    release = existing[0] if existing else {"tag_name": tag, "target_commitish": spec["target_commit"], "draft": True}
+    verify_release_target(spec, root, release, token, tag_required=not release.get("draft"))
+    if release.get("draft"):
+        verify_mirror_inputs(spec, paths, state, fresh=True)
+    if not existing:
+        release = gh_api_json(root, endpoint, token, "POST", {
             "tag_name": tag,
             "target_commitish": spec["target_commit"],
             "name": f'TClient-v{spec["version"]}',
             "draft": True,
-            "body": release_body(paths["root"], spec["notes_path"]),
+            "body": release_body(root, spec["notes_path"]),
         })
+        verify_release_target(spec, root, release, token)
     release_id = release["id"]
-    frozen = {record["name"]: record for record in assets_record["assets"]}
-    for name, path in asset_paths.items():
-        digest = sha256_of(path)
-        # 上传前必须与 package 阶段冻结的逐资产记录一致，拒绝被替换/过期的本地文件
-        record = frozen.get(name)
-        require(record is not None, f"asset missing from the frozen package record: {name}")
-        require(digest == record["sha256"] and path.stat().st_size == record["size"], f"packaged asset differs from the frozen package record: {name}")
-        upload = subprocess.run([str(GH_EXE), "release", "upload", f'v{spec["version"]}', "--repo", GITHUB_REPO, "--clobber", str(path)], env=dict(os.environ, GH_TOKEN=token, GH_HOST="github.com"), capture_output=True, text=True, encoding="utf-8", timeout=1800)
-        require(upload.returncode == 0, f"asset upload failed: {name}: " + upload.stderr)
-        remote = json.loads(gh(paths["root"], "api", f"repos/{GITHUB_REPO}/releases/{release_id}/assets?per_page=100", token=token))
-        match = [a for a in remote if a["name"] == name]
-        require(match and match[0]["size"] == path.stat().st_size, f"remote asset size differs: {name}")
-        # GitHub 返回 digest 时按同一口径复核（与 master sync 的校验方式一致）
-        remote_digest = match[0].get("digest")
-        if isinstance(remote_digest, str) and remote_digest:
-            require(remote_digest == "sha256:" + digest, f"remote asset digest differs: {name}")
-        state.setdefault("remote_digests", {})[name] = digest
-    publish = subprocess.run([str(GH_EXE), "release", "edit", f'v{spec["version"]}', "--repo", GITHUB_REPO, "--draft=false", "--latest"], env=dict(os.environ, GH_TOKEN=token), capture_output=True, text=True, encoding="utf-8", timeout=300)
-    require(publish.returncode == 0, "publishing the release failed: " + publish.stderr)
+    present = verify_remote_assets(root, release_id, frozen, token, complete=not release["draft"])
+    if release["draft"]:
+        for name, path in asset_paths.items():
+            if name in present:
+                continue
+            require(path.stat().st_size == frozen[name]["size"] and sha256_of(path) == frozen[name]["sha256"], "packaged asset changed before upload: " + name)
+            upload = subprocess.run([str(GH_EXE), "release", "upload", tag, "--repo", GITHUB_REPO, str(path)], env=dict(os.environ, GH_TOKEN=token, GH_HOST="github.com"), capture_output=True, text=True, encoding="utf-8", timeout=1800)
+            require(upload.returncode == 0, f"asset upload failed: {name}: " + upload.stderr)
+        verify_release_target(spec, root, release, token)
+        verify_remote_assets(root, release_id, frozen, token, complete=True)
+        publish = subprocess.run([str(GH_EXE), "release", "edit", tag, "--repo", GITHUB_REPO, "--draft=false", "--latest"], env=dict(os.environ, GH_TOKEN=token, GH_HOST="github.com"), capture_output=True, text=True, encoding="utf-8", timeout=300)
+        require(publish.returncode == 0, "publishing the release failed: " + publish.stderr)
+    state["remote_digests"] = {name: record["sha256"] for name, record in frozen.items()}
     return {"release_id": release_id, "published": True}
 
 
@@ -513,7 +585,7 @@ def main():
     if args.resume:
         validate_resume_state(state)
         if "mirror_probe" in completed:
-            verify_mirror_inputs(spec, paths, state, fresh=True)
+            verify_mirror_inputs(spec, paths, state, fresh=False)
 
     for phase in plan:
         if args.resume and phase in completed:

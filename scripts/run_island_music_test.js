@@ -42,6 +42,7 @@ try {
   const source = readSource('src/game/client/components/tclient/island_music.cpp');
   const track = between(source, '\tstruct STrack\n', '\t// ---------------- SMTC worker').trimEnd();
   const lyrics = between(source, '\t// ---------------- lyrics', '\tint FindLineIndex(');
+  const goneProtocol = between(source, '	// ---------------- Gone v2 protocol ----------------', '	// ---------------- Gone v2 protocol end ----------------');
   const widthCache = between(source, '\tclass CTextWidthCacheEntry', '\t// vinyl record spin angle');
   const measureCached = between(source, '\tfloat MeasureCached(', '\t// TClient: game round timer');
   const coverLimit = source.match(/static constexpr size_t COVER_MAX_BYTES[^;]*;/)?.[0];
@@ -59,6 +60,7 @@ class CIslandMusicTest
 {
 public:
 ${track}
+${goneProtocol}
 ${widthCache}
 ${measureCached}
   IHttp *m_pHttp = nullptr;

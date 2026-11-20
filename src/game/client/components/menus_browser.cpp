@@ -569,7 +569,8 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
 		static CLineInput s_ExcludeInput(g_Config.m_BrExcludeString, sizeof(g_Config.m_BrExcludeString));
 		static char s_aTooltipText[64];
 		str_format(s_aTooltipText, sizeof(s_aTooltipText), "%s: \"CHN; [A]\"", Localize("Example of usage"));
-		GameClient()->m_Tooltips.DoToolTip(&s_ExcludeInput, &QuickSearch, s_aTooltipText);
+		// [TClient] 审计修复（2026-11-20 P3，上游同款）：tooltip 锚到 exclude 输入框自身
+		GameClient()->m_Tooltips.DoToolTip(&s_ExcludeInput, &QuickExclude, s_aTooltipText);
 		if(!Ui()->IsPopupOpen() && Input()->KeyPress(KEY_X) && Input()->ShiftIsPressed() && Input()->ModifierIsPressed())
 		{
 			Ui()->SetActiveItem(&s_ExcludeInput);

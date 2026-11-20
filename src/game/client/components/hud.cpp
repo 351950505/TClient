@@ -301,13 +301,17 @@ void CHud::RenderScoreHud()
 						const char *pName = aNameBuf;
 						const float NameWidth = TextRender()->TextWidth(8.0f, pName, -1, -1.0f);
 						const vec2 NamePosition(std::min(m_Width - NameWidth - 1.0f, m_Width - ScoreWidthMax - ImageSize - 2 * Split), StartY + (t + 1) * 20.0f - 2.0f);
-						if(RenderGradientPlayerName(Id, pName, NamePosition, 8.0f))
+						// 审计修复（2026-11-20 P3）：渐变开/关切换时强制重建普通文本容器
+						const bool NameGradient = RenderGradientPlayerName(Id, pName, NamePosition, 8.0f);
+						const bool NameWasGradient = m_aScoreInfo[t].m_NameWasGradient;
+						m_aScoreInfo[t].m_NameWasGradient = NameGradient;
+						if(NameGradient)
 						{
 							str_copy(m_aScoreInfo[t].m_aPlayerNameText, pName);
 						}
 						else
 						{
-							if(str_comp(pName, m_aScoreInfo[t].m_aPlayerNameText) != 0 || RecreateRect)
+							if(str_comp(pName, m_aScoreInfo[t].m_aPlayerNameText) != 0 || RecreateRect || NameWasGradient)
 							{
 								str_copy(m_aScoreInfo[t].m_aPlayerNameText, pName);
 								CTextCursor Cursor;
@@ -490,13 +494,16 @@ void CHud::RenderScoreHud()
 						GameClient()->StreamerName(Id, aNameBuf, sizeof(aNameBuf));
 						const char *pName = aNameBuf;
 						const vec2 NamePosition(std::min(m_Width - TextRender()->TextWidth(8.0f, pName) - 1.0f, m_Width - ScoreWidthMax - ImageSize - 2 * Split - PosSize), StartY + (t + 1) * 20.0f - 2.0f);
-						if(RenderGradientPlayerName(Id, pName, NamePosition, 8.0f))
+						const bool NameGradient = RenderGradientPlayerName(Id, pName, NamePosition, 8.0f);
+						const bool NameWasGradient = m_aScoreInfo[t].m_NameWasGradient;
+						m_aScoreInfo[t].m_NameWasGradient = NameGradient;
+						if(NameGradient)
 						{
 							str_copy(m_aScoreInfo[t].m_aPlayerNameText, pName);
 						}
 						else
 						{
-							if(RecreateRect)
+							if(RecreateRect || NameWasGradient)
 							{
 								str_copy(m_aScoreInfo[t].m_aPlayerNameText, pName);
 								CTextCursor Cursor;
@@ -637,13 +644,16 @@ void CHud::RenderTextInfo()
 		if(GameClient()->m_Snap.m_SpecInfo.m_Active)
 			PlayerId = GameClient()->m_Snap.m_SpecInfo.m_SpectatorId;
 
-		if(g_Config.m_ClShowhudDDRace && GameClient()->m_Snap.m_aCharacters[PlayerId].m_HasExtendedData && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW)
+		// [TClient] 审计修复（2026-11-20 P3）：自由视角/未入场时 PlayerId=-1，
+		// 直接索引 m_aCharacters[-1]/m_aClients[-1] 会越界读相邻成员
+		const bool ValidPlayerId = PlayerId >= 0 && PlayerId < MAX_CLIENTS;
+		if(g_Config.m_ClShowhudDDRace && ValidPlayerId && GameClient()->m_Snap.m_aCharacters[PlayerId].m_HasExtendedData && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW)
 			OffsetY += 50.0f;
 		else if(g_Config.m_ClShowhudHealthAmmo && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW)
 			OffsetY += 27.0f;
 
 		vec2 Pos;
-		if(GameClient()->m_Snap.m_SpecInfo.m_SpectatorId == SPEC_FREEVIEW)
+		if(GameClient()->m_Snap.m_SpecInfo.m_SpectatorId == SPEC_FREEVIEW || !ValidPlayerId)
 			Pos = vec2(GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy].x, GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy].y);
 		else
 			Pos = GameClient()->m_aClients[PlayerId].m_RenderPos;
@@ -654,7 +664,7 @@ void CHud::RenderTextInfo()
 		OffsetY += TextHeight;
 		str_format(aBuf, sizeof(aBuf), "Y: %.2f", Pos.y / 32.0f);
 		TextRender()->Text(4, OffsetY, FontSize, aBuf, -1.0f);
-		if(GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW)
+		if(GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW && ValidPlayerId)
 		{
 			OffsetY += TextHeight;
 			str_format(aBuf, sizeof(aBuf), "Angle: %d", GameClient()->m_aClients[PlayerId].m_RenderCur.m_Angle);
@@ -1701,7 +1711,8 @@ void CHud::RenderPlayerState(const int ClientId)
 	{
 		HasProhibitedCapabilities = true;
 		Graphics()->TextureSet(GameClient()->m_HudSkin.m_SpriteHudGunHitDisabled);
-		Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_LaserHitDisabledOffset, x, y);
+		// [TClient] 审计修复（2026-11-20 P3）：改用专用 Gun 槽位（此前误用 Laser 槽）
+		Graphics()->RenderQuadContainerAsSprite(m_HudQuadContainerIndex, m_GunHitDisabledOffset, x, y);
 		x += 12;
 	}
 	if((pCharacter->m_ShotgunHitDisabled && pCharacter->m_aWeapons[WEAPON_SHOTGUN].m_Got))
@@ -2789,17 +2800,22 @@ void CHud::RenderRecord()
 
 	if(GameClient()->m_ReceivedDDNetPlayerFinishTimes)
 	{
-		const int PlayerTimeSeconds = GameClient()->m_aClients[GameClient()->m_aLocalIds[g_Config.m_ClDummy]].m_FinishTimeSeconds;
-		if(PlayerTimeSeconds != FinishTime::NOT_FINISHED_MILLIS)
+		// [TClient] 审计修复（2026-11-20 P3）：dummy 未连接时 LocalId=-1，先守卫再索引
+		const int LocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy];
+		if(LocalId >= 0 && LocalId < MAX_CLIENTS)
 		{
-			char aBuf[64];
-			TextRender()->Text(5, 82, 6, Localize("Personal best:"), -1.0f);
-			char aTime[32];
-			const int PlayerTimeMillis = GameClient()->m_aClients[GameClient()->m_aLocalIds[g_Config.m_ClDummy]].m_FinishTimeMillis;
-			int64_t TimeCentiseconds = static_cast<int64_t>(PlayerTimeSeconds) * 100 + static_cast<int64_t>(PlayerTimeMillis) / 10;
-			str_time(TimeCentiseconds, ETimeFormat::HOURS_CENTISECS, aTime, sizeof(aTime));
-			str_format(aBuf, sizeof(aBuf), "%s%s", PlayerTimeSeconds > 3600 ? "" : "   ", aTime);
-			TextRender()->Text(53, 82, 6, aBuf, -1.0f);
+			const int PlayerTimeSeconds = GameClient()->m_aClients[LocalId].m_FinishTimeSeconds;
+			if(PlayerTimeSeconds != FinishTime::NOT_FINISHED_MILLIS)
+			{
+				char aBuf[64];
+				TextRender()->Text(5, 82, 6, Localize("Personal best:"), -1.0f);
+				char aTime[32];
+				const int PlayerTimeMillis = GameClient()->m_aClients[LocalId].m_FinishTimeMillis;
+				int64_t TimeCentiseconds = static_cast<int64_t>(PlayerTimeSeconds) * 100 + static_cast<int64_t>(PlayerTimeMillis) / 10;
+				str_time(TimeCentiseconds, ETimeFormat::HOURS_CENTISECS, aTime, sizeof(aTime));
+				str_format(aBuf, sizeof(aBuf), "%s%s", PlayerTimeSeconds > 3600 ? "" : "   ", aTime);
+				TextRender()->Text(53, 82, 6, aBuf, -1.0f);
+			}
 		}
 	}
 	else

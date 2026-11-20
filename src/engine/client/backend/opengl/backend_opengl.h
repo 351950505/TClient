@@ -89,6 +89,7 @@ protected:
 	void DestroyTexture(int Slot);
 
 	bool GetPresentedImageData(uint32_t &Width, uint32_t &Height, CImageInfo::EImageFormat &Format, std::vector<uint8_t> &vDstData) override;
+	bool GetPresentedImageSize(uint32_t &Width, uint32_t &Height) override;
 
 	static size_t GLFormatToPixelSize(int GLFormat);
 

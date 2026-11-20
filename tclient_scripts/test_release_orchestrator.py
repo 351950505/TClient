@@ -2,8 +2,8 @@
 
 Covers: spec validation, helper-lock enforcement, dry-run planning, two-phase
 plan selection, state resume, release-body encoding, master-sync invocation and
-the translation gate. Build/stage/package/publish phases are deliberately not
-executed here; they require the real toolchain.
+the translation gate. Publish runs against mocked GitHub reads and writes;
+build/stage/package require the real toolchain.
 """
 from datetime import datetime, timedelta, timezone
 import json
@@ -313,6 +313,384 @@ class MasterSyncParsingTests(unittest.TestCase):
         self.assertEqual(command[command.index("--target") + 1], "a" * 40)
         self.assertEqual(command[command.index("--parent") + 1], "b" * 40)
         self.assertEqual(command[command.index("--expected-master") + 1], "c" * 40)
+
+
+class PublishTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.spec = {"repo": str(self.root), "version": "1.7.8.99", "target_commit": "a" * 40, "notes_path": str(self.root / "notes.txt")}
+        Path(self.spec["notes_path"]).write_text("release notes", encoding="utf-8")
+        self.paths = {"root": self.root}
+        self.state = {}
+        self.base = "repos/" + release_orchestrator.GITHUB_REPO
+        self.tag = "v" + self.spec["version"]
+        self.release = {"id": 7, "tag_name": self.tag, "draft": True, "target_commitish": self.spec["target_commit"]}
+        self.releases = [self.release]
+        self.refs = [{"ref": "refs/tags/" + self.tag, "object": {"type": "commit", "sha": self.spec["target_commit"]}}]
+        self.tag_objects = {}
+        self.content = {"DDNet.exe": b"client", "update.zip": b"update"}
+        self.records = []
+        for name, data in self.content.items():
+            path = self.root / name
+            path.write_bytes(data)
+            self.records.append({"name": name, "path": str(path), "size": len(data), "sha256": release_orchestrator.sha256_of(path)})
+        self.record = {"version": self.spec["version"], "source_commit": self.spec["target_commit"], "assets": self.records, "update_mirrors": {"frozen": True}}
+        self.save_record()
+        self.assets = []
+        self.reads = []
+        self.writes = []
+        self.fail_endpoint = None
+        self.corrupt_upload = False
+        self.final_extra = False
+        self.asset_reads = 0
+        self.resolved_target = self.spec["target_commit"]
+        self.real_verify_mirrors = release_orchestrator.verify_mirror_inputs
+        for target, replacement in (("github_token", lambda repo: "offline"),
+                                    ("verify_mirror_inputs", lambda *a, **k: {"frozen": True}),
+                                    ("gh", self.fake_gh)):
+            patcher = mock.patch.object(release_orchestrator, target, replacement)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(release_orchestrator.subprocess, "run", side_effect=self.fake_run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # All process launches must use fake_run; deny accidental network access.
+        for target in ("subprocess.Popen", "socket.socket", "socket.create_connection"):
+            patcher = mock.patch(target, side_effect=AssertionError("external I/O prohibited"))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def save_record(self):
+        (self.root / "local-assets.json").write_text(json.dumps(self.record), encoding="utf-8")
+
+    def asset(self, record, digest=True):
+        return {"id": 20 + self.records.index(record), "name": record["name"], "size": record["size"], "digest": "sha256:" + record["sha256"] if digest else None}
+
+    def fake_gh(self, root, *args, token, input_text=None):
+        self.assertEqual(token, "offline")
+        self.assertEqual(args[0], "api")
+        endpoint = args[1]
+        self.reads.append(endpoint)
+        if endpoint == self.fail_endpoint:
+            raise RuntimeError("gh failed: HTTP 503")
+        if "-X" in args:
+            self.assertEqual(args[args.index("-X") + 1], "POST")
+            self.assertEqual(endpoint, self.base + "/releases")
+            self.writes.append("create")
+            self.release.update(json.loads(input_text))
+            self.releases = [self.release]
+            return json.dumps(self.release)
+        if "?per_page=100&page=" in endpoint:
+            path, page = endpoint.split("?per_page=100&page=")
+            page = int(page)
+            if path == self.base + "/releases":
+                items = self.releases
+            elif path == self.base + "/git/matching-refs/tags/" + self.tag:
+                items = self.refs
+            elif path == self.base + "/releases/7/assets":
+                self.asset_reads += 1
+                items = list(self.assets)
+                if self.final_extra and self.asset_reads > 1:
+                    items.append({"name": "old.zip", "size": 1})
+            else:
+                self.fail("Unexpected list endpoint: " + endpoint)
+            return json.dumps(items[(page - 1) * 100:page * 100])
+        if endpoint.startswith(self.base + "/git/tags/"):
+            return json.dumps({"object": self.tag_objects[endpoint.rsplit("/", 1)[1]]})
+        if endpoint.startswith(self.base + "/commits/"):
+            return json.dumps({"sha": self.resolved_target})
+        self.fail("Unexpected GitHub call: " + repr(args))
+
+    def fake_run(self, command, **kwargs):
+        self.assertEqual(command[0], str(release_orchestrator.GH_EXE))
+        self.assertEqual(kwargs["env"]["GH_TOKEN"], "offline")
+        if command[1:3] == ["release", "upload"]:
+            name = Path(command[-1]).name
+            self.assertNotIn("--clobber", command)
+            self.writes.append("upload:" + name)
+            asset = self.asset(next(record for record in self.records if record["name"] == name))
+            if self.corrupt_upload:
+                asset["digest"] = "sha256:" + "0" * 64
+            self.assets.append(asset)
+        elif command[1:3] == ["release", "edit"]:
+            self.writes.append("publish")
+            self.release["draft"] = False
+        elif command[1] == "api" and command[-1] == "Accept: application/octet-stream":
+            asset_id = int(command[2].rsplit("/", 1)[1])
+            name = self.records[asset_id - 20]["name"]
+            return subprocess.CompletedProcess(command, 0, stdout=self.content[name], stderr=b"")
+        else:
+            self.fail("Unexpected process: " + repr(command))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    def publish(self):
+        return release_orchestrator.phase_publish(self.spec, self.paths, self.state)
+
+    def rejected_without_writes(self, message):
+        with self.assertRaisesRegex(RuntimeError, message):
+            self.publish()
+        self.assertEqual(self.writes, [])
+
+    def test_all_local_assets_checked_before_remote_access(self):
+        (self.root / "update.zip").write_bytes(b"broken")
+        self.rejected_without_writes("packaged asset differs")
+        self.assertEqual(self.reads, [])
+
+    def test_frozen_identity_and_duplicate_names_rejected(self):
+        self.record["source_commit"] = "b" * 40
+        self.save_record()
+        self.rejected_without_writes("different release or commit")
+        self.record["source_commit"] = self.spec["target_commit"]
+        self.record["assets"].append(self.records[0])
+        self.save_record()
+        self.rejected_without_writes("duplicate frozen")
+
+    def test_draft_wrong_target_without_tag_rejected(self):
+        self.refs = []
+        self.release["target_commitish"] = "wrong-branch"
+        self.resolved_target = "b" * 40
+        self.rejected_without_writes("draft target differs")
+
+    def test_existing_tag_mismatch_overrides_target_commitish(self):
+        self.refs[0]["object"]["sha"] = "b" * 40
+        self.rejected_without_writes("tag commit differs")
+
+    def test_annotated_tag_dereferenced(self):
+        self.refs[0]["object"] = {"type": "tag", "sha": "c" * 40}
+        self.tag_objects["c" * 40] = {"type": "tag", "sha": "d" * 40}
+        self.tag_objects["d" * 40] = {"type": "commit", "sha": self.spec["target_commit"]}
+        self.publish()
+        self.assertEqual(self.writes[-1], "publish")
+
+    def test_extra_asset_rejected(self):
+        self.assets = [{"name": "old.zip", "size": 1}]
+        self.rejected_without_writes("unexpected remote assets")
+
+    def test_wrong_existing_asset_rejected(self):
+        for field, value in (("size", 100), ("digest", "sha256:wrong")):
+            with self.subTest(field=field):
+                self.assets = [self.asset(self.records[0])]
+                self.assets[0][field] = value
+                self.rejected_without_writes("remote asset " + ("size" if field == "size" else "digest") + " differs")
+
+    def test_correct_partial_draft_only_uploads_missing(self):
+        self.assets = [self.asset(self.records[0])]
+        self.assertEqual(self.publish(), {"release_id": 7, "published": True})
+        self.assertEqual(self.writes, ["upload:update.zip", "publish"])
+
+    def test_complete_draft_does_not_reupload(self):
+        self.assets = [self.asset(record) for record in self.records]
+        self.publish()
+        self.assertEqual(self.writes, ["publish"])
+
+    def test_published_state_lost_returns_without_writes(self):
+        self.release["draft"] = False
+        self.assets = [self.asset(record) for record in self.records]
+        self.assertEqual(self.publish(), {"release_id": 7, "published": True})
+        self.assertEqual(self.writes, [])
+        self.assertEqual(self.state["remote_digests"], {record["name"]: record["sha256"] for record in self.records})
+        self.assertNotIn("master_sync", self.state.get("phases", {}))
+
+    def test_published_requires_tag_and_complete_assets(self):
+        self.release["draft"] = False
+        self.rejected_without_writes("remote asset set differs")
+        self.refs = []
+        self.rejected_without_writes("release tag is missing")
+
+    def test_pagination_finds_release_and_duplicate(self):
+        self.releases = [{"tag_name": "other"} for _ in range(100)] + [self.release]
+        self.assets = [self.asset(record) for record in self.records]
+        self.publish()
+        self.assertNotIn("create", self.writes)
+        self.assertIn(self.base + "/releases?per_page=100&page=2", self.reads)
+        self.writes.clear()
+        self.releases.append(dict(self.release))
+        self.rejected_without_writes("multiple releases")
+
+    def test_assets_pagination_detects_extra_on_second_page(self):
+        frozen = {}
+        self.assets = []
+        for index in range(100):
+            name = str(index)
+            frozen[name] = {"size": 1, "sha256": "a" * 64}
+            self.assets.append({"name": name, "size": 1, "digest": "sha256:" + "a" * 64})
+        self.assets.append({"name": "old.zip", "size": 1})
+        with self.assertRaisesRegex(RuntimeError, "unexpected remote assets"):
+            release_orchestrator.verify_remote_assets(self.root, 7, frozen, "offline", complete=True)
+        self.assertEqual(self.writes, [])
+
+    def test_list_and_tag_api_errors_have_no_writes(self):
+        for endpoint in (self.base + "/releases?per_page=100&page=1",
+                         self.base + "/git/matching-refs/tags/" + self.tag + "?per_page=100&page=1",
+                         self.base + "/releases/7/assets?per_page=100&page=1"):
+            with self.subTest(endpoint=endpoint):
+                self.fail_endpoint = endpoint
+                self.rejected_without_writes("HTTP 503")
+
+    def test_published_wrong_identity_or_assets_never_written(self):
+        self.release["draft"] = False
+        self.assets = [self.asset(record) for record in self.records]
+        self.refs[0]["object"]["sha"] = "b" * 40
+        self.rejected_without_writes("tag commit differs")
+        self.refs[0]["object"]["sha"] = self.spec["target_commit"]
+        self.assets[0]["digest"] = "sha256:wrong"
+        self.rejected_without_writes("digest differs")
+        self.assets = [self.asset(record) for record in self.records] + [{"name": "old.zip", "size": 1}]
+        self.rejected_without_writes("unexpected remote assets")
+
+    def test_tag_refs_pagination_uses_exact_tag(self):
+        self.refs = [{"ref": "refs/tags/" + self.tag + "-old", "object": {"type": "commit", "sha": "b" * 40}} for _ in range(100)] + self.refs
+        self.publish()
+        self.assertIn(self.base + "/git/matching-refs/tags/" + self.tag + "?per_page=100&page=2", self.reads)
+
+    def test_new_release_and_existing_tag(self):
+        self.releases = []
+        self.publish()
+        self.assertEqual(self.writes, ["create", "upload:DDNet.exe", "upload:update.zip", "publish"])
+
+    def test_new_release_without_tag(self):
+        self.refs = []
+        self.test_new_release_and_existing_tag()
+
+    def test_final_asset_digest_and_set_checked_before_publish(self):
+        for corrupt, extra, message in ((True, False, "digest differs"), (False, True, "unexpected remote assets")):
+            with self.subTest(message=message):
+                self.assets = []
+                self.asset_reads = 0
+                self.writes.clear()
+                self.corrupt_upload, self.final_extra = corrupt, extra
+                with self.assertRaisesRegex(RuntimeError, message):
+                    self.publish()
+                self.assertNotIn("publish", self.writes)
+
+    def test_published_resume_continues_master_sync(self):
+        self.release["draft"] = False
+        self.assets = [self.asset(record) for record in self.records]
+        root = self.root / "release-17899"
+        root.mkdir()
+        (root / "local-assets.json").write_text(json.dumps(self.record), encoding="utf-8")
+        state_path = root / "orchestrator-state.json"
+        initial = {"completed": list(release_orchestrator.LOCAL_PHASES),
+                   "phases": {phase: {} for phase in release_orchestrator.LOCAL_PHASES}}
+        state_path.write_text(json.dumps(initial), encoding="utf-8")
+        spec = dict(self.spec, work_root=str(self.root), parent_commit="b" * 40, changed_files=[])
+        spec_path = self.root / "spec.json"
+        spec_path.write_text(json.dumps(spec), encoding="utf-8")
+        with mock.patch.object(sys, "argv", ["orchestrator", "run", "--spec", str(spec_path), "--resume", "--publish"]), \
+             mock.patch.object(release_orchestrator, "phase_master_sync", side_effect=RuntimeError("mock master sync failure")) as sync, \
+             mock.patch("builtins.print"):
+            with self.assertRaisesRegex(RuntimeError, "mock master sync failure"):
+                release_orchestrator.main()
+        sync.assert_called_once()
+        saved = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["phases"]["publish"], {"release_id": 7, "published": True})
+        self.assertIn("publish", saved["completed"])
+        self.assertNotIn("master_sync", saved["completed"])
+        self.assertEqual(self.writes, [])
+
+    def use_expired_mirror_evidence(self, root=None):
+        root = root or self.root
+        self.spec["build_dir"] = str(self.root / "build")
+        report_path, header = release_orchestrator.mirror_files(self.spec, {"root": root})
+        header.parent.mkdir(parents=True, exist_ok=True)
+        header.write_text("// tested mirrors\n", encoding="utf-8")
+        report = {
+            "schema": 1, "catalog_url": "https://github.akams.cn/",
+            "fetched_at": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
+            "release_version": self.spec["version"], "source_commit": self.spec["target_commit"],
+            "header_sha256": release_orchestrator.sha256_of(header),
+            "selected": [{"prefix": "https://mirror.example/"}], "reference": {"tag": "v1.7.8.98"},
+        }
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        frozen = self.real_verify_mirrors(self.spec, {"root": root}, {})
+        self.state = {"phases": {"mirror_probe": frozen}}
+        self.content["DDNet.exe"] = b"https://mirror.example/https://github.com/351950505/TClient/releases/latest/download/TClient-update-win64.json"
+        client = self.root / "DDNet.exe"
+        client.write_bytes(self.content["DDNet.exe"])
+        self.records[0].update(size=client.stat().st_size, sha256=release_orchestrator.sha256_of(client))
+        self.record["update_mirrors"] = frozen
+        (root / "local-assets.json").write_text(json.dumps(self.record), encoding="utf-8")
+        return report_path
+
+    def resume_expired_published(self, publish_saved=False, changed_report=False):
+        self.release["draft"] = False
+        root = self.root / "release-17899"
+        root.mkdir()
+        report_path = self.use_expired_mirror_evidence(root)
+        self.assets = [self.asset(record) for record in self.records]
+        phases = {phase: {} for phase in release_orchestrator.LOCAL_PHASES}
+        phases["mirror_probe"] = self.state["phases"]["mirror_probe"]
+        completed = list(release_orchestrator.LOCAL_PHASES)
+        if publish_saved:
+            completed.append("publish")
+            phases["publish"] = {"release_id": 7, "published": True}
+        state_path = root / "orchestrator-state.json"
+        state_path.write_text(json.dumps({"completed": completed, "phases": phases}), encoding="utf-8")
+        spec = dict(self.spec, work_root=str(self.root), parent_commit="b" * 40, changed_files=[])
+        spec_path = self.root / "spec.json"
+        spec_path.write_text(json.dumps(spec), encoding="utf-8")
+        if changed_report:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["reference"]["tag"] = "v1.7.8.90"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+        with mock.patch.object(release_orchestrator, "verify_mirror_inputs", wraps=self.real_verify_mirrors), \
+             mock.patch.object(sys, "argv", ["orchestrator", "run", "--spec", str(spec_path), "--resume", "--publish"]), \
+             mock.patch.object(release_orchestrator, "phase_master_sync", return_value={"synced": True}) as sync, \
+             mock.patch("builtins.print"):
+            if changed_report:
+                with self.assertRaisesRegex(RuntimeError, "changed after the probe"):
+                    release_orchestrator.main()
+                sync.assert_not_called()
+            else:
+                self.assertEqual(release_orchestrator.main(), 0)
+                sync.assert_called_once()
+                saved = json.loads(state_path.read_text(encoding="utf-8"))
+                self.assertEqual(saved["completed"], list(release_orchestrator.PHASES))
+                self.assertEqual(saved["phases"]["publish"], {"release_id": 7, "published": True})
+        self.assertEqual(self.writes, [])
+        if publish_saved:
+            self.assertEqual(self.reads, [])
+
+    def test_expired_published_state_lost_continues_sync(self):
+        self.resume_expired_published()
+
+    def test_expired_saved_publish_continues_sync(self):
+        self.resume_expired_published(publish_saved=True)
+
+    def test_expired_changed_report_still_blocks_resume(self):
+        self.resume_expired_published(changed_report=True)
+
+    def test_expired_changed_report_blocks_saved_publish_resume(self):
+        self.resume_expired_published(publish_saved=True, changed_report=True)
+
+    def test_expired_draft_and_new_release_rejected_without_writes(self):
+        self.use_expired_mirror_evidence()
+        with mock.patch.object(release_orchestrator, "verify_mirror_inputs", wraps=self.real_verify_mirrors):
+            for existing in ([self.release], []):
+                with self.subTest(existing=bool(existing)):
+                    self.releases = existing
+                    self.rejected_without_writes("older than 24 hours")
+
+    def test_expired_published_changed_report_rejected_without_writes(self):
+        report_path = self.use_expired_mirror_evidence()
+        self.release["draft"] = False
+        self.assets = [self.asset(record) for record in self.records]
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        report["reference"]["tag"] = "v1.7.8.90"
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        with mock.patch.object(release_orchestrator, "verify_mirror_inputs", wraps=self.real_verify_mirrors):
+            self.rejected_without_writes("changed after the probe")
+        self.assertEqual(self.reads, [])
+
+    def test_legacy_assets_without_digest_are_hashed(self):
+        self.release["draft"] = False
+        self.assets = [self.asset(record, digest=False) for record in self.records]
+        self.publish()
+        self.assertEqual(self.writes, [])
+        self.content["update.zip"] = b"UPdate"
+        self.rejected_without_writes("digest differs")
 
 
 if __name__ == "__main__":

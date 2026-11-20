@@ -71,7 +71,7 @@ public:
 	static float ZoomStepsToValue(float Steps) { return std::pow(CCamera::ZOOM_STEP, Steps); }
 
 	/**
-	 * 默认缩放对应的缩放档位（cl_default_zoom 以 0.1 档为单位存储，100 即默认缩放）
+	 * 默认缩放对应的档位（cl_default_zoom 为浮点档位，10.0 对应默认缩放；实际档位为该值减 10）
 	 *
 	 * @return 缩放档位，可直接传给 ZoomStepsToValue
 	 **/

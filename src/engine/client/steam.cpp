@@ -57,11 +57,19 @@ public:
 	{
 		char aConnect[NETADDR_MAXSTRSIZE];
 		int ConnectSize = SteamAPI_ISteamApps_GetLaunchCommandLine(m_pSteamApps, aConnect, sizeof(aConnect));
-		if(ConnectSize >= NETADDR_MAXSTRSIZE)
+		// The API returns bytes copied; defensively reject unexpected negative values.
+		if(ConnectSize < 0)
 		{
-			ConnectSize = NETADDR_MAXSTRSIZE - 1;
+			aConnect[0] = 0;
 		}
-		aConnect[ConnectSize] = 0;
+		else
+		{
+			if(ConnectSize >= NETADDR_MAXSTRSIZE)
+			{
+				ConnectSize = NETADDR_MAXSTRSIZE - 1;
+			}
+			aConnect[ConnectSize] = 0;
+		}
 		m_GotConnectAddr = false;
 		ParseConnectString(aConnect);
 	}

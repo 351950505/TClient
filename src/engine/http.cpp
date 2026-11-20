@@ -335,7 +335,14 @@ size_t IHttpRequest::OnData(const char *pData, size_t DataSize)
 		}
 		if(NewBufferSize != m_BufferSize)
 		{
-			m_pBuffer = (unsigned char *)realloc(m_pBuffer, NewBufferSize);
+			// [TClient] 审计修复（2026-11-20 P3，上游同款）：realloc 失败时按写
+			// 失败收尾传输，不再对 NULL 缓冲 mem_copy 崩溃
+			unsigned char *pNewBuffer = (unsigned char *)realloc(m_pBuffer, NewBufferSize);
+			if(!pNewBuffer)
+			{
+				return 0;
+			}
+			m_pBuffer = pNewBuffer;
 			m_BufferSize = NewBufferSize;
 		}
 		mem_copy(m_pBuffer + m_ResponseLength, pData, DataSize);

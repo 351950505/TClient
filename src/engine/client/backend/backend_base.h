@@ -91,10 +91,24 @@ protected:
 	static void Texture2DTo3D(uint8_t *pImageBuffer, int ImageWidth, int ImageHeight, size_t PixelSize, int SplitCountWidth, int SplitCountHeight, uint8_t *pTarget3DImageData, int &Target3DImageWidth, int &Target3DImageHeight);
 
 	virtual bool GetPresentedImageData(uint32_t &Width, uint32_t &Height, CImageInfo::EImageFormat &Format, std::vector<uint8_t> &vDstData) = 0;
+	virtual bool GetPresentedImageSize(uint32_t &Width, uint32_t &Height) { return false; }
 
 public:
 	virtual ~CCommandProcessorFragment_GLBase() = default;
 	virtual ERunCommandReturnTypes RunCommand(const CCommandBuffer::SCommand *pBaseCommand) = 0;
+
+	ERunCommandReturnTypes RunCommandWithReadback(const CCommandBuffer::SCommand *pBaseCommand)
+	{
+		if(pBaseCommand->m_Cmd != CCommandBuffer::CMD_READ_PRESENTED_IMAGE_SIZE)
+			return RunCommand(pBaseCommand);
+		const auto *pCommand = static_cast<const CCommandBuffer::SCommand_ReadPresentedImageSize *>(pBaseCommand);
+		uint32_t Width = 0, Height = 0;
+		const bool Success = GetPresentedImageSize(Width, Height) && Width > 0 && Height > 0;
+		*pCommand->m_pWidth = Success ? Width : 0;
+		*pCommand->m_pHeight = Success ? Height : 0;
+		*pCommand->m_pSuccess = Success;
+		return ERunCommandReturnTypes::RUN_COMMAND_COMMAND_HANDLED;
+	}
 
 	virtual void StartCommands(size_t CommandCount, size_t EstimatedRenderCallCount) {}
 	virtual void EndCommands() {}

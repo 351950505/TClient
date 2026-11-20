@@ -163,6 +163,7 @@ public:
 		CMD_TRY_SWAP_AND_READ_PIXEL,
 		CMD_TRY_SWAP_AND_SCREENSHOT,
 		CMD_UPDATE_VIEWPORT,
+		CMD_READ_PRESENTED_IMAGE_SIZE,
 
 		// in Android a window that minimizes gets destroyed
 		CMD_WINDOW_CREATE_NTF,
@@ -492,6 +493,16 @@ public:
 		uint32_t m_RequestedMultiSamplingCount;
 		uint32_t *m_pRetMultiSamplingCount;
 		bool *m_pRetOk;
+	};
+
+	struct SCommand_ReadPresentedImageSize : public SCommand
+	{
+		SCommand_ReadPresentedImageSize() :
+			SCommand(CMD_READ_PRESENTED_IMAGE_SIZE) {}
+
+		uint32_t *m_pWidth;
+		uint32_t *m_pHeight;
+		bool *m_pSuccess;
 	};
 
 	struct SCommand_Update_Viewport : public SCommand
@@ -1273,6 +1284,7 @@ public:
 	const char *GetRendererString() override;
 	const char *GetFatalError() const override;
 
+	bool ReadPresentedImageSize(uint32_t &Width, uint32_t &Height) override;
 	TGLBackendReadPresentedImageData &GetReadPresentedImageDataFuncUnsafe() override;
 
 	// TClient

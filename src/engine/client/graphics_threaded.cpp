@@ -3041,6 +3041,23 @@ const char *CGraphics_Threaded::GetFatalError() const
 	return m_pBackend == nullptr ? "" : m_pBackend->GetFatalError();
 }
 
+bool CGraphics_Threaded::ReadPresentedImageSize(uint32_t &Width, uint32_t &Height)
+{
+	Width = 0;
+	Height = 0;
+	if(!m_pBackend || !m_pCommandBuffer)
+		return false;
+	bool Success = false;
+	CCommandBuffer::SCommand_ReadPresentedImageSize Cmd;
+	Cmd.m_pWidth = &Width;
+	Cmd.m_pHeight = &Height;
+	Cmd.m_pSuccess = &Success;
+	AddCmd(Cmd);
+	KickCommandBuffer();
+	WaitForIdle();
+	return Success;
+}
+
 TGLBackendReadPresentedImageData &CGraphics_Threaded::GetReadPresentedImageDataFuncUnsafe()
 {
 	return m_pBackend->GetReadPresentedImageDataFuncUnsafe();

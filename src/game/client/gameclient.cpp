@@ -1271,10 +1271,14 @@ void CGameClient::OnMessage(int MsgId, CUnpacker *pUnpacker, int Conn, bool Dumm
 	{
 		CNetMsg_Sv_Emoticon *pMsg = (CNetMsg_Sv_Emoticon *)pRawMsg;
 
-		// apply
-		m_aClients[pMsg->m_ClientId].m_Emoticon = pMsg->m_Emoticon;
-		m_aClients[pMsg->m_ClientId].m_EmoticonStartTick = Client()->GameTick(Conn);
-		m_aClients[pMsg->m_ClientId].m_EmoticonStartFraction = Client()->IntraGameTickSincePrev(Conn);
+		// SecureUnpackMsg already validates both ranges; keep a defensive check here.
+		if(pMsg->m_ClientId >= 0 && pMsg->m_ClientId < MAX_CLIENTS && pMsg->m_Emoticon >= 0 && pMsg->m_Emoticon < NUM_EMOTICONS)
+		{
+			// apply
+			m_aClients[pMsg->m_ClientId].m_Emoticon = pMsg->m_Emoticon;
+			m_aClients[pMsg->m_ClientId].m_EmoticonStartTick = Client()->GameTick(Conn);
+			m_aClients[pMsg->m_ClientId].m_EmoticonStartFraction = Client()->IntraGameTickSincePrev(Conn);
+		}
 	}
 	else if(MsgId == NETMSGTYPE_SV_SOUNDGLOBAL)
 	{
@@ -5627,12 +5631,15 @@ bool CGameClient::IsOtherTeam(int ClientId) const
 	{
 		return false;
 	}
-	else if((m_Snap.m_SpecInfo.m_Active && m_Snap.m_SpecInfo.m_SpectatorId == SPEC_FREEVIEW) || ClientId < 0)
+	// [TClient] 审计修复（2026-11-20 P3，上游同款）：ClientId/SpecId 网络来源，越界一律不可比较
+	else if((m_Snap.m_SpecInfo.m_Active && m_Snap.m_SpecInfo.m_SpectatorId == SPEC_FREEVIEW) || ClientId < 0 || ClientId >= MAX_CLIENTS)
 	{
 		return false;
 	}
 	else if(m_Snap.m_SpecInfo.m_Active && m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW)
 	{
+		if(m_Snap.m_SpecInfo.m_SpectatorId < 0 || m_Snap.m_SpecInfo.m_SpectatorId >= MAX_CLIENTS)
+			return false;
 		if(m_Teams.Team(ClientId) == m_Teams.TeamSuper() || m_Teams.Team(m_Snap.m_SpecInfo.m_SpectatorId) == m_Teams.TeamSuper())
 			return false;
 		return m_Teams.Team(ClientId) != m_Teams.Team(m_Snap.m_SpecInfo.m_SpectatorId);

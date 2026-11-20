@@ -4487,11 +4487,17 @@ void CClient::StartVideo(const char *pFilename, bool WithTimestamp)
 		str_format(aFilename, sizeof(aFilename), "videos/%s.mp4", pFilename);
 	}
 
-	// wait for idle, so there is no data race
-	Graphics()->WaitForIdle();
+	// Query on the graphics thread: backends can capture a different size than the game viewport.
+	uint32_t Width = 0, Height = 0;
+	if(!Graphics()->ReadPresentedImageSize(Width, Height))
+	{
+		log_error("videorecorder", "Could not determine presented image size for recording.");
+		m_DemoPlayer.Stop("Failed to start video recording. See local console for details.");
+		return;
+	}
 	// pause the sound device while creating the video instance
 	Sound()->PauseAudioDevice();
-	new CVideo(Graphics(), Sound(), Storage(), Graphics()->ScreenWidth(), Graphics()->ScreenHeight(), m_LocalStartTime, aFilename);
+	new CVideo(Graphics(), Sound(), Storage(), Width, Height, m_LocalStartTime, aFilename);
 	Sound()->UnpauseAudioDevice();
 	if(!IVideo::Current()->Start())
 	{
@@ -5398,7 +5404,8 @@ void CClient::HandleConnectLink(const char *pLink)
 		str_copy(m_aCmdConnect, pLink);
 	// Edge appends / to the URL
 	const int Length = str_length(m_aCmdConnect);
-	if(m_aCmdConnect[Length - 1] == '/')
+	// [TClient] 审计修复（2026-11-20 P3，上游同款）：空串防 -1 下标读
+	if(Length > 0 && m_aCmdConnect[Length - 1] == '/')
 		m_aCmdConnect[Length - 1] = '\0';
 }
 

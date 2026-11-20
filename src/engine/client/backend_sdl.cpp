@@ -199,7 +199,7 @@ void CCommandProcessor_SDL_GL::RunBuffer(CCommandBuffer *pBuffer)
 
 	for(const CCommandBuffer::SCommand *pCommand = pBuffer->Head(); pCommand; pCommand = pCommand->m_pNext)
 	{
-		auto Res = m_pGLBackend->RunCommand(pCommand);
+		auto Res = m_pGLBackend->RunCommandWithReadback(pCommand);
 		if(Res == ERunCommandReturnTypes::RUN_COMMAND_COMMAND_HANDLED)
 		{
 			continue;

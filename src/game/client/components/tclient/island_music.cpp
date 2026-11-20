@@ -6,6 +6,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <cstddef>
 #include <ctime>
 #include <cstring>
 #include <limits>
@@ -1078,6 +1079,7 @@ public:
 		uint32_t Magic;
 		uint32_t Version;
 		uint32_t Playing;
+		uint32_t Producer; // 原 v7 的4字节对齐填充；不改变任何后续字段偏移
 		int64_t ElapsedMs;
 		double LastUpdate;
 		wchar_t aTitle[256];
@@ -1096,6 +1098,43 @@ public:
 #pragma pack(pop)
 	static constexpr uint32_t ISLAND_SHM_MAGIC = 0x4D53494E;
 	static constexpr uint32_t ISLAND_SHM_VERSION = 7;
+	static_assert(offsetof(SIslandShm, ElapsedMs) == 16 && offsetof(SIslandShm, LastUpdate) == 24 && sizeof(SIslandShm) == 624, "v7 layout");
+
+	// ---------------- Gone v2 protocol ----------------
+	struct alignas(8) SIslandGoneV2
+	{
+		volatile int64_t Seq;
+		uint32_t Magic;
+		uint32_t WriterPid;
+		uint64_t Instance;
+		uint64_t UpdatedTick;
+		double MainHeartbeat;
+		uint32_t Producer;
+		uint32_t Gone;
+	};
+
+	static bool ValidateGoneV2(const SIslandGoneV2 &Gone, uint32_t Producer, double MainHeartbeat, uint64_t NowTick)
+	{
+		return Gone.Magic == 0x324E4F47 && Gone.WriterPid != 0 && Gone.Instance != 0 && Producer != 0 &&
+			Gone.Producer == Producer && Gone.MainHeartbeat == MainHeartbeat &&
+			NowTick >= Gone.UpdatedTick && NowTick - Gone.UpdatedTick < 2000 && Gone.Gone == 1;
+	}
+	static bool ReadGoneV2(const SIslandGoneV2 *pGone, uint32_t Producer, double MainHeartbeat, uint64_t NowTick)
+	{
+		if(!pGone)
+			return false;
+		const int64_t Before = pGone->Seq;
+		std::atomic_thread_fence(std::memory_order_acquire);
+		if(Before & 1)
+			return false;
+		SIslandGoneV2 Snap;
+		memcpy(&Snap, pGone, sizeof(Snap));
+		std::atomic_thread_fence(std::memory_order_acquire);
+		const int64_t After = pGone->Seq;
+		return Before == After && !(After & 1) && ValidateGoneV2(Snap, Producer, MainHeartbeat, NowTick);
+	}
+	static_assert(sizeof(SIslandGoneV2) == 48 && offsetof(SIslandGoneV2, MainHeartbeat) == 32, "Gone v2 layout");
+	// ---------------- Gone v2 protocol end ----------------
 
 	HANDLE m_hIslandMap = nullptr;
 	void *m_pIslandView = nullptr;
@@ -1104,9 +1143,10 @@ public:
 	volatile LONG64 *m_pIslandSeq = nullptr;
 	// 可选"网易云已退出"信号（monitor 新版本才建）；没有时视为未退出。
 	HANDLE m_hIslandGone = nullptr;
-	volatile uint32_t *m_pIslandGone = nullptr;
+	SIslandGoneV2 *m_pIslandGone = nullptr;
 	int64_t m_NextShmTry = 0;
 	int64_t m_NextMonitorTry = 0;
+	int64_t m_NextGoneTry = 0;
 
 	void CloseIslandMap()
 	{
@@ -1166,11 +1206,11 @@ public:
 			}
 		}
 		// 可选"网易云已退出"信号映射：monitor 新版本才建，缺失视为未退出。
-		HANDLE hGone = OpenFileMappingW(FILE_MAP_READ, FALSE, L"Local\\TClientIslandMediaGone");
-		volatile uint32_t *pGone = nullptr;
+		HANDLE hGone = OpenFileMappingW(FILE_MAP_READ, FALSE, L"Local\\TClientIslandMediaGoneV2");
+		SIslandGoneV2 *pGone = nullptr;
 		if(hGone)
 		{
-			pGone = (volatile uint32_t *)MapViewOfFile(hGone, FILE_MAP_READ, 0, 0, sizeof(uint32_t));
+			pGone = (SIslandGoneV2 *)MapViewOfFile(hGone, FILE_MAP_READ, 0, 0, sizeof(SIslandGoneV2));
 			if(!pGone)
 			{
 				CloseHandle(hGone);
@@ -1187,8 +1227,10 @@ public:
 	}
 
 	// monitor 发布时序号先奇后偶；读到奇数或前后不一致就重试，避免多字段更新读到撕裂组合。
-	bool ReadIslandShm(SIslandShm &Out)
+	bool ReadIslandShm(SIslandShm &Out, bool *pGone = nullptr)
 	{
+		if(pGone)
+			*pGone = false;
 		for(int Try = 0; Try < 8; ++Try)
 		{
 			if(!m_pIslandSeq)
@@ -1203,9 +1245,14 @@ public:
 			if(Before & 1)
 				continue;
 			memcpy(&Out, m_pIslandView, sizeof(Out));
+			const bool Gone = pGone && ReadGoneV2(m_pIslandGone, Out.Producer, Out.LastUpdate, GetTickCount64());
 			const LONG64 After = *m_pIslandSeq;
 			if(Before == After && !(After & 1))
+			{
+				if(pGone)
+					*pGone = Gone;
 				return true;
+			}
 		}
 		return false;
 	}
@@ -1361,9 +1408,36 @@ public:
 			return m_LatestMonitor; // reuse cached track between polls
 		m_NextMonitorPoll = NowTick + time_freq() / 4;
 
+		// [TClient] 审查 P3 补强（2026-11-20）：monitor 建 SHM→Gone 映射之间有
+		// 亚毫秒缝隙，客户端初次 OpenIslandMap 撞空会永久缺信号——每 5s 补开一次
+		if(!m_pIslandGone && NowTick >= m_NextGoneTry)
+		{
+			m_NextGoneTry = NowTick + time_freq() * 5;
+			HANDLE hGoneRetry = OpenFileMappingW(FILE_MAP_READ, FALSE, L"Local\\TClientIslandMediaGoneV2");
+			if(hGoneRetry)
+			{
+				SIslandGoneV2 *pGoneRetry = (SIslandGoneV2 *)MapViewOfFile(hGoneRetry, FILE_MAP_READ, 0, 0, sizeof(SIslandGoneV2));
+				if(pGoneRetry)
+				{
+					if(m_pIslandGone)
+						UnmapViewOfFile((LPCVOID)m_pIslandGone);
+					if(m_hIslandGone)
+						CloseHandle(m_hIslandGone);
+					m_pIslandGone = pGoneRetry;
+					m_hIslandGone = hGoneRetry;
+				}
+				else
+					CloseHandle(hGoneRetry);
+			}
+		}
+
 		SIslandShm Snap;
-		if(!ReadIslandShm(Snap))
-			return m_LatestMonitor; // 撕裂读重试用尽，沿用上一帧
+		bool PlayerGone = false;
+		if(!ReadIslandShm(Snap, &PlayerGone))
+		{
+			m_LatestMonitor.m_PlayerGone = false;
+			return m_LatestMonitor; // 不沿用失去发布配对的退出信号
+		}
 		if(Snap.Magic != ISLAND_SHM_MAGIC || Snap.Version != ISLAND_SHM_VERSION || !Snap.aTitle[0])
 		{
 			m_LatestMonitor = Out;
@@ -1401,7 +1475,7 @@ public:
 		// LS pauseStatus 明确暂停时强制暂停：双保险，monitor 旧版未重启或电表误判时兜底。
 		Out.m_Playing = Snap.Playing != 0 && Snap.Paused == 0;
 		Out.m_Paused = Snap.Paused != 0;
-		Out.m_PlayerGone = m_pIslandGone != nullptr && *m_pIslandGone != 0u;
+		Out.m_PlayerGone = PlayerGone;
 
 		// 位置来源（v7.1）：
 		//  1) watcher（WatcherMs，最权威）：netease-watcher hook 的网易云内部真实位置，
@@ -3170,6 +3244,8 @@ public:
 			if(Monitor.m_Valid && TcDetectSourceService(Track.m_ServiceId) == 1)
 			{
 				Track.m_Playing = Monitor.m_Playing;
+				if(Track.m_Playing)
+					Track.m_Paused = false;
 				if(!Track.m_Playing)
 				{
 					// monitor 判停即"有歌没在播"，不要当成停止把岛收起；

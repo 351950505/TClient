@@ -32,6 +32,7 @@ struct SScoreInfo
 		m_aPlayerNameText[0] = 0;
 		m_ScoreTextWidth = 0.f;
 		m_Initialized = false;
+		m_NameWasGradient = false;
 	}
 
 	STextContainerIndex m_TextRankContainerIndex;
@@ -44,6 +45,9 @@ struct SScoreInfo
 	STextContainerIndex m_OptionalNameTextContainerIndex;
 
 	bool m_Initialized;
+	// 审计修复（2026-11-20 P3）：上一帧该槽名字是否走了渐变路径——渐变开/关
+	// 切换时必须强制重建普通文本容器，否则继续渲染过期的旧名字
+	bool m_NameWasGradient;
 };
 
 class CHud : public CComponent

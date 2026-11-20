@@ -31,13 +31,14 @@ struct SLyricLine
 };
 
 // 标准 LRC：[mm:ss.xx] 文本（多时间戳/去重/逐字时间合成）。
-// Simplify=true 时把 predominantly 中文且非简体的行正文转成简体
-// （渠道常回繁体；假名/谚文/拉丁行原样保留），转换后的行标记已是简体。
-bool ParseSyncedLyrics(const char *pSyncedLyrics, std::vector<SLyricLine> &vOut, bool Simplify = true);
+// Traditional=false（默认）把 predominantly 中文的行正文统一转成简体
+// （渠道常回繁体）；true 则转成繁体。假名/谚文/拉丁行原样保留，
+// 日文汉字不做中文简繁转换。
+bool ParseSyncedLyrics(const char *pSyncedLyrics, std::vector<SLyricLine> &vOut, bool Traditional = false);
 
 // 网易 yrc：[start,duration](segStart,dur,0)文本(...) 逐字格式。
-// Simplify 语义同上；逐字时轴按字节偏移索引文本，仅接受等长转换结果。
-bool ParseYrcLyrics(const char *pYrc, std::vector<SLyricLine> &vOut, bool Simplify = true);
+// Traditional 语义同上；逐字时轴按字节偏移索引文本，仅接受等长转换结果。
+bool ParseYrcLyrics(const char *pYrc, std::vector<SLyricLine> &vOut, bool Traditional = false);
 
 // Sorted original cues: merge timestamp groups once, choose the nearest <=250ms
 // cue (reject equal-distance ambiguity), and preserve already attached translations.

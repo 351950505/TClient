@@ -856,11 +856,14 @@ int main()
 			Check(Lines[0].m_Text.substr(Words[0].m_CharBegin, Words[0].m_CharLen) == "听", "first karaoke word sliced wrong after conversion");
 			Check(Lines[0].m_Text.substr(Words[1].m_CharBegin, Words[1].m_CharLen) == "话", "second karaoke word sliced wrong after conversion");
 		});
-		Tests.Case("the traditional switch skips the conversion", [&] {
+		Tests.Case("the traditional switch converts to traditional", [&] {
 			std::vector<SLyricLine> Lines;
-			Check(ParseSyncedLyrics("[00:01.00]聽媽媽的話", Lines, false), "traditional lrc rejected");
-			Check(Lines.size() == 1 && Lines[0].m_Text == "聽媽媽的話", "traditional text was converted despite the switch");
+			Check(ParseSyncedLyrics("[00:01.00]听妈妈的话", Lines, true), "simplified lrc rejected");
+			Check(Lines.size() == 1 && Lines[0].m_Text == "聽媽媽的話", "simplified text was not converted to traditional");
 			Check(!Lines[0].m_IsSimplifiedChinese, "traditional line flagged simplified");
+			std::vector<SLyricLine> Already;
+			Check(ParseSyncedLyrics("[00:01.00]聽媽媽的話", Already, true), "traditional lrc rejected");
+			Check(Already.size() == 1 && Already[0].m_Text == "聽媽媽的話", "traditional text was altered in traditional mode");
 		});
 	});
 	Tests.Group("production text width cache invalidation", [&] {

@@ -16,22 +16,26 @@
 
 namespace TcLyric {
 
-static std::string SimplifyChinese(const std::string &Text)
+// 中文脚本转换：Traditional=false 转 zh-CN 简体，true 转 zh-Hant 繁体。
+// 转换标志必须独占（LCMAP_*_CHINESE 不能与其他标志组合）。
+static std::string ConvertChinese(const std::string &Text, bool Traditional)
 {
 #if defined(CONF_FAMILY_WINDOWS)
 	if(Text.empty() || Text.size() > (size_t)std::numeric_limits<int>::max())
 		return Text;
+	const wchar_t *pLocale = Traditional ? L"zh-Hant" : L"zh-CN";
+	const DWORD Mapping = Traditional ? LCMAP_TRADITIONAL_CHINESE : LCMAP_SIMPLIFIED_CHINESE;
 	const int Size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Text.data(), (int)Text.size(), nullptr, 0);
 	if(Size <= 0)
 		return Text;
 	std::wstring Wide(Size, L'\0');
 	if(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Text.data(), (int)Text.size(), Wide.data(), Size) != Size)
 		return Text;
-	const int MappedSize = LCMapStringEx(L"zh-CN", LCMAP_SIMPLIFIED_CHINESE, Wide.data(), Size, nullptr, 0, nullptr, nullptr, 0);
+	const int MappedSize = LCMapStringEx(pLocale, Mapping, Wide.data(), Size, nullptr, 0, nullptr, nullptr, 0);
 	if(MappedSize <= 0)
 		return Text;
 	std::wstring Mapped(MappedSize, L'\0');
-	if(LCMapStringEx(L"zh-CN", LCMAP_SIMPLIFIED_CHINESE, Wide.data(), Size, Mapped.data(), MappedSize, nullptr, nullptr, 0) != MappedSize)
+	if(LCMapStringEx(pLocale, Mapping, Wide.data(), Size, Mapped.data(), MappedSize, nullptr, nullptr, 0) != MappedSize)
 		return Text;
 	const int Bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Mapped.data(), MappedSize, nullptr, 0, nullptr, nullptr);
 	if(Bytes <= 0)
@@ -41,6 +45,11 @@ static std::string SimplifyChinese(const std::string &Text)
 		return Result;
 #endif
 	return Text;
+}
+
+static std::string SimplifyChinese(const std::string &Text)
+{
+	return ConvertChinese(Text, false);
 }
 
 // Validate UTF-8 and reject kana/Hangul for both uses, but keep the original
@@ -87,16 +96,18 @@ bool IsSimplifiedChinese(const std::string &Text)
 	return ChineseTextLetters(Text, Han, OtherLetters) && Han > 0 && Han > OtherLetters && SimplifyChinese(Text) == Text;
 }
 
-// QQ/酷狗/lrclib 兜底常返回繁体歌词；正文统一转简体。只转 predominantly 中文
-// 的行（假名/谚文一律原样，日文汉字不能转成简体字形），已是简体的行走原样。
-static void SimplifyLyricText(std::string &Text)
+// 渠道返回的中文脚本不统一（QQ/酷狗/lrclib 常回繁体），正文统一转到目标
+// 脚本（默认简体；用户勾选繁体模式则转繁体）。只转 predominantly 中文
+// 的行（假名/谚文一律原样，日文汉字不能转成中文简繁字形），已是目标
+// 脚本的行原样。翻译叠加始终走简体（AttachTranslatedLyrics 不受此开关影响）。
+static void ConvertLyricScript(std::string &Text, bool Traditional)
 {
 	int Han, OtherLetters;
 	if(!ChineseTextLetters(Text, Han, OtherLetters) || Han <= 0 || Han <= OtherLetters)
 		return;
-	std::string Simplified = SimplifyChinese(Text);
-	if(Simplified != Text)
-		Text = std::move(Simplified);
+	std::string Converted = ConvertChinese(Text, Traditional);
+	if(Converted != Text)
+		Text = std::move(Converted);
 }
 
 static bool IsProviderChineseTranslation(const std::string &Text)
@@ -174,7 +185,7 @@ static int Utf8CharLen(unsigned char c);
 		return true;
 	}
 
-	bool ParseSyncedLyrics(const char *pSyncedLyrics, std::vector<SLyricLine> &vOut, bool Simplify)
+	bool ParseSyncedLyrics(const char *pSyncedLyrics, std::vector<SLyricLine> &vOut, bool Traditional)
 	{
 		vOut.clear();
 		if(pSyncedLyrics == nullptr || pSyncedLyrics[0] == '\0')
@@ -241,8 +252,7 @@ static int Utf8CharLen(unsigned char c);
 		vOut = std::move(vMerged);
 		for(SLyricLine &Line : vOut)
 		{
-			if(Simplify)
-				SimplifyLyricText(Line.m_Text);
+			ConvertLyricScript(Line.m_Text, Traditional);
 			Line.m_IsSimplifiedChinese = IsSimplifiedChinese(Line.m_Text);
 		}
 		SynthesizeWordTimings(vOut);
@@ -330,7 +340,7 @@ static int Utf8CharLen(unsigned char c);
 		(void)vSegStartDur;
 	}
 
-	bool ParseYrcLyrics(const char *pYrc, std::vector<SLyricLine> &vOut, bool Simplify)
+	bool ParseYrcLyrics(const char *pYrc, std::vector<SLyricLine> &vOut, bool Traditional)
 	{
 		vOut.clear();
 		if(pYrc == nullptr || pYrc[0] == '\0')
@@ -468,15 +478,12 @@ static int Utf8CharLen(unsigned char c);
 			Line.m_StartMs = LineStart;
 			Line.m_Text = Text;
 			Line.m_vWords = std::move(vWords);
-			if(Simplify)
-			{
-				SimplifyLyricText(Line.m_Text);
-				// 逐字时轴按字节偏移索引 m_Text；简繁是 1:1 等长字符映射、偏移保持
-				// 有效，万一映射结果不等长（异常）就回退原文，宁保留繁体也不破坏
-				// 卡拉OK逐字偏移。
-				if(Line.m_Text.size() != Text.size())
-					Line.m_Text = Text;
-			}
+			ConvertLyricScript(Line.m_Text, Traditional);
+			// 逐字时轴按字节偏移索引 m_Text；简繁是 1:1 等长字符映射、偏移保持
+			// 有效，万一映射结果不等长（异常）就回退原文，宁保原脚本也不破坏
+			// 卡拉OK逐字偏移。
+			if(Line.m_Text.size() != Text.size())
+				Line.m_Text = Text;
 			Line.m_IsSimplifiedChinese = IsSimplifiedChinese(Line.m_Text);
 			vOut.push_back(std::move(Line));
 		}

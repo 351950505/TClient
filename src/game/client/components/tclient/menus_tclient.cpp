@@ -1585,7 +1585,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 			if(g_Config.m_TcIslandShowLyrics)
 			{
 				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandDoubleLyrics, TCLocalize("Two-line lyrics (current + next)"), &g_Config.m_TcIslandDoubleLyrics, &Column, LineSize);
-				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandLyricTraditional, TCLocalize("Keep lyrics in traditional Chinese (default simplified)"), &g_Config.m_TcIslandLyricTraditional, &Column, LineSize);
+				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandLyricTraditional, TCLocalize("Traditional Chinese lyrics (default simplified)"), &g_Config.m_TcIslandLyricTraditional, &Column, LineSize);
 			}
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowProgress, TCLocalize("Show game clock"), &g_Config.m_TcIslandShowProgress, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowSongProgress, TCLocalize("Show song progress bar"), &g_Config.m_TcIslandShowSongProgress, &Column, LineSize);

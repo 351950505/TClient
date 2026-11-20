@@ -1023,5 +1023,5 @@ Color swing
 Animation speed
 == 變化速度
 
-Keep lyrics in traditional Chinese (default simplified)
-== 歌詞保持繁體（預設轉簡體）
+Traditional Chinese lyrics (default simplified)
+== 歌詞顯示繁體（預設簡體）

@@ -2263,3 +2263,6 @@ Fast (JuKKi)
 
 NovaPilot
 == NovaPilot（新星领航）
+
+Keep lyrics in traditional Chinese (default simplified)
+== 歌词保持繁体（默认转简体）

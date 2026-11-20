@@ -1583,7 +1583,10 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandNotch, TCLocalize("Notch style (attach to top edge)"), &g_Config.m_TcIslandNotch, &Column, LineSize);
 			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowLyrics, TCLocalize("Show synced lyrics"), &g_Config.m_TcIslandShowLyrics, &Column, LineSize);
 			if(g_Config.m_TcIslandShowLyrics)
+			{
 				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandDoubleLyrics, TCLocalize("Two-line lyrics (current + next)"), &g_Config.m_TcIslandDoubleLyrics, &Column, LineSize);
+				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandLyricTraditional, TCLocalize("Keep lyrics in traditional Chinese (default simplified)"), &g_Config.m_TcIslandLyricTraditional, &Column, LineSize);
+			}
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowProgress, TCLocalize("Show game clock"), &g_Config.m_TcIslandShowProgress, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowSongProgress, TCLocalize("Show song progress bar"), &g_Config.m_TcIslandShowSongProgress, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandLocalClock, TCLocalize("Show local computer time (HH:MM)"), &g_Config.m_TcIslandLocalClock, &Column, LineSize);

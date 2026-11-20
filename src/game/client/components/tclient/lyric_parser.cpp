@@ -174,7 +174,7 @@ static int Utf8CharLen(unsigned char c);
 		return true;
 	}
 
-	bool ParseSyncedLyrics(const char *pSyncedLyrics, std::vector<SLyricLine> &vOut)
+	bool ParseSyncedLyrics(const char *pSyncedLyrics, std::vector<SLyricLine> &vOut, bool Simplify)
 	{
 		vOut.clear();
 		if(pSyncedLyrics == nullptr || pSyncedLyrics[0] == '\0')
@@ -241,7 +241,8 @@ static int Utf8CharLen(unsigned char c);
 		vOut = std::move(vMerged);
 		for(SLyricLine &Line : vOut)
 		{
-			SimplifyLyricText(Line.m_Text);
+			if(Simplify)
+				SimplifyLyricText(Line.m_Text);
 			Line.m_IsSimplifiedChinese = IsSimplifiedChinese(Line.m_Text);
 		}
 		SynthesizeWordTimings(vOut);
@@ -329,7 +330,7 @@ static int Utf8CharLen(unsigned char c);
 		(void)vSegStartDur;
 	}
 
-	bool ParseYrcLyrics(const char *pYrc, std::vector<SLyricLine> &vOut)
+	bool ParseYrcLyrics(const char *pYrc, std::vector<SLyricLine> &vOut, bool Simplify)
 	{
 		vOut.clear();
 		if(pYrc == nullptr || pYrc[0] == '\0')
@@ -467,12 +468,15 @@ static int Utf8CharLen(unsigned char c);
 			Line.m_StartMs = LineStart;
 			Line.m_Text = Text;
 			Line.m_vWords = std::move(vWords);
-			SimplifyLyricText(Line.m_Text);
-			// 逐字时轴按字节偏移索引 m_Text；简繁是 1:1 等长字符映射、偏移保持
-			// 有效，万一映射结果不等长（异常）就回退原文，宁保留繁体也不破坏
-			// 卡拉OK逐字偏移。
-			if(Line.m_Text.size() != Text.size())
-				Line.m_Text = Text;
+			if(Simplify)
+			{
+				SimplifyLyricText(Line.m_Text);
+				// 逐字时轴按字节偏移索引 m_Text；简繁是 1:1 等长字符映射、偏移保持
+				// 有效，万一映射结果不等长（异常）就回退原文，宁保留繁体也不破坏
+				// 卡拉OK逐字偏移。
+				if(Line.m_Text.size() != Text.size())
+					Line.m_Text = Text;
+			}
 			Line.m_IsSimplifiedChinese = IsSimplifiedChinese(Line.m_Text);
 			vOut.push_back(std::move(Line));
 		}

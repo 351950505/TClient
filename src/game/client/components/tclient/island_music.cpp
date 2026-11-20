@@ -1554,6 +1554,7 @@ public:
 		std::string m_Artist;
 		std::string m_Album;
 		int64_t m_DurationMs = 0;
+		bool m_Traditional = false;
 	};
 
 	static constexpr int64_t LYRICS_MAX_BYTES = 4 * 1024 * 1024;
@@ -1605,6 +1606,9 @@ public:
 	}
 
 	STrack m_LyricsIdentity;
+	// 上一次见到的简繁设置；变化时清空所有已解析缓存并重取（缓存里的正文
+	// 是按旧设置转换过的，混用会一半简体一半繁体）。
+	bool m_LyricTraditional = false;
 
 	void UpdateLyricsIdentity(const STrack &Track)
 	{
@@ -1927,6 +1931,7 @@ public:
 			m_pRequestJob->m_Result.m_Artist = m_LyricsIdentity.m_Artist;
 			m_pRequestJob->m_Result.m_Album = m_LyricsIdentity.m_Album;
 			m_pRequestJob->m_Result.m_DurationMs = m_LyricsIdentity.m_DurationMs;
+			m_pRequestJob->m_Result.m_Traditional = g_Config.m_TcIslandLyricTraditional != 0;
 			m_pEngine->AddJob(m_pRequestJob);
 			return;
 		}
@@ -2004,7 +2009,7 @@ public:
 						pSyncedText = pSyncedValue->u.string.ptr;
 				}
 
-				if(ParseSyncedLyrics(pSyncedText, Entry.m_vLines))
+				if(ParseSyncedLyrics(pSyncedText, Entry.m_vLines, Entry.m_Traditional))
 					Entry.m_State = ELyricsState::READY;
 				json_value_free(pRoot);
 			}
@@ -2013,6 +2018,18 @@ public:
 
 	void UpdateLyrics(const STrack &Track)
 	{
+		// 简繁切换检测放在最前：没有曲目时也要清，避免旧缓存残留到下一首
+		const bool Traditional = g_Config.m_TcIslandLyricTraditional != 0;
+		if(Traditional != m_LyricTraditional)
+		{
+			m_LyricTraditional = Traditional;
+#if defined(CONF_FAMILY_WINDOWS)
+			m_NeteaseData.clear();
+#endif
+			m_Cache.clear();
+			ResetLyrics();
+		}
+
 		if(!Track.m_Valid || (Track.m_Title.empty() && Track.m_Artist.empty()))
 		{
 			ResetLyrics();
@@ -2089,9 +2106,14 @@ public:
 		int m_LrclibAttempts = 0;
 		int64_t m_LrclibRetryAt = 0;
 		std::string m_QQMid;
+		// QQ 搜索命中的专辑 mid（与歌词同一评分门槛选中），网易云搜不到的
+		// 云盘歌用它拼 y.gtimg.cn 封面 URL 兜底
+		std::string m_QQAlbumMid;
 		std::string m_KugouHash;
 		std::string m_KugouLyricId;
 		std::string m_KugouAccessKey;
+		// 请求发起时的简繁设置快照（解析在 worker 线程，不读 g_Config）
+		bool m_Traditional = false;
 	};
 
 	class CMusicResponse
@@ -2148,6 +2170,7 @@ public:
 			if(It != m_NeteaseData.end())
 			{
 				It->second.m_TriedQQ = false;
+				It->second.m_QQAlbumMid.clear();
 				It->second.m_LyricState = ELyricsState::NOTFOUND;
 			}
 			m_pQQRequest->Abort();
@@ -2307,6 +2330,7 @@ public:
 		// Keep search/ranking metadata even when the title-monitor identity has
 		// no album. Filling it is not a reason to invalidate an in-flight key.
 		if(!Track.m_Album.empty()) Meta.m_Album = Track.m_Album;
+		Meta.m_Traditional = g_Config.m_TcIslandLyricTraditional != 0;
 		// 曲库搜不到的歌(典型:云盘上传)网易云侧永远 resolve 不了,Meta 曲长一直是
 		// 0,后续 QQ/酷狗/lrclib 的"曲长一致"评分就没有输入。用 SMTC/monitor 的曲长
 		// 补种;已 resolve(拿到曲库时长)不再覆盖,切歌瞬间的旧值残留按 2.5s 阈值在
@@ -2406,13 +2430,24 @@ public:
 					Meta.m_DetailQueued = true;
 					StartNeteaseRequest(Key, aUrl, false, true);
 				}
-				else if(!Meta.m_PicUrl.empty() && !Meta.m_CoverQueued)
-				{
-					Meta.m_CoverQueued = true;
-					if(Meta.m_PicUrl.rfind("http", 0) == 0)
-						StartNeteaseRequest(Key, Meta.m_PicUrl.c_str(), false, false, true);
-				}
+			else if(!Meta.m_PicUrl.empty() && !Meta.m_CoverQueued)
+			{
+				Meta.m_CoverQueued = true;
+				if(Meta.m_PicUrl.rfind("http", 0) == 0)
+					StartNeteaseRequest(Key, Meta.m_PicUrl.c_str(), false, false, true);
 			}
+		}
+		else if(!m_pNeteaseRequest && !Meta.m_Resolved && Meta.m_TriedLyric && Meta.m_PicUrl.empty() &&
+			!Meta.m_QQAlbumMid.empty() && !Meta.m_CoverQueued)
+		{
+			// 云盘歌等网易云搜不到的歌：QQ 搜索命中（同一评分门槛选中的那一首）
+			// 的专辑图兜底，复用网易云封面槽位与原始字节解析。QQ 音乐播放器
+			// 场景同样受益——此前非网易云来源完全没有封面下载链路。
+			char aUrl[256];
+			str_format(aUrl, sizeof(aUrl), "https://y.gtimg.cn/music/photo_new/T002R300x300M000%s.jpg", Meta.m_QQAlbumMid.c_str());
+			Meta.m_CoverQueued = true;
+			StartNeteaseRequest(Key, aUrl, false, false, true);
+		}
 		}
 
 		m_LyricsState = Meta.m_LyricState;
@@ -2443,6 +2478,7 @@ public:
 				Response.m_Meta.m_Artist = It->second.m_Artist;
 				Response.m_Meta.m_Album = It->second.m_Album;
 				Response.m_Meta.m_DurationMs = It->second.m_DurationMs;
+				Response.m_Meta.m_Traditional = It->second.m_Traditional;
 			}
 			m_pEngine->AddJob(m_pNeteaseJob);
 			return;
@@ -2792,13 +2828,13 @@ public:
 					const json_value *pLyric = pLrc ? json_object_get(pLrc, "lyric") : nullptr;
 					const char *pLyricText = (pLyric != nullptr && pLyric->type == json_string) ? pLyric->u.string.ptr : "";
 
-					const bool LrcOk = ParseSyncedLyrics(pLyricText, Meta.m_vFallbackLines);
+					const bool LrcOk = ParseSyncedLyrics(pLyricText, Meta.m_vFallbackLines, Meta.m_Traditional);
 
 						bool Ok = false;
 						if(pYrcText[0] != '\0')
 						{
 							std::vector<SLyricLine> vYrc;
-							if(ParseYrcLyrics(pYrcText, vYrc))
+							if(ParseYrcLyrics(pYrcText, vYrc, Meta.m_Traditional))
 							{
 								Meta.m_vLines = std::move(vYrc);
 								++Meta.m_LinesRevision;
@@ -2860,6 +2896,7 @@ public:
 					m_pQQJob->m_Result.m_Meta.m_Artist = It->second.m_Artist;
 					m_pQQJob->m_Result.m_Meta.m_Album = It->second.m_Album;
 					m_pQQJob->m_Result.m_Meta.m_DurationMs = It->second.m_DurationMs;
+					m_pQQJob->m_Result.m_Meta.m_Traditional = It->second.m_Traditional;
 				}
 			}
 			m_pEngine->AddJob(m_pQQJob);
@@ -2882,6 +2919,8 @@ public:
 		const bool FoundMid = !Parsed.m_QQMid.empty();
 		if(FoundMid)
 			Meta.m_QQMid = std::move(Parsed.m_QQMid);
+		if(!Parsed.m_QQAlbumMid.empty())
+			Meta.m_QQAlbumMid = std::move(Parsed.m_QQAlbumMid);
 		if(!Parsed.m_vLines.empty())
 		{
 			Meta.m_vLines = std::move(Parsed.m_vLines);
@@ -2952,13 +2991,19 @@ public:
 					{
 						const json_value *pMid = json_object_get(pBest, "songmid");
 						Meta.m_QQMid = pMid->u.string.ptr;
+						// 专辑 mid 与歌词同一评分门槛选中；网易云搜不到的云盘歌靠它兜底封面
+						const json_value *pAlbumMid = json_object_get(pBest, "albummid");
+						if(pAlbumMid != nullptr && pAlbumMid->type == json_string && pAlbumMid->u.string.length > 0)
+							Meta.m_QQAlbumMid = pAlbumMid->u.string.ptr;
+						else
+							Meta.m_QQAlbumMid.clear();
 					}
 				}
 				else if(Success && WasLyric)
 				{
 					const json_value *pLyric = json_object_get(pRoot, "lyric");
 					std::vector<SLyricLine> vLines;
-					if(pLyric->type == json_string && ParseSyncedLyrics(pLyric->u.string.ptr, vLines))
+					if(pLyric->type == json_string && ParseSyncedLyrics(pLyric->u.string.ptr, vLines, Meta.m_Traditional))
 					{
 						const json_value *pTranslated = json_object_get(pRoot, "trans");
 						if(pTranslated && pTranslated->type == json_string)
@@ -3097,7 +3142,7 @@ public:
 				{
 					vDecoded[DecodedLen] = '\0';
 					std::vector<SLyricLine> vLines;
-					if(ParseSyncedLyrics(vDecoded.data(), vLines))
+					if(ParseSyncedLyrics(vDecoded.data(), vLines, Meta.m_Traditional))
 					{
 						Meta.m_vLines = std::move(vLines);
 						++Meta.m_LinesRevision;
@@ -3126,6 +3171,7 @@ public:
 					m_pKugouJob->m_Result.m_Meta.m_Artist = It->second.m_Artist;
 					m_pKugouJob->m_Result.m_Meta.m_Album = It->second.m_Album;
 					m_pKugouJob->m_Result.m_Meta.m_DurationMs = It->second.m_DurationMs;
+					m_pKugouJob->m_Result.m_Meta.m_Traditional = It->second.m_Traditional;
 				}
 			}
 			m_pEngine->AddJob(m_pKugouJob);

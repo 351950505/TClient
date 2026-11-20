@@ -1001,3 +1001,6 @@ Players
 
 Prediction mode (show hook landing before firing)
 == 預判模式（出鉤前顯示將鉤到的落點）
+
+Keep lyrics in traditional Chinese (default simplified)
+== 歌詞保持繁體（預設轉簡體）

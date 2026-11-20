@@ -285,6 +285,7 @@ public:
 	char m_TcIslandFont[128] = "";
 	char m_TcCustomFont[255] = "Default";
 	char m_TcIslandLrclibBase[128] = "https://lrclib.net";
+	int m_TcIslandLyricTraditional = 0;
 };
 static CTestFontConfig g_Config;
 static int str_length(const char *pText) { return (int)strlen(pText); }
@@ -855,6 +856,12 @@ int main()
 			Check(Lines[0].m_Text.substr(Words[0].m_CharBegin, Words[0].m_CharLen) == "听", "first karaoke word sliced wrong after conversion");
 			Check(Lines[0].m_Text.substr(Words[1].m_CharBegin, Words[1].m_CharLen) == "话", "second karaoke word sliced wrong after conversion");
 		});
+		Tests.Case("the traditional switch skips the conversion", [&] {
+			std::vector<SLyricLine> Lines;
+			Check(ParseSyncedLyrics("[00:01.00]聽媽媽的話", Lines, false), "traditional lrc rejected");
+			Check(Lines.size() == 1 && Lines[0].m_Text == "聽媽媽的話", "traditional text was converted despite the switch");
+			Check(!Lines[0].m_IsSimplifiedChinese, "traditional line flagged simplified");
+		});
 	});
 	Tests.Group("production text width cache invalidation", [&] {
 		Tests.Case("font changes invalidate and stable fonts reuse widths", [&] {
@@ -1069,9 +1076,27 @@ int main()
 			auto &Meta = Fixture.Music().m_NeteaseData.at(Fixture.Music().m_ActiveKey);
 			Check(Meta.m_DurationMs == 120000, "playing duration was not seeded for fallback scoring");
 			Check(!Meta.m_Resolved && Meta.m_TriedLyric && Count(QQ_SEARCH) == 1, "empty NetEase search did not hand over to QQ");
-			Last(QQ_SEARCH)->Complete(R"({"code":0,"data":{"song":{"list":[{"songmid":"midWrong","songname":"TrackA","albumname":"","interval":200,"singer":[{"name":"Artist"}]},{"songmid":"midRight","songname":"TrackA","albumname":"","interval":120,"singer":[{"name":"Artist"}]}]}}})");
+			Last(QQ_SEARCH)->Complete(R"({"code":0,"data":{"song":{"list":[{"songmid":"midWrong","songname":"TrackA","albumname":"","interval":200,"singer":[{"name":"Artist"}]},{"songmid":"midRight","songname":"TrackA","albumname":"","interval":120,"albummid":"albumRight","singer":[{"name":"Artist"}]}]}}})");
 			Tick(Fixture);
 			Check(Last(QQ_LYRIC)->m_Url.find("songmid=midRight") != std::string::npos, "QQ fallback ignored the duration anchor");
+			// 同一次评分命中的专辑图兜底下载（网易云搜不到 → 无曲库封面）
+			Check(Count("y.gtimg.cn") == 1, "QQ album cover fallback did not start");
+			const auto pCover = Last("y.gtimg.cn");
+			Check(pCover->m_Url.find("T002R300x300M000albumRight.jpg") != std::string::npos, "cover fallback used the wrong album");
+			Check(pCover->m_MaxResponseSize == 16u * 1024u * 1024u, "cover fallback lost the cover size limit");
+		});
+		Tests.Case("toggling the simplified/traditional switch wipes parsed caches", [&] {
+			CFixture Fixture;
+			Tick(Fixture); // NET_SEARCH in flight
+			Check(Count(NET_SEARCH) == 1, "expected the initial search");
+			g_Config.m_TcIslandLyricTraditional = 1;
+			Render(Fixture); // switch detected -> caches wiped, same song re-requested
+			Check(Count(NET_SEARCH) == 2, "script switch did not restart the lyric pipeline");
+			Last(NET_SEARCH)->Complete(NET_FOUND);
+			Tick(Fixture);
+			Last(NET_LYRIC)->Complete(NET_LINES);
+			CheckReady(Fixture, "Net lyric");
+			g_Config.m_TcIslandLyricTraditional = 0;
 		});
 	});
 	Tests.Group("real YRC priority and LRC degradation", [&] {

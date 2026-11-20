@@ -1579,6 +1579,15 @@ void CPlayers::OnRender()
 	const int HookPredictViewId = (GameClient()->m_Snap.m_SpecInfo.m_Active && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW) ? GameClient()->m_Snap.m_SpecInfo.m_SpectatorId : GameClient()->m_Snap.m_LocalClientId;
 	const SHookLandingPrediction *pHookPredictLanding = g_Config.m_TcHookTileHighlightFreeze ? HookLandingPrediction(HookPredictViewId) : nullptr;
 	const int HookPredictTargetId = pHookPredictLanding ? pHookPredictLanding->m_PlayerId : -1;
+	// 视角主人当前钩住的玩家：钩住冻结 tee 期间保持常亮——救活拉扯时准星
+	// 离移不再让染色熄灭（修复来回闪烁）。
+	int HookHeldId = -1;
+	if(in_range(HookPredictViewId, MAX_CLIENTS - 1))
+	{
+		const auto &ViewChar = GameClient()->m_aClients[HookPredictViewId].m_RenderCur;
+		if(ViewChar.m_HookState == HOOK_GRABBED && in_range(ViewChar.m_HookedPlayer, MAX_CLIENTS - 1))
+			HookHeldId = ViewChar.m_HookedPlayer;
+	}
 
 	for(int i = 0; i < MAX_CLIENTS; ++i)
 	{
@@ -1677,10 +1686,12 @@ void CPlayers::OnRender()
 		// 预判冻结 tee 染色：预判模拟命中可钩冻结 tee 时，按卡锤高亮同款
 		// 0.12s 节奏渐入渐出。卡锤染色优先——实际出锤/出钩的真实反馈压过
 		// 预判；染色层与渲染层读同一 alpha 值判优先级，同帧一致不错乱。
-		const bool HookPredictFrozenMarked = i == HookPredictTargetId &&
+		// Marked = 预判命中该冻结 tee，或视角主人正钩住它（救活拉扯中准星
+		// 离移不再熄灭）；渐出放缓到 0.2s——快速扫掠时轻微离开也不抖。
+		const bool HookPredictFrozenMarked = (i == HookPredictTargetId || i == HookHeldId) &&
 			(GameClient()->m_aClients[i].m_FreezeEnd != 0 || GameClient()->m_aClients[i].m_LiveFrozen);
 		float &HookPredictAlpha = m_aHookPredictHighlightAlpha[i];
-		HookPredictAlpha = TcAdvanceHighlightTimed(HookPredictAlpha, HookPredictFrozenMarked, Client()->RenderFrameTime(), 0.04f, 0.12f);
+		HookPredictAlpha = TcAdvanceHighlightTimed(HookPredictAlpha, HookPredictFrozenMarked, Client()->RenderFrameTime(), 0.04f, 0.2f);
 		if(Alpha <= 0.001f && HookPredictAlpha > 0.001f)
 		{
 			const ColorRGBA HookPredictBodyColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcHookTileHighlightFreezeBodyColor));

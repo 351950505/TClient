@@ -831,6 +831,31 @@ int main()
 				Check(Lines[0].m_StartMs == Test.m_ExpectedMs, "timestamp milliseconds are incorrect");
 			});
 	});
+	Tests.Group("fetched lyrics are normalized to simplified Chinese", [&] {
+		Tests.Case("traditional lines are converted and flagged simplified", [&] {
+			std::vector<SLyricLine> Lines;
+			Check(ParseSyncedLyrics("[00:01.00]聽媽媽的話\n[00:03.00]別讓她受傷", Lines), "traditional lrc rejected");
+			Check(Lines.size() == 2, "traditional lrc line count wrong");
+			Check(Lines[0].m_Text == "听妈妈的话" && Lines[1].m_Text == "别让她受伤", "traditional line was not converted");
+			Check(Lines[0].m_IsSimplifiedChinese && Lines[1].m_IsSimplifiedChinese, "converted lines are not flagged simplified");
+		});
+		Tests.Case("already simplified, kana and latin lines pass through untouched", [&] {
+			std::vector<SLyricLine> Lines;
+			Check(ParseSyncedLyrics("[00:01.00]听妈妈的话\n[00:03.00]夜に駆ける\n[00:05.00]La la la", Lines), "mixed lrc rejected");
+			Check(Lines[0].m_Text == "听妈妈的话" && Lines[0].m_IsSimplifiedChinese, "simplified line changed");
+			Check(Lines[1].m_Text == "夜に駆ける" && !Lines[1].m_IsSimplifiedChinese, "kana line was touched");
+			Check(Lines[2].m_Text == "La la la" && !Lines[2].m_IsSimplifiedChinese, "latin line was touched");
+		});
+		Tests.Case("yrc word offsets survive the conversion", [&] {
+			std::vector<SLyricLine> Lines;
+			Check(TcLyric::ParseYrcLyrics("[1000,2000](1000,1000,0)聽(2000,1000,0)話", Lines), "traditional yrc rejected");
+			Check(Lines.size() == 1 && Lines[0].m_Text == "听话", "yrc text was not converted");
+			const auto &Words = Lines[0].m_vWords;
+			Check(Words.size() == 2, "yrc words lost");
+			Check(Lines[0].m_Text.substr(Words[0].m_CharBegin, Words[0].m_CharLen) == "听", "first karaoke word sliced wrong after conversion");
+			Check(Lines[0].m_Text.substr(Words[1].m_CharBegin, Words[1].m_CharLen) == "话", "second karaoke word sliced wrong after conversion");
+		});
+	});
 	Tests.Group("production text width cache invalidation", [&] {
 		Tests.Case("font changes invalidate and stable fonts reuse widths", [&] {
 			CMusic Music;

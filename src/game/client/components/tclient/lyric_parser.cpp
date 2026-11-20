@@ -87,6 +87,18 @@ bool IsSimplifiedChinese(const std::string &Text)
 	return ChineseTextLetters(Text, Han, OtherLetters) && Han > 0 && Han > OtherLetters && SimplifyChinese(Text) == Text;
 }
 
+// QQ/酷狗/lrclib 兜底常返回繁体歌词；正文统一转简体。只转 predominantly 中文
+// 的行（假名/谚文一律原样，日文汉字不能转成简体字形），已是简体的行走原样。
+static void SimplifyLyricText(std::string &Text)
+{
+	int Han, OtherLetters;
+	if(!ChineseTextLetters(Text, Han, OtherLetters) || Han <= 0 || Han <= OtherLetters)
+		return;
+	std::string Simplified = SimplifyChinese(Text);
+	if(Simplified != Text)
+		Text = std::move(Simplified);
+}
+
 static bool IsProviderChineseTranslation(const std::string &Text)
 {
 	int Han, OtherLetters;
@@ -228,7 +240,10 @@ static int Utf8CharLen(unsigned char c);
 		}
 		vOut = std::move(vMerged);
 		for(SLyricLine &Line : vOut)
+		{
+			SimplifyLyricText(Line.m_Text);
 			Line.m_IsSimplifiedChinese = IsSimplifiedChinese(Line.m_Text);
+		}
 		SynthesizeWordTimings(vOut);
 		return !vOut.empty();
 	}
@@ -451,7 +466,13 @@ static int Utf8CharLen(unsigned char c);
 			SLyricLine Line;
 			Line.m_StartMs = LineStart;
 			Line.m_Text = Text;
-			Line.m_vWords = vWords;
+			Line.m_vWords = std::move(vWords);
+			SimplifyLyricText(Line.m_Text);
+			// 逐字时轴按字节偏移索引 m_Text；简繁是 1:1 等长字符映射、偏移保持
+			// 有效，万一映射结果不等长（异常）就回退原文，宁保留繁体也不破坏
+			// 卡拉OK逐字偏移。
+			if(Line.m_Text.size() != Text.size())
+				Line.m_Text = Text;
 			Line.m_IsSimplifiedChinese = IsSimplifiedChinese(Line.m_Text);
 			vOut.push_back(std::move(Line));
 		}

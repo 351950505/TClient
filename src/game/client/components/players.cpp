@@ -808,11 +808,48 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 		return;
 	}
 
-	// 缓存容器（修复钩墙卡顿）：抓住期间钩点恒定，几何与颜色只在"选择砖块/
-	// 钩点/配置指纹"变化时重建一次；每帧只剩一次与瓦片地图同管线的缓冲容器
-	// 提交，不再把逐帧立即模式批次（无纹理管线切换 + 动态顶点缓冲）插进连续
-	// 渲染流。RGB 循环量化到 48 桶：默认速度下约 0.4 s 重建一次，桶间色差
-	// 肉眼不可辨。
+	// 选砖范围与亮心（提前计算：重建判断与渐变构建都要用）。
+	float MinX = Selection.m_aTiles[0].m_X;
+	float MaxX = MinX;
+	float MinY = Selection.m_aTiles[0].m_Y;
+	float MaxY = MinY;
+	for(int Index = 1; Index < Selection.m_Count; ++Index)
+	{
+		MinX = std::min(MinX, (float)Selection.m_aTiles[Index].m_X);
+		MaxX = std::max(MaxX, (float)Selection.m_aTiles[Index].m_X);
+		MinY = std::min(MinY, (float)Selection.m_aTiles[Index].m_Y);
+		MaxY = std::max(MaxY, (float)Selection.m_aTiles[Index].m_Y);
+	}
+	// 亮心=钩住的那一侧：以钩点（钳制到选砖范围）为渐变中心，预判与抓住
+	// 一致。预判模式下钩点随准星连续变化，量化到 8 单位网格再作中心，
+	// 同一格内微动零重建（8 单位误差在 46+ 半径的柔光里不可辨）；量化后
+	// 再钳回范围，防止偏出砖块边缘。
+	const auto QuantizeCenter = [](float v) { return std::floor(v / 8.0f) * 8.0f + 4.0f; };
+	const vec2 Contact = vec2(
+		std::clamp((Predict ? QuantizeCenter(HookPos.x) : (float)Character.m_HookX), MinX * 32.0f, (MaxX + 1) * 32.0f),
+		std::clamp((Predict ? QuantizeCenter(HookPos.y) : (float)Character.m_HookY), MinY * 32.0f, (MaxY + 1) * 32.0f));
+	const float Alpha = g_Config.m_TcHookTileHighlightOpacity / 100.0f;
+	// 顶点 alpha 结构（颜色仍由渲染时整体调制）。默认径向柔光：以钩点为圆心
+	// 分段线性衰减——中心全强度、55% 处 55%、边缘 12%（对齐对比稿
+	// softgradradial 的三段 stop，半径=区域最长边×0.95）；纵向柔光
+	// （tc_hook_tile_highlight_gradient=1）：组顶 28% 到组底 100% 线性，
+	// 接缝双砖按整组高度归一保证无缝。
+	const float RegionW = (MaxX - MinX + 1.0f) * 32.0f;
+	const float RegionH = (MaxY - MinY + 1.0f) * 32.0f;
+	const float FalloffRadius = std::max(RegionW, RegionH) * 0.95f;
+	const float GroupTop = MinY * 32.0f;
+	const float GroupHeight = std::max(1.0f, RegionH);
+	const auto FalloffAlpha = [&](vec2 Point) {
+		if(g_Config.m_TcHookTileHighlightGradient)
+			return Alpha * (0.28f + 0.72f * std::clamp((Point.y - GroupTop) / GroupHeight, 0.0f, 1.0f));
+		const float T = std::clamp(distance(Point, Contact) / FalloffRadius, 0.0f, 1.0f);
+		const float V = T <= 0.55f ? 1.0f - 0.45f * (T / 0.55f) : 0.55f - 0.43f * ((T - 0.55f) / 0.45f);
+		return Alpha * V;
+	};
+
+	// 缓存容器（修复钩墙卡顿）：几何只在"选择砖块/量化亮心/配置指纹"变化时
+	// 重建一次；每帧只剩一次与瓦片地图同管线的缓冲容器提交，不再把逐帧立即
+	// 模式批次（无纹理管线切换 + 动态顶点缓冲）插进连续渲染流。
 	// 64 位重建键，字段无重叠：透明度 0-6、光晕 7、预判模式 8。动态颜色不进键：
 	// 顶点色已白化（RGB=1），颜色由渲染时的整体调制（SetColor + 容器 Ex 路径，
 	// primex shader: FragClr = vertColor * gVerticesColor）承载，颜色每帧连续
@@ -820,12 +857,12 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 	const unsigned long long Key = ((unsigned long long)(g_Config.m_TcHookTileHighlightOpacity & 0x7F) << 0) |
 		((unsigned long long)(g_Config.m_TcHookTileHighlightGlow & 1) << 7) |
 		((unsigned long long)(Predict ? 1 : 0) << 8);
-	// 预判模式的几何只依赖所选砖块与配置（梯度焦点取区域中心），不比较钩点，
-	// 准星在同一块砖内微动不会触发逐帧重建。
+	// 重建条件：砖块、量化亮心与配置指纹。预判模式的亮心已量化到 8 单位
+	// 网格，同一格内准星微动不会触发逐帧重建。
 	bool SameSelection = m_HookTileHighlightContainer != -1 &&
 		m_HookTileHighlightTileCount == Selection.m_Count &&
-		(Predict || (m_HookTileHighlightHookX == (int)HookPos.x &&
-			m_HookTileHighlightHookY == (int)HookPos.y)) &&
+		m_HookTileHighlightHookX == (int)Contact.x &&
+		m_HookTileHighlightHookY == (int)Contact.y &&
 		m_HookTileHighlightKey == Key;
 	for(int Index = 0; SameSelection && Index < Selection.m_Count; ++Index)
 		SameSelection = m_HookTileHighlightTileX[Index] == Selection.m_aTiles[Index].m_X &&
@@ -843,47 +880,11 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 		HookTileHighlightReset();
 		m_HookTileHighlightContainer = Graphics()->CreateQuadContainer(false);
 
-		// 顶点色白化：RGB 固定 1，alpha 承载晕染/光晕/边框的结构；实际颜色在
+		// 顶点色白化：RGB 固定 1，alpha 承载柔光渐变/光晕的结构；实际颜色在
 		// 渲染时整体调制（见 HookTileHighlightColor），构建与颜色完全解耦。
-		// 接触晕染 × Nova 机制：钩子接触点附近更亮，向外平滑衰减为低强度底染。
 		// 混合模式为加法（BlendAdditive）：普通 alpha 混合下 src = 纹理×顶点色，
 		// 实心砖纹理是深灰(48,48,48)，浅色高亮乘上去只剩 ~18% 亮度，等于隐形——
 		// 加法让所选颜色真正"点亮"砖块区域，与 Nova 的发光观感一致。
-		const float Alpha = g_Config.m_TcHookTileHighlightOpacity / 100.0f;
-		float MinX = Selection.m_aTiles[0].m_X;
-		float MaxX = MinX;
-		float MinY = Selection.m_aTiles[0].m_Y;
-		float MaxY = MinY;
-		for(int Index = 1; Index < Selection.m_Count; ++Index)
-		{
-			MinX = std::min(MinX, (float)Selection.m_aTiles[Index].m_X);
-			MaxX = std::max(MaxX, (float)Selection.m_aTiles[Index].m_X);
-			MinY = std::min(MinY, (float)Selection.m_aTiles[Index].m_Y);
-			MaxY = std::max(MaxY, (float)Selection.m_aTiles[Index].m_Y);
-		}
-		// 梯度焦点：预判模式取所选区域中心（砖块量化，随砖块稳定，避免准星微动
-		// 每帧重建）；抓住模式为真实钩点。
-		const vec2 Contact = Predict ? vec2((MinX + MaxX + 1.0f) * 16.0f, (MinY + MaxY + 1.0f) * 16.0f) :
-						vec2(
-							std::clamp((float)Character.m_HookX, MinX * 32.0f, (MaxX + 1) * 32.0f),
-							std::clamp((float)Character.m_HookY, MinY * 32.0f, (MaxY + 1) * 32.0f));
-		// 顶点 alpha 结构（颜色仍由渲染时整体调制）。默认径向柔光：以钩点为圆心
-		// 分段线性衰减——中心全强度、55% 处 55%、边缘 12%（对齐对比稿
-		// softgradradial 的三段 stop，半径=区域最长边×0.95）；纵向柔光
-		// （tc_hook_tile_highlight_gradient=1）：组顶 28% 到组底 100% 线性，
-		// 接缝双砖按整组高度归一保证无缝。
-		const float RegionW = (MaxX - MinX + 1.0f) * 32.0f;
-		const float RegionH = (MaxY - MinY + 1.0f) * 32.0f;
-		const float FalloffRadius = std::max(RegionW, RegionH) * 0.95f;
-		const float GroupTop = MinY * 32.0f;
-		const float GroupHeight = std::max(1.0f, RegionH);
-		const auto FalloffAlpha = [&](vec2 Point) {
-			if(g_Config.m_TcHookTileHighlightGradient)
-				return Alpha * (0.28f + 0.72f * std::clamp((Point.y - GroupTop) / GroupHeight, 0.0f, 1.0f));
-			const float T = std::clamp(distance(Point, Contact) / FalloffRadius, 0.0f, 1.0f);
-			const float V = T <= 0.55f ? 1.0f - 0.45f * (T / 0.55f) : 0.55f - 0.43f * ((T - 0.55f) / 0.45f);
-			return Alpha * V;
-		};
 		constexpr int SubQuads = 4;
 		constexpr float CellSize = 32.0f / SubQuads;
 		const auto FillRect = [&](float X, float Y, float W, float H, const ColorRGBA &ColorTL, const ColorRGBA &ColorTR, const ColorRGBA &ColorBR, const ColorRGBA &ColorBL) {
@@ -961,8 +962,8 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 			m_HookTileHighlightTileX[Index] = Selection.m_aTiles[Index].m_X;
 			m_HookTileHighlightTileY[Index] = Selection.m_aTiles[Index].m_Y;
 		}
-		m_HookTileHighlightHookX = (int)HookPos.x;
-		m_HookTileHighlightHookY = (int)HookPos.y;
+		m_HookTileHighlightHookX = (int)Contact.x;
+		m_HookTileHighlightHookY = (int)Contact.y;
 		m_HookTileHighlightKey = Key;
 		m_HookTileHighlightLastRebuild = Now;
 	}

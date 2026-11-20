@@ -246,6 +246,9 @@ public:
 	{
 		if(pTicks == nullptr || ElapsedTicks <= 0)
 			return;
+		// 队伍轮次模式：0 队（散人）不走全队冻结/全员死亡的轮次状态机，
+		// 改用逐玩家重置（死亡后在起点重新出现，见第 2 段）。
+		const bool TeamRoundMode = IsTrackedTeam(LocalTeam, IncludeTeamZero) && LocalTeam != TEAM_FLOCK;
 		if(LocalTeam != m_StatsLocalTeam)
 		{
 			// 本地换队：已计入的数字保留（沿用显示过滤），轮次状态全部重来。
@@ -257,7 +260,7 @@ public:
 			for(SPlayer &Player : m_aPlayers)
 				Player.m_LastCounted = false;
 		}
-		if(m_AledEpisodeDone)
+		if(TeamRoundMode && m_AledEpisodeDone)
 		{
 			bool AllDead = true;
 			for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
@@ -281,7 +284,7 @@ public:
 				m_aEpisodeDeaths = {};
 			}
 		}
-		if(m_WaitForUnfrozen)
+		if(TeamRoundMode && m_WaitForUnfrozen)
 		{
 			// 等待期照常推进衰减，解锁首 tick 才不会拿旧钩冻/旧冻结基线虚记。
 			for(SPlayer &Player : m_aPlayers)
@@ -289,7 +292,6 @@ public:
 				Player.m_HookFrozenMateTicks = std::max(0, Player.m_HookFrozenMateTicks - ElapsedTicks);
 				Player.m_StatHasPrev = false;
 				Player.m_StatPrevJumpedTotal = -1;
-				Player.m_PendingRescuers = 0; // 旧轮次的救援待确认一并作废
 			}
 			// K 消息可能先于重生快照；仍在服的成员全部重新出现并解冻前，
 			// 不把旧冻结状态计作新一轮。永久离线的成员不再阻塞计数；
@@ -337,9 +339,6 @@ public:
 		const SPlayer &Rescuer = m_aPlayers[HookerId];
 		if(Rescuer.m_Team != Victim.m_Team || !IsTrackedTeam(Rescuer.m_Team, IncludeTeamZero))
 			continue;
-		Victim.m_PendingRescuers = 1ULL << HookerId;
-		Victim.m_PendingSaveX = VictimTick.m_X;
-		Victim.m_PendingSaveY = VictimTick.m_Y;
 	}
 
 		// 2) 逐玩家计数与状态推进。
@@ -353,7 +352,6 @@ public:
 				Player.m_HookFrozenMateTicks = std::max(0, Player.m_HookFrozenMateTicks - ElapsedTicks);
 				Player.m_StatHasPrev = false;
 				Player.m_StatPrevJumpedTotal = -1;
-				Player.m_PendingRescuers = 0; // 角色消失/离线：救援确认作废
 				continue;
 			}
 
@@ -401,31 +399,6 @@ public:
 			else
 				Player.m_TicksAlive += std::min(ElapsedTicks, std::numeric_limits<int>::max() - Player.m_TicksAlive);
 
-			// 救援确认：待确认的被救者进入活的状态（自己出钩、被钩或累计移动
-			// ≥半砖——锤/激光击打会让它立刻恢复行动自然落入触发），钩手各 +1；
-			// 再次冻结或死亡（由 FeedDeath 清）则作废。
-			if(Player.m_PendingRescuers != 0)
-			{
-				const float PendingDX = Now.m_X - Player.m_PendingSaveX;
-				const float PendingDY = Now.m_Y - Player.m_PendingSaveY;
-				const bool EnteredAlive = Now.m_HookState == HOOK_FLYING || Now.m_HookState == HOOK_GRABBED ||
-					PendingDX * PendingDX + PendingDY * PendingDY >= 16.0f * 16.0f;
-				if(Now.m_Frozen)
-					Player.m_PendingRescuers = 0;
-				else if(EnteredAlive)
-				{
-					for(int RescuerId = 0; RescuerId < MAX_CLIENTS; ++RescuerId)
-					{
-						if(!(Player.m_PendingRescuers & (1ULL << RescuerId)))
-							continue;
-						SPlayer &Rescuer = m_aPlayers[RescuerId];
-						if(Rescuer.m_Saves < std::numeric_limits<int>::max())
-							++Rescuer.m_Saves;
-					}
-					Player.m_PendingRescuers = 0;
-				}
-			}
-
 			Player.m_StatPrevFrozen = Now.m_Frozen;
 			Player.m_StatPrevHookState = Now.m_HookState;
 			Player.m_StatPrevFreezeEnd = Now.m_FreezeEndTick;
@@ -455,11 +428,11 @@ public:
 			}
 		}
 
-		// 3) 坚持 / 全灭（整队轮次，只统计已离开起点的玩家）。
+		// 3) 坚持 / 全灭（整队轮次，只统计已离开起点的玩家；0 队跳过）。
 		int Eligible = 0;
 		int UnfrozenEligible = 0;
 		int LastUnfrozenId = -1;
-		if(IsTrackedTeam(LocalTeam, IncludeTeamZero))
+		if(TeamRoundMode)
 		{
 			for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
 			{
@@ -528,7 +501,6 @@ private:
 		Player.m_StatHasPrev = false;
 		Player.m_HookFrozenMateTicks = 0;
 		Player.m_HookFrozenMateId = -1;
-		Player.m_PendingRescuers = 0;
 		Player.m_StatPrevJumpedTotal = -1;
 		Player.m_LastCounted = false;
 	}

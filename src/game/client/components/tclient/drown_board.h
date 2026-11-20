@@ -56,6 +56,13 @@ class CTClientDrownBoard
 		int m_StatPrevJumpedTotal = -1;
 		int m_HookFrozenMateTicks = 0; // >0：最近 SAVE_WINDOW_TICKS tick 内钩住过冻结队友
 		int m_HookFrozenMateId = -1;
+		// 救援待确认（2026-11-21 用户口径）：解冻瞬间收集 25 tick 内钩住过它的
+		// 本队成员；被救者 1 秒内进入活的状态（自己出钩或明显移动）才给钩手 +1，
+		// 自然解冻不虚记。
+		unsigned long long m_PendingRescuers = 0;
+		int m_PendingSaveTicks = 0;
+		float m_PendingSaveX = 0.0f;
+		float m_PendingSaveY = 0.0f;
 		bool m_LastCounted = false; // 本轮“坚持”已计数
 	};
 	std::array<SPlayer, MAX_CLIENTS> m_aPlayers{};
@@ -276,6 +283,8 @@ public:
 				Player.m_HookFrozenMateTicks = std::max(0, Player.m_HookFrozenMateTicks - ElapsedTicks);
 				Player.m_StatHasPrev = false;
 				Player.m_StatPrevJumpedTotal = -1;
+				Player.m_PendingRescuers = 0; // 旧轮次的救援待确认一并作废
+				Player.m_PendingSaveTicks = 0;
 			}
 			// K 消息可能先于重生快照；仍在服的成员全部重新出现并解冻前，
 			// 不把旧冻结状态计作新一轮。永久离线的成员不再阻塞计数；
@@ -298,26 +307,34 @@ public:
 
 		const float HookHitRadius2 = HOOK_HIT_RADIUS * HOOK_HIT_RADIUS;
 
-		// 1) 救援归因：用上一 tick 建立的“钩住冻结队友”标记，队友解冻时给钩手 +1。
-		for(int VictimId = 0; VictimId < MAX_CLIENTS; ++VictimId)
+	// 1) 救援归因（解冻 tick）：收集 25 tick 窗口内钩住过该冻结 tee 的本队成员
+	// 到被救者的待确认集；真正计数在被救者「进入活的状态」时（见第 2 段）。
+	for(int VictimId = 0; VictimId < MAX_CLIENTS; ++VictimId)
+	{
+		SPlayer &Victim = m_aPlayers[VictimId];
+		const SDrownStatTick &VictimTick = pTicks[VictimId];
+		if(!Victim.m_StatHasPrev || !Victim.m_StatPrevFrozen)
+			continue;
+		if(!VictimTick.m_Active || !VictimTick.m_HasCharacter || VictimTick.m_Frozen)
+			continue;
+		unsigned long long Mask = 0;
+		for(int RescuerId = 0; RescuerId < MAX_CLIENTS; ++RescuerId)
 		{
-			const SPlayer &Victim = m_aPlayers[VictimId];
-			const SDrownStatTick &VictimTick = pTicks[VictimId];
-			if(!Victim.m_StatHasPrev || !Victim.m_StatPrevFrozen)
+			const SPlayer &Rescuer = m_aPlayers[RescuerId];
+			if(RescuerId == VictimId || Rescuer.m_HookFrozenMateTicks < ElapsedTicks || Rescuer.m_HookFrozenMateId != VictimId)
 				continue;
-			if(!VictimTick.m_Active || !VictimTick.m_HasCharacter || VictimTick.m_Frozen)
+			if(Rescuer.m_Team != Victim.m_Team || !IsTrackedTeam(Rescuer.m_Team, IncludeTeamZero))
 				continue;
-			for(int RescuerId = 0; RescuerId < MAX_CLIENTS; ++RescuerId)
-			{
-				SPlayer &Rescuer = m_aPlayers[RescuerId];
-				if(RescuerId == VictimId || Rescuer.m_HookFrozenMateTicks < ElapsedTicks || Rescuer.m_HookFrozenMateId != VictimId)
-					continue;
-				if(Rescuer.m_Team != Victim.m_Team || !IsTrackedTeam(Rescuer.m_Team, IncludeTeamZero))
-					continue;
-				if(Rescuer.m_Saves < std::numeric_limits<int>::max())
-					++Rescuer.m_Saves;
-			}
+			Mask |= 1ULL << RescuerId;
 		}
+		if(Mask)
+		{
+			Victim.m_PendingRescuers = Mask;
+			Victim.m_PendingSaveTicks = SERVER_TICK_SPEED; // 1 秒确认期
+			Victim.m_PendingSaveX = VictimTick.m_X;
+			Victim.m_PendingSaveY = VictimTick.m_Y;
+		}
+	}
 
 		// 2) 逐玩家计数与状态推进。
 		for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
@@ -330,6 +347,8 @@ public:
 				Player.m_HookFrozenMateTicks = std::max(0, Player.m_HookFrozenMateTicks - ElapsedTicks);
 				Player.m_StatHasPrev = false;
 				Player.m_StatPrevJumpedTotal = -1;
+				Player.m_PendingRescuers = 0; // 离线/转观战时放弃待确认的救援
+				Player.m_PendingSaveTicks = 0;
 				continue;
 			}
 
@@ -368,6 +387,34 @@ public:
 				Player.m_TicksFrozen += std::min(ElapsedTicks, std::numeric_limits<int>::max() - Player.m_TicksFrozen);
 			else
 				Player.m_TicksAlive += std::min(ElapsedTicks, std::numeric_limits<int>::max() - Player.m_TicksAlive);
+
+			// 救援确认：解冻后 1 秒内自己出钩或明显移动（≥半砖）= 进入活的状态，
+			// 待确认集里的钩手各 +1；超时、再次冻结或离开则放弃。
+			if(Player.m_PendingSaveTicks > 0)
+			{
+				Player.m_PendingSaveTicks = std::max(0, Player.m_PendingSaveTicks - ElapsedTicks);
+				const float PendingDX = Now.m_X - Player.m_PendingSaveX;
+				const float PendingDY = Now.m_Y - Player.m_PendingSaveY;
+				const bool EnteredAlive = Now.m_HookState == HOOK_FLYING || PendingDX * PendingDX + PendingDY * PendingDY >= 16.0f * 16.0f;
+				if(Now.m_Frozen || Player.m_PendingSaveTicks == 0)
+				{
+					Player.m_PendingRescuers = 0;
+					Player.m_PendingSaveTicks = 0;
+				}
+				else if(EnteredAlive)
+				{
+					for(int RescuerId = 0; RescuerId < MAX_CLIENTS; ++RescuerId)
+					{
+						if(!(Player.m_PendingRescuers & (1ULL << RescuerId)))
+							continue;
+						SPlayer &Rescuer = m_aPlayers[RescuerId];
+						if(Rescuer.m_Saves < std::numeric_limits<int>::max())
+							++Rescuer.m_Saves;
+					}
+					Player.m_PendingRescuers = 0;
+					Player.m_PendingSaveTicks = 0;
+				}
+			}
 
 			Player.m_StatPrevFrozen = Now.m_Frozen;
 			Player.m_StatPrevHookState = Now.m_HookState;
@@ -470,6 +517,8 @@ private:
 		Player.m_StatHasPrev = false;
 		Player.m_HookFrozenMateTicks = 0;
 		Player.m_HookFrozenMateId = -1;
+		Player.m_PendingRescuers = 0;
+		Player.m_PendingSaveTicks = 0;
 		Player.m_StatPrevJumpedTotal = -1;
 		Player.m_LastCounted = false;
 	}

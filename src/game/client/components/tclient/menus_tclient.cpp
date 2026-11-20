@@ -625,6 +625,9 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	Column.HSplitTop(LineSize * 2, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("Tile highlight, landing preview and frozen-tee tint are independent toggles."), EditBoxFontSize, TEXTALIGN_TL);
 
+	// 左列排完：Column 是 Left 的副本，其最终 y 才是左列实际底部（Left.y 不动）。
+	const float LeftBottom = Column.y;
+
 	// ***** 右列 · 冻结卡锤/卡钩高亮（自 ME 设置页迁入）***** //
 	Column = Right;
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
@@ -653,11 +656,11 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 		}
 	}
 
-	// 滚动内容总框照 ME 页模式记账：两列的消费高度取最大（滚动后列剩余
-	// 高度可能为负，只有消费掉的高度算内容）。
+	// 滚动内容总框照 ME 页模式记账：两列的消费高度取最大。注意左右列都用
+	// Column 副本排布，必须取副本排完后的底部，Left/Right 本体的 y 停在列顶。
 	CUIRect Content = MainView;
 	Content.y = ContentTop;
-	Content.h = std::max(Left.y, Right.y) - ContentTop + Margin;
+	Content.h = std::max(LeftBottom, Column.y) - ContentTop + Margin;
 	s_ScrollRegion.AddRect(Content);
 	s_ScrollRegion.End();
 }

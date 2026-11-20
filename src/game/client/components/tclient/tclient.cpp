@@ -2102,10 +2102,16 @@ void CTClient::UpdateDrownBoard()
 		const bool Active = Player.m_Active && GameClient()->m_Snap.m_apPlayerInfos[ClientId] != nullptr;
 		const bool Hooking = Character.m_Active && (Character.m_Cur.m_HookState == HOOK_FLYING || Character.m_Cur.m_HookState == HOOK_GRABBED);
 		bool OnStart = false;
+		bool InFreezeTile = false;
 		if(Active && Character.m_Active && pCollision != nullptr)
 		{
 			const int Index = pCollision->GetPureMapIndex(vec2((float)Character.m_Cur.m_X, (float)Character.m_Cur.m_Y));
 			OnStart = pCollision->GetTileIndex(Index) == TILE_START || pCollision->GetFrontTileIndex(Index) == TILE_START;
+			// 服务器语义：普通冻结离开瓦片即解冻；解冻时仍在冻结瓦片内=自然融化。
+			const int GameTile = pCollision->GetTileIndex(Index);
+			const int FrontTile = pCollision->GetFrontTileIndex(Index);
+			InFreezeTile = GameTile == TILE_FREEZE || GameTile == TILE_DFREEZE || GameTile == TILE_LFREEZE ||
+				FrontTile == TILE_FREEZE || FrontTile == TILE_DFREEZE || FrontTile == TILE_LFREEZE;
 		}
 		m_DrownBoard.Observe(ClientId, Active, Player.m_aName, Player.m_aClan, GameClient()->m_Teams.Team(ClientId),
 			Character.m_Active, Player.m_FreezeEnd != 0, Hooking, OnStart, IncludeTeamZero);
@@ -2114,6 +2120,8 @@ void CTClient::UpdateDrownBoard()
 		Tick.m_Active = Active;
 		Tick.m_HasCharacter = Character.m_Active;
 		Tick.m_Frozen = Player.m_FreezeEnd != 0;
+		Tick.m_InFreezeTile = InFreezeTile;
+		Tick.m_FreezeEndTick = Player.m_FreezeEnd;
 		Tick.m_OnStart = OnStart;
 		Tick.m_HookState = Character.m_Active ? Character.m_Cur.m_HookState : HOOK_IDLE;
 		Tick.m_JumpedTotal = Character.m_HasExtendedData ? Character.m_ExtendedData.m_JumpedTotal : -1;
@@ -2125,7 +2133,7 @@ void CTClient::UpdateDrownBoard()
 
 	const int LocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy] >= 0 ? GameClient()->m_aLocalIds[g_Config.m_ClDummy] : GameClient()->m_Snap.m_LocalClientId;
 	const int LocalTeam = LocalId >= 0 && LocalId < MAX_CLIENTS ? GameClient()->m_Teams.Team(LocalId) : -1;
-	m_DrownBoard.ObserveStats(aStatTicks, LocalTeam, IncludeTeamZero, g_Config.m_TcDrownBoardResetOnWipe != 0, ElapsedTicks);
+	m_DrownBoard.ObserveStats(aStatTicks, LocalTeam, IncludeTeamZero, g_Config.m_TcDrownBoardResetOnWipe != 0, ElapsedTicks, GameTick);
 }
 
 constexpr const char STRIP_CHARS[] = {'-', '=', '+', '_', ' '};

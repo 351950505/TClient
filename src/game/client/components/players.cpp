@@ -706,7 +706,7 @@ const CPlayers::SHookLandingPrediction *CPlayers::HookLandingPrediction(int Clie
 		m_HookPredictCacheClientId = ClientId;
 		m_HookPredictCacheValid = false;
 		m_HookPredictCache = SHookLandingPrediction{};
-		if(g_Config.m_TcHookTileHighlight && g_Config.m_TcHookTileHighlightPredict)
+		if(g_Config.m_TcHookTileHighlightPredict || g_Config.m_TcHookTileHighlightFreeze)
 		{
 			const auto Result = PredictHookLanding(ClientId);
 			if(Result)
@@ -777,7 +777,10 @@ void CPlayers::HookTileHighlightReset()
 void CPlayers::RenderHookTileHighlight(int ClientId)
 {
 	const bool Predict = g_Config.m_TcHookTileHighlightPredict != 0;
-	if(!g_Config.m_TcHookTileHighlight || g_Config.m_TcHookTileHighlightOpacity == 0 ||
+	// 三个开关各自独立：主开关=抓住时的砖块高亮，预测=出钩前的落点高亮，
+	// 冻结=钩到冻结玩家时的染色（独立跑模拟，见 HookLandingPrediction）。
+	// 砖块视觉参数（颜色/透明度/光晕/渐变方向）为抓住态与预判态共用。
+	if((!g_Config.m_TcHookTileHighlight && !Predict) || g_Config.m_TcHookTileHighlightOpacity == 0 ||
 		!in_range(ClientId, MAX_CLIENTS - 1) || !IsPlayerInfoAvailable(ClientId))
 	{
 		HookTileHighlightReset();
@@ -794,7 +797,12 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 	}
 	if(Character.m_HookState == HOOK_GRABBED)
 	{
-		// 已抓住：用真实钩点（网络整数），预判模式下也以真实钩点为准。
+		// 抓住态归主开关：真实钩点（网络整数）。
+		if(!g_Config.m_TcHookTileHighlight)
+		{
+			HookTileHighlightReset();
+			return;
+		}
 		HookPos = vec2(Character.m_HookX, Character.m_HookY);
 	}
 	else if(Predict)
@@ -1566,11 +1574,11 @@ void CPlayers::OnRender()
 	const bool IsTeamPlay = GameClient()->IsTeamPlay();
 
 	// 预判冻结 tee 高亮目标：视角主人（本地或被观战玩家）的预判命中玩家。
-	// 与 RenderHookTileHighlight 共用帧缓存（同帧只模拟一次）；freeze 开关
-	// 关闭时不触发模拟，由砖块高亮路径按需填充缓存。
+	// 与 RenderHookTileHighlight 共用帧缓存（同帧只模拟一次）；冻结开关
+	// 独立生效——即使预测与砖块高亮都关，也会为染色判定跑模拟。
 	const int HookPredictViewId = (GameClient()->m_Snap.m_SpecInfo.m_Active && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW) ? GameClient()->m_Snap.m_SpecInfo.m_SpectatorId : GameClient()->m_Snap.m_LocalClientId;
-	const SHookLandingPrediction *pHookPredictLanding = (g_Config.m_TcHookTileHighlight && g_Config.m_TcHookTileHighlightPredict && g_Config.m_TcHookTileHighlightFreeze) ? HookLandingPrediction(HookPredictViewId) : nullptr;
-	const int HookPredictTargetId = (g_Config.m_TcHookTileHighlightFreeze && pHookPredictLanding) ? pHookPredictLanding->m_PlayerId : -1;
+	const SHookLandingPrediction *pHookPredictLanding = g_Config.m_TcHookTileHighlightFreeze ? HookLandingPrediction(HookPredictViewId) : nullptr;
+	const int HookPredictTargetId = pHookPredictLanding ? pHookPredictLanding->m_PlayerId : -1;
 
 	for(int i = 0; i < MAX_CLIENTS; ++i)
 	{

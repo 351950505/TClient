@@ -4376,19 +4376,9 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+		// 三个开关平级独立：砖块高亮（抓住态）、预判落点、冻结玩家染色；
+		// 砖块视觉参数（颜色/模式/光晕/透明度）为抓住态与预判态共用。
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlight, TCLocalize("Highlight hooked tiles (both tiles at seams)"), &g_Config.m_TcHookTileHighlight, &LeftView, LineSize);
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightPredict, TCLocalize("Prediction mode (show hook landing before firing)"), &g_Config.m_TcHookTileHighlightPredict, &LeftView, LineSize);
-		if(g_Config.m_TcHookTileHighlightPredict)
-		{
-			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightFreeze, TCLocalize("Highlight hookable frozen tees (water hammer style)"), &g_Config.m_TcHookTileHighlightFreeze, &LeftView, LineSize);
-			if(g_Config.m_TcHookTileHighlightFreeze)
-			{
-				static CButtonContainer s_HookTileFreezeBodyColor;
-				DoLine_ColorPicker(&s_HookTileFreezeBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Frozen tee highlight body color"), &g_Config.m_TcHookTileHighlightFreezeBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightFreezeBodyColor)), false);
-				static CButtonContainer s_HookTileFreezeFeetColor;
-				DoLine_ColorPicker(&s_HookTileFreezeFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Frozen tee highlight feet color"), &g_Config.m_TcHookTileHighlightFreezeFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightFreezeFeetColor)), false);
-			}
-		}
 		static CButtonContainer s_HookTileColor;
 		DoLine_ColorPicker(&s_HookTileColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Hooked tile color"), &g_Config.m_TcHookTileHighlightColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightColor)), false);
 		// 颜色变化模式下拉（照快速输入的下拉交互）；-1 是旧 rainbow 开关的
@@ -4431,9 +4421,19 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 		}
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightGlow, TCLocalize("Glow around the hooked tile"), &g_Config.m_TcHookTileHighlightGlow, &LeftView, LineSize);
 		LeftView.HSplitTop(LineSize, &Button, &LeftView);
-	Ui()->DoScrollbarOption(&g_Config.m_TcHookTileHighlightOpacity, &g_Config.m_TcHookTileHighlightOpacity, &Button, TCLocalize("Hooked tile opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+		Ui()->DoScrollbarOption(&g_Config.m_TcHookTileHighlightOpacity, &g_Config.m_TcHookTileHighlightOpacity, &Button, TCLocalize("Hooked tile opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+		LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightPredict, TCLocalize("Prediction mode (show hook landing before firing)"), &g_Config.m_TcHookTileHighlightPredict, &LeftView, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightFreeze, TCLocalize("Highlight hookable frozen tees (water hammer style)"), &g_Config.m_TcHookTileHighlightFreeze, &LeftView, LineSize);
+		if(g_Config.m_TcHookTileHighlightFreeze)
+		{
+			static CButtonContainer s_HookTileFreezeBodyColor;
+			DoLine_ColorPicker(&s_HookTileFreezeBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Frozen tee highlight body color"), &g_Config.m_TcHookTileHighlightFreezeBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightFreezeBodyColor)), false);
+			static CButtonContainer s_HookTileFreezeFeetColor;
+			DoLine_ColorPicker(&s_HookTileFreezeFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Frozen tee highlight feet color"), &g_Config.m_TcHookTileHighlightFreezeFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightFreezeFeetColor)), false);
+		}
 	LeftView.HSplitTop(LineSize * 2, &Label, &LeftView);
-	Ui()->DoLabel(&Label, TCLocalize("Covers the hooked tiles with a soft colored glow. RGB cycling and an outer glow are optional."), EditBoxFontSize, TEXTALIGN_TL);
+	Ui()->DoLabel(&Label, TCLocalize("Tile highlight, landing preview and frozen-tee tint are independent toggles sharing one color scheme."), EditBoxFontSize, TEXTALIGN_TL);
 
 	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
 	Ui()->DoLabel(&Label, TCLocalize("Message muting"), HeadlineFontSize, TEXTALIGN_ML);

@@ -1032,5 +1032,8 @@ Color swing
 Animation speed
 == 變化速度
 
+Tile highlight, landing preview and frozen-tee tint are independent toggles sharing one color scheme.
+== 磚塊高亮、出鉤落點預判與凍結玩家染色相互獨立，共用同一套顏色設置。
+
 Traditional Chinese lyrics (default simplified)
 == 歌詞顯示繁體（預設簡體）

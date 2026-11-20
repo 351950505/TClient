@@ -545,41 +545,14 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	Column.HSplitTop(LineSize, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
 	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	// ***** 左列 · 钩子显示 ***** //
+	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
+	Column.HSplitTop(HeadlineHeight, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Hook display"), HeadlineFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
 	// 三个开关平级独立：砖块高亮（抓住态）、预判落点、冻结玩家染色；
 	// 砖块视觉参数（颜色/模式/光晕/透明度）为抓住态与预判态共用。
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlight, TCLocalize("Highlight hooked tiles (both tiles at seams)"), &g_Config.m_TcHookTileHighlight, &Column, LineSize);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightGlow, TCLocalize("Glow around the hooked tile"), &g_Config.m_TcHookTileHighlightGlow, &Column, LineSize);
-	Column.HSplitTop(LineSize, &Row, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_TcHookTileHighlightOpacity, &g_Config.m_TcHookTileHighlightOpacity, &Row, TCLocalize("Hooked tile opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
-
-	// ***** 右列 · 强调色 ***** //
-	Column = Right;
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Accent"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
-	const char *apStyles[] = {TCLocalize("Solid color"), TCLocalize("Static gradient"), TCLocalize("Animated gradient"), TCLocalize("RGB color cycle")};
-	static CUi::SDropDownState s_StyleState;
-	static CScrollRegion s_StyleScroll;
-	s_StyleState.m_SelectionPopupContext.m_pScrollRegion = &s_StyleScroll;
-	Column.HSplitTop(LineSize, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Accent style"), EditBoxFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(LineSize, &Row, &Column);
-	g_Config.m_TcUiAccentMode = Ui()->DoDropDown(&Row, g_Config.m_TcUiAccentMode, apStyles, std::size(apStyles), s_StyleState);
-	static CButtonContainer s_First, s_Second;
-	DoLine_ColorPicker(&s_First, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("First accent color"), &g_Config.m_TcUiAccent, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent)), false);
-	DoLine_ColorPicker(&s_Second, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Second accent color"), &g_Config.m_TcUiAccent2, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent2)), false);
-	Column.HSplitTop(LineSize, &Row, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentAngle, &g_Config.m_TcUiAccentAngle, &Row, TCLocalize("Gradient angle"), 0, 360, &CUi::ms_LinearScrollbarScale, 0, "°");
-	Column.HSplitTop(LineSize, &Row, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentSpeed, &g_Config.m_TcUiAccentSpeed, &Row, TCLocalize("Accent animation speed"), 1, 200);
-	Column.HSplitTop(LineSize, &Row, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_TcUiBackgroundOpacity, &g_Config.m_TcUiBackgroundOpacity, &Row, TCLocalize("Panel background opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
-
-	// ***** 右列 · 高亮颜色与预判 ***** //
-	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-	Column.HSplitTop(HeadlineHeight, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("Highlight colors & prediction"), HeadlineFontSize, TEXTALIGN_ML);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
 	static CButtonContainer s_HookTileColor;
 	DoLine_ColorPicker(&s_HookTileColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Hooked tile color"), &g_Config.m_TcHookTileHighlightColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightColor)), false);
 	// 颜色变化模式下拉（照快速输入的下拉交互）；-1 是旧 rainbow 开关的
@@ -629,8 +602,34 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 		static CButtonContainer s_HookTileFreezeFeetColor;
 		DoLine_ColorPicker(&s_HookTileFreezeFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Frozen tee highlight feet color"), &g_Config.m_TcHookTileHighlightFreezeFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightFreezeFeetColor)), false);
 	}
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightGlow, TCLocalize("Glow around the hooked tile"), &g_Config.m_TcHookTileHighlightGlow, &Column, LineSize);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcHookTileHighlightOpacity, &g_Config.m_TcHookTileHighlightOpacity, &Row, TCLocalize("Hooked tile opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 	Column.HSplitTop(LineSize * 2, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("Tile highlight, landing preview and frozen-tee tint are independent toggles."), EditBoxFontSize, TEXTALIGN_TL);
+
+	// ***** 右列 · 强调色 ***** //
+	Column = Right;
+	Column.HSplitTop(HeadlineHeight, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Accent"), HeadlineFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	const char *apStyles[] = {TCLocalize("Solid color"), TCLocalize("Static gradient"), TCLocalize("Animated gradient"), TCLocalize("RGB color cycle")};
+	static CUi::SDropDownState s_StyleState;
+	static CScrollRegion s_StyleScroll;
+	s_StyleState.m_SelectionPopupContext.m_pScrollRegion = &s_StyleScroll;
+	Column.HSplitTop(LineSize, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Accent style"), EditBoxFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	g_Config.m_TcUiAccentMode = Ui()->DoDropDown(&Row, g_Config.m_TcUiAccentMode, apStyles, std::size(apStyles), s_StyleState);
+	static CButtonContainer s_First, s_Second;
+	DoLine_ColorPicker(&s_First, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("First accent color"), &g_Config.m_TcUiAccent, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent)), false);
+	DoLine_ColorPicker(&s_Second, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Second accent color"), &g_Config.m_TcUiAccent2, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent2)), false);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentAngle, &g_Config.m_TcUiAccentAngle, &Row, TCLocalize("Gradient angle"), 0, 360, &CUi::ms_LinearScrollbarScale, 0, "°");
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentSpeed, &g_Config.m_TcUiAccentSpeed, &Row, TCLocalize("Accent animation speed"), 1, 200);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiBackgroundOpacity, &g_Config.m_TcUiBackgroundOpacity, &Row, TCLocalize("Panel background opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 
 	// ***** 右列 · 冻结卡锤/卡钩高亮（自 ME 设置页迁入）***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);

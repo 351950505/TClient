@@ -2135,6 +2135,9 @@ Reset stats after the frozen team has all died
 Highlight hooked tiles (both tiles at seams)
 == 高亮钩住的砖块（接缝处同时高亮两块）
 
+Prediction mode (show hook landing before firing)
+== 预判模式（出钩前显示将勾到的落点）
+
 Hooked tile color
 == 钩住砖块的高亮颜色
 

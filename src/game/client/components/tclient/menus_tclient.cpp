@@ -4374,6 +4374,7 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlight, TCLocalize("Highlight hooked tiles (both tiles at seams)"), &g_Config.m_TcHookTileHighlight, &LeftView, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightPredict, TCLocalize("Prediction mode (show hook landing before firing)"), &g_Config.m_TcHookTileHighlightPredict, &LeftView, LineSize);
 		static CButtonContainer s_HookTileColor;
 		DoLine_ColorPicker(&s_HookTileColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Hooked tile color"), &g_Config.m_TcHookTileHighlightColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightColor)), false);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightRgb, TCLocalize("Cycle highlight through RGB colors"), &g_Config.m_TcHookTileHighlightRgb, &LeftView, LineSize);

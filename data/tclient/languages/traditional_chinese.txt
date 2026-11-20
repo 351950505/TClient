@@ -998,3 +998,6 @@ Two-line lyrics (current + next)
 
 Players
 == 玩家
+
+Prediction mode (show hook landing before firing)
+== 預判模式（出鉤前顯示將鉤到的落點）

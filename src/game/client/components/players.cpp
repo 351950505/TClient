@@ -599,6 +599,71 @@ void CPlayers::RenderHook(
 	RenderHand(&RenderInfo, Position, normalize(HookPos - Pos), -pi / 2, vec2(20, 0), Alpha);
 }
 
+// 预判模式：从玩家当前位置沿当前准星方向模拟一次钩子飞行，返回第一个
+// 可勾住的钩点（round_to_int 对齐网络整数钩点）。飞行与碰撞语义对齐
+// CCharacterCore::Tick 的 HOOK_FLYING 分支（gamecore.cpp）：起跳点 =
+// 玩家位置 + 方向 × 1.5 × PhysicalSize，每 tick 前进 m_HookFireSpeed，
+// 超长 tick 直接收钩（不会再抓砖），TILE_NOHOOK 收钩，TILE_TELEINHOOK
+// 穿送且长度基准重置。段起点每 tick 取整、方向在第一 tick 后量化到
+// 1/256，与 DDNet hookline 的实现保持一致。两个已知近似（与 hookline
+// 相同）：长度基准固定在出钩瞬间位置，不模拟钩住玩家。
+std::optional<vec2> CPlayers::PredictHookLanding(int ClientId)
+{
+	const auto &Data = GameClient()->m_aClients[ClientId];
+	const float Intra = Data.m_IsPredicted ? Client()->PredIntraGameTick(g_Config.m_ClDummy) : Client()->IntraGameTick(g_Config.m_ClDummy);
+	const vec2 Direction = direction(GetPlayerTargetAngle(&Data.m_RenderPrev, &Data.m_RenderCur, ClientId, Intra));
+
+	// 与 hookline 同源：预测过的玩家用其 tune，未预测的退回本地 tune。
+	const CCharacterCore &Core = Data.m_IsPredicted ? Data.m_Predicted : GameClient()->m_aClients[GameClient()->m_aLocalIds[g_Config.m_ClDummy]].m_Predicted;
+	const float HookLength = Core.m_Tuning.m_HookLength;
+	const float HookFireSpeed = Core.m_Tuning.m_HookFireSpeed;
+	if(HookLength <= CCharacterCore::PhysicalSize() * 1.5f || HookFireSpeed <= 0.0f)
+		return std::nullopt;
+
+	constexpr float HookStartDistance = CCharacterCore::PhysicalSize() * 1.5f;
+	CCollision *pCollision = Collision(); // TeleOuts 非 const（首次访问构建缓存）
+	vec2 SegStart = Data.m_RenderPos + Direction * HookStartDistance;
+	vec2 LengthBase = Data.m_RenderPos;
+	vec2 Dir = Direction;
+	constexpr int MaxTicks = 64; // 覆盖最大钩长与多级传送链
+	for(int Tick = 0; Tick < MaxTicks; ++Tick)
+	{
+		vec2 SegEnd = SegStart + Dir * HookFireSpeed;
+		if(distance(LengthBase, SegEnd) > HookLength)
+			return std::nullopt;
+
+		vec2 HitPos;
+		int Tele = 0;
+		const int Hit = pCollision->IntersectLineTeleHook(SegStart, SegEnd, &HitPos, nullptr, &Tele);
+		if(!Hit)
+		{
+			SegStart = SegEnd;
+			SegStart.x = round_to_int(SegStart.x);
+			SegStart.y = round_to_int(SegStart.y);
+			if(Tick == 0)
+			{
+				Dir.x = round_to_int(Dir.x * 256.0f) / 256.0f;
+				Dir.y = round_to_int(Dir.y * 256.0f) / 256.0f;
+			}
+			continue;
+		}
+		if(Hit == TILE_NOHOOK)
+			return std::nullopt;
+		if(Hit == TILE_TELEINHOOK)
+		{
+			const std::vector<vec2> &vOuts = pCollision->TeleOuts(Tele - 1);
+			if(vOuts.size() != 1)
+				return std::nullopt; // 无出口钩会卡住；多出口随机，落点不可知
+			// 唯一出口：从出口重新起跳，长度基准随之重置（对齐 m_HookTeleBase）。
+			SegStart = vOuts[0] + Direction * HookStartDistance;
+			LengthBase = SegStart;
+			continue;
+		}
+		return vec2(round_to_int(HitPos.x), round_to_int(HitPos.y));
+	}
+	return std::nullopt;
+}
+
 void CPlayers::HookTileHighlightReset()
 {
 	if(m_HookTileHighlightContainer != -1)
@@ -614,6 +679,7 @@ void CPlayers::HookTileHighlightReset()
 
 void CPlayers::RenderHookTileHighlight(int ClientId)
 {
+	const bool Predict = g_Config.m_TcHookTileHighlightPredict != 0;
 	if(!g_Config.m_TcHookTileHighlight || g_Config.m_TcHookTileHighlightOpacity == 0 ||
 		!in_range(ClientId, MAX_CLIENTS - 1) || !IsPlayerInfoAvailable(ClientId))
 	{
@@ -622,13 +688,36 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 	}
 	const auto &Data = GameClient()->m_aClients[ClientId];
 	const auto &Character = Data.m_RenderCur;
-	if(Character.m_HookState != HOOK_GRABBED || Character.m_HookedPlayer != -1)
+
+	vec2 HookPos;
+	if(Character.m_HookedPlayer != -1)
+	{
+		HookTileHighlightReset();
+		return;
+	}
+	if(Character.m_HookState == HOOK_GRABBED)
+	{
+		// 已抓住：用真实钩点（网络整数），预判模式下也以真实钩点为准。
+		HookPos = vec2(Character.m_HookX, Character.m_HookY);
+	}
+	else if(Predict)
+	{
+		// 预判模式：未出钩（空闲/飞行/收钩）时按准星方向模拟出钩落点。
+		const std::optional<vec2> Predicted = PredictHookLanding(ClientId);
+		if(!Predicted)
+		{
+			HookTileHighlightReset();
+			return;
+		}
+		HookPos = *Predicted;
+	}
+	else
 	{
 		HookTileHighlightReset();
 		return;
 	}
 	const CCollision *pCollision = Collision();
-	const auto Selection = tclient_hook_tile::Select(vec2(Character.m_HookX, Character.m_HookY),
+	const auto Selection = tclient_hook_tile::Select(HookPos,
 		pCollision->GetWidth(), pCollision->GetHeight(), [&](int X, int Y) {
 			return pCollision->GetTile(X * 32 + 16, Y * 32 + 16) == TILE_SOLID;
 		});
@@ -645,16 +734,19 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 	// 肉眼不可辨。
 	const float RgbHue = std::fmod(Client()->LocalTime() * g_Config.m_TcHookTileHighlightRgbSpeed / 600.0f, 1.0f);
 	const int RgbBucket = g_Config.m_TcHookTileHighlightRgb ? (int)(RgbHue * 48.0f) % 48 : -1;
-	// 64 位重建键，字段无重叠：颜色 0-23、透明度 24-30、光晕 31、RGB 桶 32-37
-	//（32 位打包会在桶 ≥16 时截断、透明度与光晕位互相踩踏，导致漏重建）。
+	// 64 位重建键，字段无重叠：颜色 0-23、透明度 24-30、光晕 31、RGB 桶 32-37、
+	// 预判模式 38（32 位打包会在桶 ≥16 时截断、透明度与光晕位互相踩踏，导致漏重建）。
 	const unsigned long long Key = (unsigned long long)(g_Config.m_TcHookTileHighlightColor & 0xFFFFFF) |
 		((unsigned long long)(g_Config.m_TcHookTileHighlightOpacity & 0x7F) << 24) |
 		((unsigned long long)(g_Config.m_TcHookTileHighlightGlow & 1) << 31) |
-		((unsigned long long)((RgbBucket + 1) & 0x3F) << 32);
+		((unsigned long long)((RgbBucket + 1) & 0x3F) << 32) |
+		((unsigned long long)(Predict ? 1 : 0) << 38);
+	// 预判模式的几何只依赖所选砖块与配置（梯度焦点取区域中心），不比较钩点，
+	// 准星在同一块砖内微动不会触发逐帧重建。
 	bool SameSelection = m_HookTileHighlightContainer != -1 &&
 		m_HookTileHighlightTileCount == Selection.m_Count &&
-		m_HookTileHighlightHookX == Character.m_HookX &&
-		m_HookTileHighlightHookY == Character.m_HookY &&
+		(Predict || (m_HookTileHighlightHookX == (int)HookPos.x &&
+			m_HookTileHighlightHookY == (int)HookPos.y)) &&
 		m_HookTileHighlightKey == Key;
 	for(int Index = 0; SameSelection && Index < Selection.m_Count; ++Index)
 		SameSelection = m_HookTileHighlightTileX[Index] == Selection.m_aTiles[Index].m_X &&
@@ -685,9 +777,12 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 			MinY = std::min(MinY, (float)Selection.m_aTiles[Index].m_Y);
 			MaxY = std::max(MaxY, (float)Selection.m_aTiles[Index].m_Y);
 		}
-		const vec2 Contact = vec2(
-			std::clamp((float)Character.m_HookX, MinX * 32.0f, (MaxX + 1) * 32.0f),
-			std::clamp((float)Character.m_HookY, MinY * 32.0f, (MaxY + 1) * 32.0f));
+		// 梯度焦点：预判模式取所选区域中心（砖块量化，随砖块稳定，避免准星微动
+		// 每帧重建）；抓住模式为真实钩点。
+		const vec2 Contact = Predict ? vec2((MinX + MaxX + 1.0f) * 16.0f, (MinY + MaxY + 1.0f) * 16.0f) :
+						vec2(
+							std::clamp((float)Character.m_HookX, MinX * 32.0f, (MaxX + 1) * 32.0f),
+							std::clamp((float)Character.m_HookY, MinY * 32.0f, (MaxY + 1) * 32.0f));
 		const float CoreAlpha = std::min(0.42f, Alpha * 0.42f);
 		const float EdgeAlpha = std::max(0.10f, Alpha * 0.14f);
 		// 渐变半径对齐 HTML 设计稿：区域最长边 × 0.75（单砖 24、接缝 48 单位），
@@ -803,8 +898,8 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 			m_HookTileHighlightTileX[Index] = Selection.m_aTiles[Index].m_X;
 			m_HookTileHighlightTileY[Index] = Selection.m_aTiles[Index].m_Y;
 		}
-		m_HookTileHighlightHookX = Character.m_HookX;
-		m_HookTileHighlightHookY = Character.m_HookY;
+		m_HookTileHighlightHookX = (int)HookPos.x;
+		m_HookTileHighlightHookY = (int)HookPos.y;
 		m_HookTileHighlightKey = Key;
 	}
 

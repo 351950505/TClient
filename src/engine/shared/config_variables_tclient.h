@@ -197,6 +197,7 @@ MACRO_CONFIG_INT(TcHookTileHighlightOpacity, tc_hook_tile_highlight_opacity, 70,
 MACRO_CONFIG_INT(TcHookTileHighlightRgb, tc_hook_tile_highlight_rgb, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Cycle the hooked tile highlight through RGB colors")
 MACRO_CONFIG_INT(TcHookTileHighlightRgbSpeed, tc_hook_tile_highlight_rgb_speed, 30, 1, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Hooked tile RGB cycle speed (30 ≈ one cycle every 20 s)")
 MACRO_CONFIG_INT(TcHookTileHighlightGlow, tc_hook_tile_highlight_glow, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Glow around the hooked tile")
+MACRO_CONFIG_INT(TcHookTileHighlightPredict, tc_hook_tile_highlight_predict, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Prediction mode: before the hook is fired, highlight the spot a hook toward the crosshair would grab")
 
 MACRO_CONFIG_INT(TcColorFreeze, tc_color_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use skin colors for frozen tees")
 MACRO_CONFIG_INT(TcColorFreezeDarken, tc_color_freeze_darken, 90, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Makes color of tees darker when in freeze (0-100)")

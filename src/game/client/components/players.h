@@ -4,8 +4,11 @@
 #define GAME_CLIENT_COMPONENTS_PLAYERS_H
 #include <generated/protocol.h>
 
+#include <base/vmath.h>
 #include <game/client/component.h>
 #include <game/client/render.h>
+
+#include <optional>
 
 class CPlayers : public CComponent
 {
@@ -61,6 +64,9 @@ public:
 	void OnRender() override;
 	void RenderHookTileHighlight(int ClientId);
 	void HookTileHighlightReset();
+	// 预判模式：未出钩时按准星方向模拟一次钩子飞行，返回将勾住的钩点
+	// （round_to_int 对齐网络整数钩点）。
+	std::optional<vec2> PredictHookLanding(int ClientId);
 	// 钩住砖块高亮缓存容器：抓住期间零重建，只在选择砖块/钩点/配置变化时重建
 	// （详见 RenderHookTileHighlight 的注释）。
 	int m_HookTileHighlightContainer = -1;

@@ -43,6 +43,14 @@ inline float TcAdvanceWaterHammerHighlight(float Current, bool Marked, float Del
 	return Marked ? std::min(Current + Step, 1.0f) : std::max(Current - Step, 0.0f);
 }
 
+// 可调进出节奏的版本：预判冻结 tee 高亮用近瞬时渐入（用户反馈 0.12s 有
+// 可感延迟），渐出保留柔和过渡。
+inline float TcAdvanceHighlightTimed(float Current, bool Marked, float DeltaSeconds, float InSeconds, float OutSeconds)
+{
+	return Marked ? std::min(Current + std::clamp(DeltaSeconds / InSeconds, 0.0f, 1.0f), 1.0f) :
+					std::max(Current - std::clamp(DeltaSeconds / OutSeconds, 0.0f, 1.0f), 0.0f);
+}
+
 // The highlight is a readiness signal, not an input flash. Require the frozen
 // hammer/hook state to persist before marking it visible.
 inline constexpr float TcWaterHammerMarkDelaySeconds = 0.5f;

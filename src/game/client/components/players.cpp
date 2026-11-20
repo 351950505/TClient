@@ -626,8 +626,11 @@ std::optional<CPlayers::SHookLandingPrediction> CPlayers::PredictHookLanding(int
 
 	constexpr float HookStartDistance = CCharacterCore::PhysicalSize() * 1.5f;
 	CCollision *pCollision = Collision(); // TeleOuts 非 const（首次访问构建缓存）
-	vec2 SegStart = Data.m_RenderPos + Direction * HookStartDistance;
-	vec2 LengthBase = Data.m_RenderPos;
+	// 起点用预测核心位置而非渲染插值位置：渲染值来自上一 snapshot（最长
+	// 一拍 20ms），预测核心本帧已更新——消除预判高亮的可感跟随延迟。
+	const vec2 BasePos = Data.m_IsPredicted ? Data.m_Predicted.m_Pos : Data.m_RenderPos;
+	vec2 SegStart = BasePos + Direction * HookStartDistance;
+	vec2 LengthBase = BasePos;
 	vec2 Dir = Direction;
 	constexpr int MaxTicks = 64; // 覆盖最大钩长与多级传送链
 	for(int Tick = 0; Tick < MaxTicks; ++Tick)
@@ -1654,7 +1657,7 @@ void CPlayers::OnRender()
 		const bool HookPredictFrozenMarked = i == HookPredictTargetId &&
 			(GameClient()->m_aClients[i].m_FreezeEnd != 0 || GameClient()->m_aClients[i].m_LiveFrozen);
 		float &HookPredictAlpha = m_aHookPredictHighlightAlpha[i];
-		HookPredictAlpha = TcAdvanceWaterHammerHighlight(HookPredictAlpha, HookPredictFrozenMarked, Client()->RenderFrameTime());
+		HookPredictAlpha = TcAdvanceHighlightTimed(HookPredictAlpha, HookPredictFrozenMarked, Client()->RenderFrameTime(), 0.04f, 0.12f);
 		if(Alpha <= 0.001f && HookPredictAlpha > 0.001f)
 		{
 			const ColorRGBA HookPredictBodyColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcHookTileHighlightFreezeBodyColor));

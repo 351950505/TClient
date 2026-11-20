@@ -2189,8 +2189,8 @@ Interface style
 Accent
 == 强调色
 
-Highlight colors & prediction
-== 高亮颜色与预判
+Hook display
+== 钩子显示
 
 Frozen
 == 冻结

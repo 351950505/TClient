@@ -1044,8 +1044,8 @@ Interface style
 Accent
 == 強調色
 
-Highlight colors & prediction
-== 高亮顏色與預判
+Hook display
+== 鉤子顯示
 
 Traditional Chinese lyrics (default simplified)
 == 歌詞顯示繁體（預設簡體）

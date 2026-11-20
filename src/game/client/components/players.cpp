@@ -867,20 +867,25 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 						vec2(
 							std::clamp((float)Character.m_HookX, MinX * 32.0f, (MaxX + 1) * 32.0f),
 							std::clamp((float)Character.m_HookY, MinY * 32.0f, (MaxY + 1) * 32.0f));
-		const float CoreAlpha = std::min(0.42f, Alpha * 0.42f);
-		const float EdgeAlpha = std::max(0.10f, Alpha * 0.14f);
-		// 渐变半径对齐 HTML 设计稿：区域最长边 × 0.75（单砖 24、接缝 48 单位），
-		// 让"钩点聚焦"的比例与预览一致，而不是摊满整砖。
+		// 顶点 alpha 结构（颜色仍由渲染时整体调制）。默认径向柔光：以钩点为圆心
+		// 分段线性衰减——中心全强度、55% 处 55%、边缘 12%（对齐对比稿
+		// softgradradial 的三段 stop，半径=区域最长边×0.95）；纵向柔光
+		// （tc_hook_tile_highlight_gradient=1）：组顶 28% 到组底 100% 线性，
+		// 接缝双砖按整组高度归一保证无缝。
 		const float RegionW = (MaxX - MinX + 1.0f) * 32.0f;
 		const float RegionH = (MaxY - MinY + 1.0f) * 32.0f;
-		const float FalloffRadius = std::max(RegionW, RegionH) * 0.75f;
+		const float FalloffRadius = std::max(RegionW, RegionH) * 0.95f;
+		const float GroupTop = MinY * 32.0f;
+		const float GroupHeight = std::max(1.0f, RegionH);
+		const auto FalloffAlpha = [&](vec2 Point) {
+			if(g_Config.m_TcHookTileHighlightGradient)
+				return Alpha * (0.28f + 0.72f * std::clamp((Point.y - GroupTop) / GroupHeight, 0.0f, 1.0f));
+			const float T = std::clamp(distance(Point, Contact) / FalloffRadius, 0.0f, 1.0f);
+			const float V = T <= 0.55f ? 1.0f - 0.45f * (T / 0.55f) : 0.55f - 0.43f * ((T - 0.55f) / 0.45f);
+			return Alpha * V;
+		};
 		constexpr int SubQuads = 4;
 		constexpr float CellSize = 32.0f / SubQuads;
-		const auto FalloffAlpha = [&](vec2 Point) {
-			const float T = std::clamp(distance(Point, Contact) / FalloffRadius, 0.0f, 1.0f);
-			const float Smooth = T * T * (3.0f - 2.0f * T);
-			return std::max(EdgeAlpha, CoreAlpha + (EdgeAlpha - CoreAlpha) * Smooth);
-		};
 		const auto FillRect = [&](float X, float Y, float W, float H, const ColorRGBA &ColorTL, const ColorRGBA &ColorTR, const ColorRGBA &ColorBR, const ColorRGBA &ColorBL) {
 			// SetColor4 的 TL, TR, BR, BL 槽位序与容器顶点序一致，颜色在加入时
 			// 烘焙进容器顶点。
@@ -936,7 +941,7 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 				{
 					const float CellX = Tile.m_X * 32.0f + SubX * CellSize;
 					const float CellY = Tile.m_Y * 32.0f + SubY * CellSize;
-					// 接触晕染：钩点附近更亮，向外衰减为低强度底染（TL, TR, BR, BL）。
+					// 柔光渐变：钩点附近更亮，向外平滑衰减（TL, TR, BR, BL）。
 					FillRect(CellX, CellY, CellSize, CellSize,
 						ColorRGBA(1, 1, 1, FalloffAlpha(vec2(CellX, CellY))),
 						ColorRGBA(1, 1, 1, FalloffAlpha(vec2(CellX + CellSize, CellY))),
@@ -944,32 +949,6 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 						ColorRGBA(1, 1, 1, FalloffAlpha(vec2(CellX, CellY + CellSize))));
 				}
 			}
-			// 细边框：非共享边描出结构线（接缝处两块共用一条边，不叠加重复描线）。
-			const float BorderW = 1.2f;
-			const float BorderAlpha = Alpha * 0.85f;
-			const auto HasNeighbor = [&](int DX, int DY) {
-				for(int Other = 0; Other < Selection.m_Count; ++Other)
-					if(Selection.m_aTiles[Other].m_X == Tile.m_X + DX && Selection.m_aTiles[Other].m_Y == Tile.m_Y + DY)
-						return true;
-				return false;
-			};
-			const auto Edge = [&](float EX, float EY, float EW, float EH) {
-				Graphics()->SetColor4(
-					ColorRGBA(1, 1, 1, BorderAlpha), ColorRGBA(1, 1, 1, BorderAlpha),
-					ColorRGBA(1, 1, 1, BorderAlpha), ColorRGBA(1, 1, 1, BorderAlpha));
-				IGraphics::CQuadItem Item(EX, EY, EW, EH);
-				Graphics()->QuadContainerAddQuads(m_HookTileHighlightContainer, &Item, 1);
-			};
-			const float TileX = Tile.m_X * 32.0f;
-			const float TileY = Tile.m_Y * 32.0f;
-			if(!HasNeighbor(0, -1))
-				Edge(TileX, TileY, 32.0f, BorderW);
-			if(!HasNeighbor(0, 1))
-				Edge(TileX, TileY + 32.0f - BorderW, 32.0f, BorderW);
-			if(!HasNeighbor(-1, 0))
-				Edge(TileX, TileY + BorderW, BorderW, 32.0f - BorderW * 2.0f);
-			if(!HasNeighbor(1, 0))
-				Edge(TileX + 32.0f - BorderW, TileY + BorderW, BorderW, 32.0f - BorderW * 2.0f);
 		}
 		Graphics()->QuadsEnd();
 		Graphics()->QuadContainerUpload(m_HookTileHighlightContainer);

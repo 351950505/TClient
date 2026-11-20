@@ -1032,11 +1032,8 @@ Color swing
 Animation speed
 == 變化速度
 
-Tile highlight, landing preview and frozen-tee tint are independent toggles; colors live on the Modern UI page.
-== 磚塊高亮、出鉤落點預判與凍結玩家染色相互獨立；顏色設置在「現代化界面」頁。
-
-Hook tile highlight colors
-== 鉤磚高亮顏色
+Tile highlight, landing preview and frozen-tee tint are independent toggles.
+== 磚塊高亮、出鉤落點預判與凍結玩家染色相互獨立。
 
 Traditional Chinese lyrics (default simplified)
 == 歌詞顯示繁體（預設簡體）

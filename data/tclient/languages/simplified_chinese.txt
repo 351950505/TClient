@@ -2177,11 +2177,8 @@ Animation speed
 Glow around the hooked tile
 == 钩住砖块的外圈光晕
 
-Tile highlight, landing preview and frozen-tee tint are independent toggles; colors live on the Modern UI page.
-== 砖块高亮、出钩落点预判与冻结玩家染色相互独立；颜色设置在「现代化界面」页。
-
-Hook tile highlight colors
-== 钩砖高亮颜色
+Tile highlight, landing preview and frozen-tee tint are independent toggles.
+== 砖块高亮、出钩落点预判与冻结玩家染色相互独立。
 
 Frozen
 == 冻结

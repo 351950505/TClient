@@ -632,6 +632,33 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	Column.HSplitTop(LineSize * 2, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("Tile highlight, landing preview and frozen-tee tint are independent toggles."), EditBoxFontSize, TEXTALIGN_TL);
 
+	// ***** 右列 · 冻结卡锤/卡钩高亮（自 ME 设置页迁入）***** //
+	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
+	Column.HSplitTop(HeadlineHeight, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Frozen hammer/hook highlight"), HeadlineFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHookHighlight, TCLocalize("Enable frozen hook highlight"), &g_Config.m_TcWaterHookHighlight, &Column, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlight, TCLocalize("Enable frozen hammer highlight"), &g_Config.m_TcWaterHammerHighlight, &Column, LineSize);
+	if(g_Config.m_TcWaterHookHighlight || g_Config.m_TcWaterHammerHighlight)
+	{
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlightSelf, TCLocalize("Highlight your own frozen tee and dummy"), &g_Config.m_TcWaterHammerHighlightSelf, &Column, LineSize);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerSeparateColors, TCLocalize("Separate hook and hammer colors"), &g_Config.m_TcWaterHammerSeparateColors, &Column, LineSize);
+		if(g_Config.m_TcWaterHammerSeparateColors)
+		{
+			static CButtonContainer s_WaterHammerHookBodyColor, s_WaterHammerHookFeetColor, s_WaterHammerHammerBodyColor, s_WaterHammerHammerFeetColor;
+			DoLine_ColorPicker(&s_WaterHammerHookBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Frozen hook highlight body color"), &g_Config.m_TcWaterHammerHookBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHookBodyColor)), false);
+			DoLine_ColorPicker(&s_WaterHammerHookFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Frozen hook highlight feet color"), &g_Config.m_TcWaterHammerHookFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHookFeetColor)), false);
+			DoLine_ColorPicker(&s_WaterHammerHammerBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Frozen hammer highlight body color"), &g_Config.m_TcWaterHammerHammerBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHammerBodyColor)), false);
+			DoLine_ColorPicker(&s_WaterHammerHammerFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Frozen hammer highlight feet color"), &g_Config.m_TcWaterHammerHammerFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHammerFeetColor)), false);
+		}
+		else
+		{
+			static CButtonContainer s_WaterHammerBodyColor, s_WaterHammerFeetColor;
+			DoLine_ColorPicker(&s_WaterHammerBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Frozen highlight body color"), &g_Config.m_TcWaterHammerBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerBodyColor)), false);
+			DoLine_ColorPicker(&s_WaterHammerFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Frozen highlight feet color"), &g_Config.m_TcWaterHammerFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerFeetColor)), false);
+		}
+	}
+
 	// 滚动内容总框照 ME 页模式记账：两列的消费高度取最大（滚动后列剩余
 	// 高度可能为负，只有消费掉的高度算内容）。
 	CUIRect Content = MainView;
@@ -4543,33 +4570,8 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	RightView.HSplitTop(LineSize, &Label, &RightView);
 	Ui()->DoLabel(&Label, TCLocalize("You and your friends are never hidden. Sub-options only apply while the master switch is on."), EditBoxFontSize, TEXTALIGN_TL);
 
-	RightView.HSplitTop(MarginBetweenSections, nullptr, &RightView);
-	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
-	Ui()->DoLabel(&Label, TCLocalize("Frozen hammer/hook highlight"), HeadlineFontSize, TEXTALIGN_ML);
-	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHookHighlight, TCLocalize("Enable frozen hook highlight"), &g_Config.m_TcWaterHookHighlight, &RightView, LineSize);
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlight, TCLocalize("Enable frozen hammer highlight"), &g_Config.m_TcWaterHammerHighlight, &RightView, LineSize);
-		if(g_Config.m_TcWaterHookHighlight || g_Config.m_TcWaterHammerHighlight)
-		{
-			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerHighlightSelf, TCLocalize("Highlight your own frozen tee and dummy"), &g_Config.m_TcWaterHammerHighlightSelf, &RightView, LineSize);
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcWaterHammerSeparateColors, TCLocalize("Separate hook and hammer colors"), &g_Config.m_TcWaterHammerSeparateColors, &RightView, LineSize);
-		if(g_Config.m_TcWaterHammerSeparateColors)
-		{
-			static CButtonContainer s_WaterHammerHookBodyColor, s_WaterHammerHookFeetColor, s_WaterHammerHammerBodyColor, s_WaterHammerHammerFeetColor;
-			DoLine_ColorPicker(&s_WaterHammerHookBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen hook highlight body color"), &g_Config.m_TcWaterHammerHookBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHookBodyColor)), false);
-			DoLine_ColorPicker(&s_WaterHammerHookFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen hook highlight feet color"), &g_Config.m_TcWaterHammerHookFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHookFeetColor)), false);
-			DoLine_ColorPicker(&s_WaterHammerHammerBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen hammer highlight body color"), &g_Config.m_TcWaterHammerHammerBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHammerBodyColor)), false);
-			DoLine_ColorPicker(&s_WaterHammerHammerFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen hammer highlight feet color"), &g_Config.m_TcWaterHammerHammerFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerHammerFeetColor)), false);
-		}
-		else
-		{
-			static CButtonContainer s_WaterHammerBodyColor, s_WaterHammerFeetColor;
-			DoLine_ColorPicker(&s_WaterHammerBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen highlight body color"), &g_Config.m_TcWaterHammerBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerBodyColor)), false);
-			DoLine_ColorPicker(&s_WaterHammerFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &RightView, TCLocalize("Frozen highlight feet color"), &g_Config.m_TcWaterHammerFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcWaterHammerFeetColor)), false);
-		}
-	}
-
 	// The columns' remaining height may be negative after scrolling; only their consumed height is content.
+	// （冻结卡锤/卡钩高亮已于 2026-11-21 迁到 ME → 视觉页。）
 	CUIRect Content = MainView;
 	Content.h = std::max(LeftView.y, RightView.y) - Content.y + Margin;
 	s_ScrollRegion.AddRect(Content);

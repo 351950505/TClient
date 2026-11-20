@@ -632,25 +632,39 @@ std::optional<CPlayers::SHookLandingPrediction> CPlayers::PredictHookLanding(int
 	vec2 SegStart = BasePos + Direction * HookStartDistance;
 	vec2 LengthBase = BasePos;
 	vec2 Dir = Direction;
+	bool AfterTele = false; // 穿送钩后 m_NewHook=true：超长 tick 不再查玩家（对齐 gamecore）
 	constexpr int MaxTicks = 64; // 覆盖最大钩长与多级传送链
 	for(int Tick = 0; Tick < MaxTicks; ++Tick)
 	{
 		vec2 SegEnd = SegStart + Dir * HookFireSpeed;
+		bool OverLength = false;
 		if(distance(LengthBase, SegEnd) > HookLength)
-			return std::nullopt;
+		{
+			// gamecore：超长 tick 先把终点钳制到钩长；玩家检查（未穿送时）
+			// 仍会命中——钩长边界最后一段的玩家是可以钩到的，不能提前退出。
+			OverLength = true;
+			SegEnd = LengthBase + normalize(SegEnd - LengthBase) * HookLength;
+		}
 
 		vec2 HitPos;
 		int Tele = 0;
 		const int Hit = pCollision->IntersectLineTeleHook(SegStart, SegEnd, &HitPos, nullptr, &Tele);
 		if(!Hit)
 			HitPos = SegEnd; // 无砖：整段都可命中玩家（gamecore 的玩家检查在全段）
-		// 玩家优先于地面抓取（gamecore：玩家命中直接 HOOK_GRABBED，
-		// 地面结果丢弃）。命中未冻结玩家时同样返回玩家命中——砖块高亮
-		// 不显示（避免误报玩家身后的砖），冻结染色由渲染层按配置处理。
-		vec2 PlayerHitPos;
-		const int HookedPlayer = GameClient()->IntersectCharacter(SegStart, HitPos, SegEnd, ClientId, &PlayerHitPos);
-		if(HookedPlayer != -1)
-			return SHookLandingPrediction{PlayerHitPos, HookedPlayer};
+		// 玩家优先于地面抓取（gamecore：玩家命中直接 HOOK_GRABBED，地面结果
+		// 丢弃）。检查条件 (HOOK_FLYING || !m_NewHook)：飞行 tick 恒查；超长
+		// tick 状态已非 FLYING，仅在未穿送时仍查。命中未冻结玩家时同样返回
+		// 玩家命中——砖块高亮不显示（避免误报玩家身后的砖），冻结染色由
+		// 渲染层按配置处理。
+		if(!OverLength || !AfterTele)
+		{
+			vec2 PlayerHitPos;
+			const int HookedPlayer = GameClient()->IntersectCharacter(SegStart, HitPos, SegEnd, ClientId, &PlayerHitPos);
+			if(HookedPlayer != -1)
+				return SHookLandingPrediction{PlayerHitPos, HookedPlayer};
+		}
+		if(OverLength)
+			return std::nullopt; // 超长收钩：砖块不会抓取
 		if(!Hit)
 		{
 			SegStart = SegEnd;
@@ -673,6 +687,7 @@ std::optional<CPlayers::SHookLandingPrediction> CPlayers::PredictHookLanding(int
 			// 唯一出口：从出口重新起跳，长度基准随之重置（对齐 m_HookTeleBase）。
 			SegStart = vOuts[0] + Direction * HookStartDistance;
 			LengthBase = SegStart;
+			AfterTele = true;
 			continue;
 		}
 		return SHookLandingPrediction{vec2(round_to_int(HitPos.x), round_to_int(HitPos.y)), -1};

@@ -511,7 +511,7 @@ MACRO_CONFIG_INT(TcDrownBoardShowTee, tc_drown_board_show_tee, 1, 0, 1, CFGFLAG_
 // 落水榜列选择位掩码：bit0 落水 bit1 死亡 bit2 救援 bit3 坚持 bit4 全灭 bit5 跳跃
 // bit6 出钩 bit7 钩人 bit8 存活时间 bit9 冻结时间 bit10 效率；默认 133 = 落水+救援+钩人
 //（用户指定）；2047 = 全开。除落水外均为客户端估算（判据见落水榜多列语义 2026-11-19）。
-MACRO_CONFIG_INT(TcDrownBoardColumns, tc_drown_board_columns, 133, 0, 2047, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: column bitmask (1 Freezes, 2 Deaths, 4 Saves, 8 Lasts, 16 Aleds, 32 Jumps, 64 Hooks launched, 128 Player hooks, 256 Time alive, 512 Time frozen, 1024 Eff; default 133 = Freezes+Saves+Player hooks; estimated stats)")
+MACRO_CONFIG_INT(TcDrownBoardColumns, tc_drown_board_columns, 133, 0, 2047, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: column bitmask, locked to 133 (Freezes+Saves+Player hooks) by the settings UI")
 MACRO_CONFIG_INT(TcDrownBoardResetOnWipe, tc_drown_board_reset_on_wipe, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: after the whole team freezes, reset all stats only once every member has died")
 MACRO_CONFIG_INT(TcIslandOffsetX, tc_island_offset_x, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island horizontal offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandOffsetY, tc_island_offset_y, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island vertical offset in pixels (at 100% size)")

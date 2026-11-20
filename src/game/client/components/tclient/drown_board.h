@@ -20,8 +20,10 @@
 // 换图、切换 Gores 模式或玩家换队/离开起点会重置。
 class CTClientDrownBoard
 {
-	// 救援归因窗口（tick）：钩手在队友解冻前这么多个 tick 内钩住过其冻结位置即记一次救援。
-	static constexpr int SAVE_WINDOW_TICKS = 3;
+	// 救援归因窗口（tick）：队友解冻前这么多个 tick 内钩住过其冻结位置的本队
+	// 成员都记一次救援。2026-11-21 用户口径放宽为 0.5 秒（25 tick）——
+	// “把 tee 从冻结状态救活就算一次”，钩一下就走的救援也能归因。
+	static constexpr int SAVE_WINDOW_TICKS = 25;
 	// 钩尖/钩点与目标的判定半径，与物理 ProximityRadius 一致。
 	static constexpr float HOOK_HIT_RADIUS = 28.0f;
 

@@ -1035,5 +1035,17 @@ Animation speed
 Tile highlight, landing preview and frozen-tee tint are independent toggles.
 == 磚塊高亮、出鉤落點預判與凍結玩家染色相互獨立。
 
+Visuals
+== 視覺
+
+Interface style
+== 介面樣式
+
+Accent
+== 強調色
+
+Highlight colors & prediction
+== 高亮顏色與預判
+
 Traditional Chinese lyrics (default simplified)
 == 歌詞顯示繁體（預設簡體）

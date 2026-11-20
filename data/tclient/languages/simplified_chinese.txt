@@ -2180,14 +2180,23 @@ Glow around the hooked tile
 Tile highlight, landing preview and frozen-tee tint are independent toggles.
 == 砖块高亮、出钩落点预判与冻结玩家染色相互独立。
 
+Visuals
+== 视觉
+
+Interface style
+== 界面样式
+
+Accent
+== 强调色
+
+Highlight colors & prediction
+== 高亮颜色与预判
+
 Frozen
 == 冻结
 
 Ninja
 == 忍者
-
-Modern UI
-== 现代化界面
 
 Choose modern or classic weapons, freeze timer, chat and voting.
 == 分别选择现代或经典的武器、冻结计时器、聊天和投票样式。

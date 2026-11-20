@@ -523,56 +523,24 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 
 	const float ContentTop = MainView.y;
 	MainView.Margin(Margin, &MainView);
-
-	// ***** 分节一：Modern UI 原有内容 ***** //
-	MainView.HSplitTop(HeadlineHeight, &Label, &MainView);
-	Ui()->DoLabel(&Label, TCLocalize("Modern UI"), HeadlineFontSize, TEXTALIGN_ML);
-	MainView.HSplitTop(LineSize * 2, &Label, &MainView);
-	Ui()->DoLabel(&Label, TCLocalize("Choose modern or classic weapons, freeze timer, chat and voting."), EditBoxFontSize, TEXTALIGN_ML);
 	MainView.VSplitMid(&Left, &Right, MarginBetweenViews);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernGuns, TCLocalize("Modern Guns"), &g_Config.m_TcModernGuns, &Left, LineSize);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernFreezeTimer, TCLocalize("Modern Freeze Timer"), &g_Config.m_TcModernFreezeTimer, &Left, LineSize);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernChat, TCLocalize("Modern Chat"), &g_Config.m_TcModernChat, &Left, LineSize);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernVote, TCLocalize("Modern Vote"), &g_Config.m_TcModernVote, &Left, LineSize);
-	Left.HSplitTop(LineSize, nullptr, &Left);
-	Left.HSplitTop(LineSize * 3, &Label, &Left);
-	Ui()->DoLabel(&Label, TCLocalize("Hover chat with the menu open to scroll history. Click a message to copy it."), EditBoxFontSize, TEXTALIGN_TL);
-	const char *apStyles[] = {TCLocalize("Solid color"), TCLocalize("Static gradient"), TCLocalize("Animated gradient"), TCLocalize("RGB color cycle")};
-	static CUi::SDropDownState s_StyleState;
-	static CScrollRegion s_StyleScroll;
-	s_StyleState.m_SelectionPopupContext.m_pScrollRegion = &s_StyleScroll;
-	Right.HSplitTop(LineSize, &Label, &Right);
-	Ui()->DoLabel(&Label, TCLocalize("Accent style"), EditBoxFontSize, TEXTALIGN_ML);
-	Right.HSplitTop(LineSize, &Row, &Right);
-	g_Config.m_TcUiAccentMode = Ui()->DoDropDown(&Row, g_Config.m_TcUiAccentMode, apStyles, std::size(apStyles), s_StyleState);
-	static CButtonContainer s_First, s_Second;
-	DoLine_ColorPicker(&s_First, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Right, TCLocalize("First accent color"), &g_Config.m_TcUiAccent, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent)), false);
-	DoLine_ColorPicker(&s_Second, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Right, TCLocalize("Second accent color"), &g_Config.m_TcUiAccent2, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent2)), false);
-	Right.HSplitTop(LineSize, &Row, &Right);
-	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentAngle, &g_Config.m_TcUiAccentAngle, &Row, TCLocalize("Gradient angle"), 0, 360, &CUi::ms_LinearScrollbarScale, 0, "°");
-	Right.HSplitTop(LineSize, &Row, &Right);
-	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentSpeed, &g_Config.m_TcUiAccentSpeed, &Row, TCLocalize("Accent animation speed"), 1, 200);
-	Right.HSplitTop(LineSize, &Row, &Right);
-	Ui()->DoScrollbarOption(&g_Config.m_TcUiBackgroundOpacity, &g_Config.m_TcUiBackgroundOpacity, &Row, TCLocalize("Panel background opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 
-	// 左右两列排完后把 MainView 前进到两列底部（VSplitMid 不消费 MainView，
-	// 不前进的话下一个分节会从标题下方开始、与两列内容重叠）。
-	{
-		const float ColumnsBottom = std::max(Left.y, Right.y);
-		MainView.h -= ColumnsBottom - MainView.y;
-		MainView.y = ColumnsBottom;
-	}
-
-	// ***** 分节二：地图图层（自 ME 设置页迁入，含全部钩砖高亮开关与颜色控件）***** //
-	MainView.HSplitTop(MarginBetweenSections, nullptr, &MainView);
-	MainView.HSplitTop(Margin, nullptr, &MainView);
-	MainView.HSplitTop(HeadlineHeight, &Label, &MainView);
-	Ui()->DoLabel(&Label, TCLocalize("Map Layers"), HeadlineFontSize, TEXTALIGN_ML);
-	MainView.HSplitTop(MarginSmall, nullptr, &MainView);
-
-	// 左右两列（照设置页排布），控件分摊两列节省纵向空间。
-	MainView.VSplitMid(&Left, &Right, MarginBetweenViews);
+	// ***** 左列 · 界面样式 ***** //
 	Column = Left;
+	Column.HSplitTop(HeadlineHeight, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Interface style"), HeadlineFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernGuns, TCLocalize("Modern Guns"), &g_Config.m_TcModernGuns, &Column, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernFreezeTimer, TCLocalize("Modern Freeze Timer"), &g_Config.m_TcModernFreezeTimer, &Column, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernChat, TCLocalize("Modern Chat"), &g_Config.m_TcModernChat, &Column, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernVote, TCLocalize("Modern Vote"), &g_Config.m_TcModernVote, &Column, LineSize);
+	Column.HSplitTop(LineSize * 2, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Hover chat with the menu open to scroll history. Click a message to copy it."), EditBoxFontSize, TEXTALIGN_TL);
+	// ***** 左列 · 地图图层 ***** //
+	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
+	Column.HSplitTop(HeadlineHeight, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Map Layers"), HeadlineFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowTuneZoneColors, TCLocalize("Show tune zone colors"), &g_Config.m_TcShowTuneZoneColors, &Column, LineSize);
 	Column.HSplitTop(LineSize, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
@@ -580,6 +548,38 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	// 三个开关平级独立：砖块高亮（抓住态）、预判落点、冻结玩家染色；
 	// 砖块视觉参数（颜色/模式/光晕/透明度）为抓住态与预判态共用。
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlight, TCLocalize("Highlight hooked tiles (both tiles at seams)"), &g_Config.m_TcHookTileHighlight, &Column, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightGlow, TCLocalize("Glow around the hooked tile"), &g_Config.m_TcHookTileHighlightGlow, &Column, LineSize);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcHookTileHighlightOpacity, &g_Config.m_TcHookTileHighlightOpacity, &Row, TCLocalize("Hooked tile opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+
+	// ***** 右列 · 强调色 ***** //
+	Column = Right;
+	Column.HSplitTop(HeadlineHeight, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Accent"), HeadlineFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	const char *apStyles[] = {TCLocalize("Solid color"), TCLocalize("Static gradient"), TCLocalize("Animated gradient"), TCLocalize("RGB color cycle")};
+	static CUi::SDropDownState s_StyleState;
+	static CScrollRegion s_StyleScroll;
+	s_StyleState.m_SelectionPopupContext.m_pScrollRegion = &s_StyleScroll;
+	Column.HSplitTop(LineSize, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Accent style"), EditBoxFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	g_Config.m_TcUiAccentMode = Ui()->DoDropDown(&Row, g_Config.m_TcUiAccentMode, apStyles, std::size(apStyles), s_StyleState);
+	static CButtonContainer s_First, s_Second;
+	DoLine_ColorPicker(&s_First, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("First accent color"), &g_Config.m_TcUiAccent, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent)), false);
+	DoLine_ColorPicker(&s_Second, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Second accent color"), &g_Config.m_TcUiAccent2, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcUiAccent2)), false);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentAngle, &g_Config.m_TcUiAccentAngle, &Row, TCLocalize("Gradient angle"), 0, 360, &CUi::ms_LinearScrollbarScale, 0, "°");
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiAccentSpeed, &g_Config.m_TcUiAccentSpeed, &Row, TCLocalize("Accent animation speed"), 1, 200);
+	Column.HSplitTop(LineSize, &Row, &Column);
+	Ui()->DoScrollbarOption(&g_Config.m_TcUiBackgroundOpacity, &g_Config.m_TcUiBackgroundOpacity, &Row, TCLocalize("Panel background opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+
+	// ***** 右列 · 高亮颜色与预判 ***** //
+	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
+	Column.HSplitTop(HeadlineHeight, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Highlight colors & prediction"), HeadlineFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
 	static CButtonContainer s_HookTileColor;
 	DoLine_ColorPicker(&s_HookTileColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Hooked tile color"), &g_Config.m_TcHookTileHighlightColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightColor)), false);
 	// 颜色变化模式下拉（照快速输入的下拉交互）；-1 是旧 rainbow 开关的
@@ -620,12 +620,6 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 		}
 		Column.HSplitTop(MarginSmall, nullptr, &Column);
 	}
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightGlow, TCLocalize("Glow around the hooked tile"), &g_Config.m_TcHookTileHighlightGlow, &Column, LineSize);
-	Column.HSplitTop(LineSize, &Row, &Column);
-	Ui()->DoScrollbarOption(&g_Config.m_TcHookTileHighlightOpacity, &g_Config.m_TcHookTileHighlightOpacity, &Row, TCLocalize("Hooked tile opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
-
-	// 右列：预判与冻结玩家染色。
-	Column = Right;
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightPredict, TCLocalize("Prediction mode (show hook landing before firing)"), &g_Config.m_TcHookTileHighlightPredict, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightFreeze, TCLocalize("Highlight hookable frozen tees (water hammer style)"), &g_Config.m_TcHookTileHighlightFreeze, &Column, LineSize);
 	if(g_Config.m_TcHookTileHighlightFreeze)
@@ -4304,7 +4298,7 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 {
 	static int s_Page = 0;
 	static CButtonContainer s_aTabs[3];
-	const char *apNames[] = {TCLocalize("Settings"), TCLocalize("Modern UI"), TCLocalize("Get assets")};
+	const char *apNames[] = {TCLocalize("Settings"), TCLocalize("Visuals"), TCLocalize("Get assets")};
 	CUIRect TabBar, TabButton;
 	MainView.HSplitTop(LineSize, &TabBar, &MainView);
 	const float TabWidth = TabBar.w / std::size(apNames);
@@ -4338,38 +4332,68 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	MainView.Margin(Margin, &MainView);
 	MainView.VSplitMid(&LeftView, &RightView, MarginBetweenViews);
 
+	// ***** 客户端更新（v1.4 起，GitHub Releases；2026-11-21 与主播模式换位，更新排第一）***** //
+	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
 	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
-	Ui()->DoLabel(&Label, TCLocalize("Streamer Mode"), HeadlineFontSize, TEXTALIGN_ML);
+	Ui()->DoLabel(&Label, TCLocalize("Updates"), HeadlineFontSize, TEXTALIGN_ML);
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
 
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerMode, TCLocalize("Enable streamer mode"), &g_Config.m_MeStreamerMode, &LeftView, LineSize);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerFilterWords, TCLocalize("Filter sensitive words (chat, names, clans)"), &g_Config.m_MeStreamerFilterWords, &LeftView, LineSize);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerHideNames, TCLocalize("Hide non-friend names (show client ID) and clans"), &g_Config.m_MeStreamerHideNames, &LeftView, LineSize);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerHideSkins, TCLocalize("Non-friends use default skin"), &g_Config.m_MeStreamerHideSkins, &LeftView, LineSize);
-	// 国旗不再是子开关：主播模式开启时始终不画（含记分板、名牌、服务器浏览器、
-	// 皮肤资料卡），避免"开了主播模式国旗还露"。
-	LeftView.HSplitTop(LineSize, &Label, &LeftView);
-	Ui()->DoLabel(&Label, TCLocalize("Country flags are always hidden while streamer mode is on"), FontSize, TEXTALIGN_ML);
-
-	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
-	if(LeftView.w >= 280.0f)
 	{
-		LeftView.HSplitTop(LineSize + MarginExtraSmall, &Button, &LeftView);
-		Button.VSplitLeft(140.0f, &Label, &Button);
-	}
-	else
-	{
+		CTClient &TC = GameClient()->m_TClient;
+		char aLine[256];
+		str_format(aLine, sizeof(aLine), TCLocalize("Current version: %s"), TCLIENT_APP_VERSION);
 		LeftView.HSplitTop(LineSize, &Label, &LeftView);
-		LeftView.HSplitTop(LineSize + MarginExtraSmall, &Button, &LeftView);
-	}
-	Ui()->DoLabel(&Label, TCLocalize("Custom word list file"), FontSize, TEXTALIGN_ML);
-	static CLineInput s_WordsFile(g_Config.m_MeStreamerWordsFile, sizeof(g_Config.m_MeStreamerWordsFile));
-	s_WordsFile.SetEmptyText(TCLocalize("One word per line, # starts a comment"));
-	Ui()->DoEditBox(&s_WordsFile, &Button, EditBoxFontSize);
+		Ui()->DoLabel(&Label, aLine, FontSize, TEXTALIGN_ML);
 
-	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
-	LeftView.HSplitTop(LineSize, &Label, &LeftView);
-	Ui()->DoLabel(&Label, TCLocalize("You and your friends are never hidden. Sub-options only apply while the master switch is on."), EditBoxFontSize, TEXTALIGN_TL);
+		LeftView.HSplitTop(LineSize, &Label, &LeftView);
+		Ui()->DoLabel(&Label, TC.UpdateStateText(), FontSize, TEXTALIGN_ML);
+
+		const CTClient::EUpdateState State = TC.GetUpdateState();
+		if(State == CTClient::EUpdateState::FAILED || State == CTClient::EUpdateState::CHECKING || State == CTClient::EUpdateState::DOWNLOADING || State == CTClient::EUpdateState::AVAILABLE || State == CTClient::EUpdateState::DOWNLOADED)
+		{
+			LeftView.HSplitTop(LineSize, &Label, &LeftView);
+			Ui()->DoLabel(&Label, TC.UpdateStatusText(), EditBoxFontSize, TEXTALIGN_ML);
+		}
+		if(State == CTClient::EUpdateState::DOWNLOADING)
+		{
+			LeftView.HSplitTop(LineSize, &Button, &LeftView);
+			Ui()->RenderProgressBar(Button, std::clamp(TC.UpdateDownloadPercent() / 100.0f, 0.0f, 1.0f));
+		}
+
+		// 三步完全手动：获取更新清单 / 下载 / 安装并重启。每一步都要玩家点；
+		// 下载完成只显示待安装状态，普通退出不弹出安装提示也不启动 helper。
+		static CButtonContainer s_CheckButton, s_DownloadButton, s_InstallButton;
+		CUIRect CheckRect, DownloadRect, InstallRect;
+		if(LeftView.w >= 400.0f + 2.0f * MarginSmall)
+		{
+			CUIRect Row;
+			LeftView.HSplitTop(LineSize + MarginExtraSmall, &Row, &LeftView);
+			Row.VSplitLeft(120.0f, &CheckRect, &Row);
+			Row.VSplitLeft(MarginSmall, nullptr, &Row);
+			Row.VSplitLeft(120.0f, &DownloadRect, &Row);
+			Row.VSplitLeft(MarginSmall, nullptr, &Row);
+			Row.VSplitLeft(160.0f, &InstallRect, &Row);
+		}
+		else
+		{
+			LeftView.HSplitTop(LineSize + MarginExtraSmall, &CheckRect, &LeftView);
+			LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+			LeftView.HSplitTop(LineSize + MarginExtraSmall, &DownloadRect, &LeftView);
+			LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+			LeftView.HSplitTop(LineSize + MarginExtraSmall, &InstallRect, &LeftView);
+		}
+
+		if(DoButton_Menu(&s_CheckButton, TCLocalize("Get update"), 0, &CheckRect) && State != CTClient::EUpdateState::CHECKING && State != CTClient::EUpdateState::DOWNLOADING)
+			TC.UpdateCheck(true);
+		if(DoButton_Menu(&s_DownloadButton, TCLocalize("Download"), 0, &DownloadRect) && State == CTClient::EUpdateState::AVAILABLE)
+			TC.UpdateStartDownload();
+		if(DoButton_Menu(&s_InstallButton, TCLocalize("Install and restart"), 0, &InstallRect) && State == CTClient::EUpdateState::DOWNLOADED)
+			TC.UpdateInstallAndRestart();
+
+		LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+		LeftView.HSplitTop(LineSize, &Label, &LeftView);
+		Ui()->DoLabel(&Label, TCLocalize("Updates are downloaded from the public GitHub releases of this client. Your config, demos and custom fonts are not touched."), EditBoxFontSize, TEXTALIGN_TL);
+	}
 
 	// 一键缩放（从 Ping 页挪来）
 	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
@@ -4484,68 +4508,40 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	RightView.HSplitTop(LineSize * 3, &Label, &RightView);
 	Ui()->DoLabel(&Label, TCLocalize("Console commands: me_mute_team_chat / me_mute_whisper / me_mute_system_chat / me_mute_kill_feed / me_mute_finish_feed"), EditBoxFontSize, TEXTALIGN_TL);
 
-	// ***** Updates (v1.4 起，GitHub Releases) ***** //
+	// ***** 主播模式（2026-11-21 与客户端更新换位）***** //
 	RightView.HSplitTop(MarginBetweenSections, nullptr, &RightView);
 	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);
-	Ui()->DoLabel(&Label, TCLocalize("Updates"), HeadlineFontSize, TEXTALIGN_ML);
+	Ui()->DoLabel(&Label, TCLocalize("Streamer Mode"), HeadlineFontSize, TEXTALIGN_ML);
 	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
 
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerMode, TCLocalize("Enable streamer mode"), &g_Config.m_MeStreamerMode, &RightView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerFilterWords, TCLocalize("Filter sensitive words (chat, names, clans)"), &g_Config.m_MeStreamerFilterWords, &RightView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerHideNames, TCLocalize("Hide non-friend names (show client ID) and clans"), &g_Config.m_MeStreamerHideNames, &RightView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_MeStreamerHideSkins, TCLocalize("Non-friends use default skin"), &g_Config.m_MeStreamerHideSkins, &RightView, LineSize);
+	// 国旗不再是子开关：主播模式开启时始终不画（含记分板、名牌、服务器浏览器、
+	// 皮肤资料卡），避免"开了主播模式国旗还露"。
+	RightView.HSplitTop(LineSize, &Label, &RightView);
+	Ui()->DoLabel(&Label, TCLocalize("Country flags are always hidden while streamer mode is on"), FontSize, TEXTALIGN_ML);
+
+	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
+	if(RightView.w >= 280.0f)
 	{
-		CTClient &TC = GameClient()->m_TClient;
-		char aLine[256];
-		str_format(aLine, sizeof(aLine), TCLocalize("Current version: %s"), TCLIENT_APP_VERSION);
-		RightView.HSplitTop(LineSize, &Label, &RightView);
-		Ui()->DoLabel(&Label, aLine, FontSize, TEXTALIGN_ML);
-
-		RightView.HSplitTop(LineSize, &Label, &RightView);
-		Ui()->DoLabel(&Label, TC.UpdateStateText(), FontSize, TEXTALIGN_ML);
-
-		const CTClient::EUpdateState State = TC.GetUpdateState();
-		if(State == CTClient::EUpdateState::FAILED || State == CTClient::EUpdateState::CHECKING || State == CTClient::EUpdateState::DOWNLOADING || State == CTClient::EUpdateState::AVAILABLE || State == CTClient::EUpdateState::DOWNLOADED)
-		{
-			RightView.HSplitTop(LineSize, &Label, &RightView);
-			Ui()->DoLabel(&Label, TC.UpdateStatusText(), EditBoxFontSize, TEXTALIGN_ML);
-		}
-		if(State == CTClient::EUpdateState::DOWNLOADING)
-		{
-			RightView.HSplitTop(LineSize, &Button, &RightView);
-			Ui()->RenderProgressBar(Button, std::clamp(TC.UpdateDownloadPercent() / 100.0f, 0.0f, 1.0f));
-		}
-
-		// 三步完全手动：获取更新清单 / 下载 / 安装并重启。每一步都要玩家点；
-		// 下载完成只显示待安装状态，普通退出不弹出安装提示也不启动 helper。
-		static CButtonContainer s_CheckButton, s_DownloadButton, s_InstallButton;
-		CUIRect CheckRect, DownloadRect, InstallRect;
-		if(RightView.w >= 400.0f + 2.0f * MarginSmall)
-		{
-			CUIRect Row;
-			RightView.HSplitTop(LineSize + MarginExtraSmall, &Row, &RightView);
-			Row.VSplitLeft(120.0f, &CheckRect, &Row);
-			Row.VSplitLeft(MarginSmall, nullptr, &Row);
-			Row.VSplitLeft(120.0f, &DownloadRect, &Row);
-			Row.VSplitLeft(MarginSmall, nullptr, &Row);
-			Row.VSplitLeft(160.0f, &InstallRect, &Row);
-		}
-		else
-		{
-			RightView.HSplitTop(LineSize + MarginExtraSmall, &CheckRect, &RightView);
-			RightView.HSplitTop(MarginSmall, nullptr, &RightView);
-			RightView.HSplitTop(LineSize + MarginExtraSmall, &DownloadRect, &RightView);
-			RightView.HSplitTop(MarginSmall, nullptr, &RightView);
-			RightView.HSplitTop(LineSize + MarginExtraSmall, &InstallRect, &RightView);
-		}
-
-		if(DoButton_Menu(&s_CheckButton, TCLocalize("Get update"), 0, &CheckRect) && State != CTClient::EUpdateState::CHECKING && State != CTClient::EUpdateState::DOWNLOADING)
-			TC.UpdateCheck(true);
-		if(DoButton_Menu(&s_DownloadButton, TCLocalize("Download"), 0, &DownloadRect) && State == CTClient::EUpdateState::AVAILABLE)
-			TC.UpdateStartDownload();
-		if(DoButton_Menu(&s_InstallButton, TCLocalize("Install and restart"), 0, &InstallRect) && State == CTClient::EUpdateState::DOWNLOADED)
-			TC.UpdateInstallAndRestart();
-
-		RightView.HSplitTop(MarginSmall, nullptr, &RightView);
-		RightView.HSplitTop(LineSize, &Label, &RightView);
-		Ui()->DoLabel(&Label, TCLocalize("Updates are downloaded from the public GitHub releases of this client. Your config, demos and custom fonts are not touched."), EditBoxFontSize, TEXTALIGN_TL);
+		RightView.HSplitTop(LineSize + MarginExtraSmall, &Button, &RightView);
+		Button.VSplitLeft(140.0f, &Label, &Button);
 	}
+	else
+	{
+		RightView.HSplitTop(LineSize, &Label, &RightView);
+		RightView.HSplitTop(LineSize + MarginExtraSmall, &Button, &RightView);
+	}
+	Ui()->DoLabel(&Label, TCLocalize("Custom word list file"), FontSize, TEXTALIGN_ML);
+	static CLineInput s_WordsFile(g_Config.m_MeStreamerWordsFile, sizeof(g_Config.m_MeStreamerWordsFile));
+	s_WordsFile.SetEmptyText(TCLocalize("One word per line, # starts a comment"));
+	Ui()->DoEditBox(&s_WordsFile, &Button, EditBoxFontSize);
+
+	RightView.HSplitTop(MarginSmall, nullptr, &RightView);
+	RightView.HSplitTop(LineSize, &Label, &RightView);
+	Ui()->DoLabel(&Label, TCLocalize("You and your friends are never hidden. Sub-options only apply while the master switch is on."), EditBoxFontSize, TEXTALIGN_TL);
 
 	RightView.HSplitTop(MarginBetweenSections, nullptr, &RightView);
 	RightView.HSplitTop(HeadlineHeight, &Label, &RightView);

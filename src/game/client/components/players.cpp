@@ -664,6 +664,48 @@ std::optional<vec2> CPlayers::PredictHookLanding(int ClientId)
 	return std::nullopt;
 }
 
+// 钩砖高亮动态颜色：容器顶点色已白化（RGB=1），此颜色经 Ex 渲染路径整体
+// 乘上去（primex shader: FragClr = vertColor * gVerticesColor），因此颜色
+// 每帧连续变化零重建。模式语义：0 固定取色器颜色；1 彩虹循环（色相连续，
+// 600/速度 秒每圈，与旧 tc_hook_tile_highlight_rgb 速度语义一致）；2 呼吸
+// （取色器颜色明度正弦起伏，60/速度 秒每周期）；3 脉冲（明度快脉冲，
+// 30/速度 秒每周期）；4 摆动（取色器颜色与反色间渐变摆动，120/速度 秒
+// 每周期）。mode=-1 为迁移值：沿用旧 tc_hook_tile_highlight_rgb 开关
+// （1→彩虹，0→固定），下拉选中任意模式后覆盖。
+ColorRGBA CPlayers::HookTileHighlightColor(float Time)
+{
+	int Mode = g_Config.m_TcHookTileHighlightMode;
+	if(Mode < 0)
+		Mode = g_Config.m_TcHookTileHighlightRgb ? 1 : 0;
+	if(Mode == 0)
+		return color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcHookTileHighlightColor)).WithAlpha(1.0f);
+
+	const int Speed = std::max(1, g_Config.m_TcHookTileHighlightRgbSpeed);
+	if(Mode == 1)
+	{
+		const float Hue = std::fmod(Time * Speed / 600.0f, 1.0f);
+		return color_cast<ColorRGBA>(ColorHSLA(Hue, 0.75f, 0.62f)).WithAlpha(1.0f);
+	}
+	const ColorRGBA Base = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcHookTileHighlightColor));
+	if(Mode == 2)
+	{
+		const float T = 0.5f + 0.5f * std::sin(Time * 2.0f * pi * Speed / 60.0f);
+		return Base.Multiply(0.35f + 0.65f * T).WithAlpha(1.0f);
+	}
+	if(Mode == 3)
+	{
+		const float T = 0.5f + 0.5f * std::sin(Time * 2.0f * pi * Speed / 30.0f);
+		return Base.Multiply(0.30f + 0.70f * (T * T)).WithAlpha(1.0f);
+	}
+	// Mode == 4：颜色 ↔ 反色线性摆动（穿过灰）。
+	const float T = 0.5f + 0.5f * std::sin(Time * 2.0f * pi * Speed / 120.0f);
+	return ColorRGBA(
+		Base.r + ((1.0f - Base.r) - Base.r) * T,
+		Base.g + ((1.0f - Base.g) - Base.g) * T,
+		Base.b + ((1.0f - Base.b) - Base.b) * T,
+		1.0f);
+}
+
 void CPlayers::HookTileHighlightReset()
 {
 	if(m_HookTileHighlightContainer != -1)
@@ -732,15 +774,13 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 	// 提交，不再把逐帧立即模式批次（无纹理管线切换 + 动态顶点缓冲）插进连续
 	// 渲染流。RGB 循环量化到 48 桶：默认速度下约 0.4 s 重建一次，桶间色差
 	// 肉眼不可辨。
-	const float RgbHue = std::fmod(Client()->LocalTime() * g_Config.m_TcHookTileHighlightRgbSpeed / 600.0f, 1.0f);
-	const int RgbBucket = g_Config.m_TcHookTileHighlightRgb ? (int)(RgbHue * 48.0f) % 48 : -1;
-	// 64 位重建键，字段无重叠：颜色 0-23、透明度 24-30、光晕 31、RGB 桶 32-37、
-	// 预判模式 38（32 位打包会在桶 ≥16 时截断、透明度与光晕位互相踩踏，导致漏重建）。
-	const unsigned long long Key = (unsigned long long)(g_Config.m_TcHookTileHighlightColor & 0xFFFFFF) |
-		((unsigned long long)(g_Config.m_TcHookTileHighlightOpacity & 0x7F) << 24) |
-		((unsigned long long)(g_Config.m_TcHookTileHighlightGlow & 1) << 31) |
-		((unsigned long long)((RgbBucket + 1) & 0x3F) << 32) |
-		((unsigned long long)(Predict ? 1 : 0) << 38);
+	// 64 位重建键，字段无重叠：透明度 0-6、光晕 7、预判模式 8。动态颜色不进键：
+	// 顶点色已白化（RGB=1），颜色由渲染时的整体调制（SetColor + 容器 Ex 路径，
+	// primex shader: FragClr = vertColor * gVerticesColor）承载，颜色每帧连续
+	// 变化零重建（彩虹钩同款管线）。
+	const unsigned long long Key = ((unsigned long long)(g_Config.m_TcHookTileHighlightOpacity & 0x7F) << 0) |
+		((unsigned long long)(g_Config.m_TcHookTileHighlightGlow & 1) << 7) |
+		((unsigned long long)(Predict ? 1 : 0) << 8);
 	// 预判模式的几何只依赖所选砖块与配置（梯度焦点取区域中心），不比较钩点，
 	// 准星在同一块砖内微动不会触发逐帧重建。
 	bool SameSelection = m_HookTileHighlightContainer != -1 &&
@@ -751,16 +791,21 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 	for(int Index = 0; SameSelection && Index < Selection.m_Count; ++Index)
 		SameSelection = m_HookTileHighlightTileX[Index] == Selection.m_aTiles[Index].m_X &&
 			m_HookTileHighlightTileY[Index] == Selection.m_aTiles[Index].m_Y;
+	// 重建节流（tc_hook_tile_highlight_throttle，默认 0 关）：快速扫墙时落点连续
+	// 跨砖会频繁重建；节流窗口内沿用旧容器继续渲染（内容短暂滞后），窗口过后
+	// 一次重建到位。首次构建（容器不存在）不节流。
+	const float Now = Client()->LocalTime();
+	const float ThrottleSec = g_Config.m_TcHookTileHighlightThrottle / 1000.0f;
+	if(!SameSelection && m_HookTileHighlightContainer != -1 && ThrottleSec > 0.0f &&
+		Now - m_HookTileHighlightLastRebuild < ThrottleSec)
+		SameSelection = true;
 	if(!SameSelection)
 	{
 		HookTileHighlightReset();
 		m_HookTileHighlightContainer = Graphics()->CreateQuadContainer(false);
 
-		// 颜色：RGB 循环用桶中心色相（对齐 Nova nc_hooked_tile_rgb/speed，此时
-		// 忽略取色器），否则使用配置颜色。
-		const ColorRGBA Color = RgbBucket >= 0 ?
-						color_cast<ColorRGBA>(ColorHSLA((RgbBucket + 0.5f) / 48.0f, 0.75f, 0.62f)) :
-						color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcHookTileHighlightColor));
+		// 顶点色白化：RGB 固定 1，alpha 承载晕染/光晕/边框的结构；实际颜色在
+		// 渲染时整体调制（见 HookTileHighlightColor），构建与颜色完全解耦。
 		// 接触晕染 × Nova 机制：钩子接触点附近更亮，向外平滑衰减为低强度底染。
 		// 混合模式为加法（BlendAdditive）：普通 alpha 混合下 src = 纹理×顶点色，
 		// 实心砖纹理是深灰(48,48,48)，浅色高亮乘上去只剩 ~18% 亮度，等于隐形——
@@ -836,10 +881,10 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 					const float CellW = ExpW / GlowQuads;
 					const float CellH = ExpH / GlowQuads;
 					FillRect(CellX, CellY, CellW, CellH,
-						Color.WithAlpha(GlowAlpha(vec2(CellX, CellY))),
-						Color.WithAlpha(GlowAlpha(vec2(CellX + CellW, CellY))),
-						Color.WithAlpha(GlowAlpha(vec2(CellX + CellW, CellY + CellH))),
-						Color.WithAlpha(GlowAlpha(vec2(CellX, CellY + CellH))));
+						ColorRGBA(1, 1, 1, GlowAlpha(vec2(CellX, CellY))),
+						ColorRGBA(1, 1, 1, GlowAlpha(vec2(CellX + CellW, CellY))),
+						ColorRGBA(1, 1, 1, GlowAlpha(vec2(CellX + CellW, CellY + CellH))),
+						ColorRGBA(1, 1, 1, GlowAlpha(vec2(CellX, CellY + CellH))));
 				}
 			}
 		}
@@ -854,10 +899,10 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 					const float CellY = Tile.m_Y * 32.0f + SubY * CellSize;
 					// 接触晕染：钩点附近更亮，向外衰减为低强度底染（TL, TR, BR, BL）。
 					FillRect(CellX, CellY, CellSize, CellSize,
-						Color.WithAlpha(FalloffAlpha(vec2(CellX, CellY))),
-						Color.WithAlpha(FalloffAlpha(vec2(CellX + CellSize, CellY))),
-						Color.WithAlpha(FalloffAlpha(vec2(CellX + CellSize, CellY + CellSize))),
-						Color.WithAlpha(FalloffAlpha(vec2(CellX, CellY + CellSize))));
+						ColorRGBA(1, 1, 1, FalloffAlpha(vec2(CellX, CellY))),
+						ColorRGBA(1, 1, 1, FalloffAlpha(vec2(CellX + CellSize, CellY))),
+						ColorRGBA(1, 1, 1, FalloffAlpha(vec2(CellX + CellSize, CellY + CellSize))),
+						ColorRGBA(1, 1, 1, FalloffAlpha(vec2(CellX, CellY + CellSize))));
 				}
 			}
 			// 细边框：非共享边描出结构线（接缝处两块共用一条边，不叠加重复描线）。
@@ -871,8 +916,8 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 			};
 			const auto Edge = [&](float EX, float EY, float EW, float EH) {
 				Graphics()->SetColor4(
-					Color.WithAlpha(BorderAlpha), Color.WithAlpha(BorderAlpha),
-					Color.WithAlpha(BorderAlpha), Color.WithAlpha(BorderAlpha));
+					ColorRGBA(1, 1, 1, BorderAlpha), ColorRGBA(1, 1, 1, BorderAlpha),
+					ColorRGBA(1, 1, 1, BorderAlpha), ColorRGBA(1, 1, 1, BorderAlpha));
 				IGraphics::CQuadItem Item(EX, EY, EW, EH);
 				Graphics()->QuadContainerAddQuads(m_HookTileHighlightContainer, &Item, 1);
 			};
@@ -901,11 +946,18 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 		m_HookTileHighlightHookX = (int)HookPos.x;
 		m_HookTileHighlightHookY = (int)HookPos.y;
 		m_HookTileHighlightKey = Key;
+		m_HookTileHighlightLastRebuild = Now;
 	}
 
+	// 动态颜色 + 整体调制渲染：Ex 路径把 SetColor 颜色作为 uniform 乘上容器
+	// 顶点色（彩虹钩同款管线，GL/Vulkan 均实现）。X=Y=0 不改变屏幕矩形与
+	// 顶点位置，rotationless 变体下与原 RenderQuadContainer 等价，仅多一次
+	// 调制乘法。QuadsSetRotation(0) 防止上一段渲染遗留的旋转影响几何。
+	Graphics()->QuadsSetRotation(0.0f);
+	Graphics()->SetColor(HookTileHighlightColor(Client()->LocalTime()));
 	Graphics()->BlendAdditive();
 	Graphics()->TextureClear();
-	Graphics()->RenderQuadContainer(m_HookTileHighlightContainer, 0, -1, false);
+	Graphics()->RenderQuadContainerEx(m_HookTileHighlightContainer, 0, -1, 0.0f, 0.0f);
 	Graphics()->BlendNormal();
 	Graphics()->SetColor(1, 1, 1, 1);
 }

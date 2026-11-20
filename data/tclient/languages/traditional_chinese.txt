@@ -1002,5 +1002,26 @@ Players
 Prediction mode (show hook landing before firing)
 == 預判模式（出鉤前顯示將鉤到的落點）
 
+Color animation mode
+== 顏色變化模式
+
+Fixed color
+== 固定顏色
+
+Rainbow cycle
+== 彩虹循環
+
+Breathing
+== 呼吸閃爍
+
+Pulsing
+== 脈衝閃爍
+
+Color swing
+== 顏色擺動
+
+Animation speed
+== 變化速度
+
 Keep lyrics in traditional Chinese (default simplified)
 == 歌詞保持繁體（預設轉簡體）

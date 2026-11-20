@@ -194,8 +194,10 @@ MACRO_CONFIG_INT(TcAntiPingUncertaintyScale, tc_antiping_uncertainty_scale, 150,
 MACRO_CONFIG_INT(TcHookTileHighlight, tc_hook_tile_highlight, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Cover the tile your hook holds with a colored glow, including both tiles at a seam")
 MACRO_CONFIG_COL(TcHookTileHighlightColor, tc_hook_tile_highlight_color, 8435379, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Hooked terrain highlight color")
 MACRO_CONFIG_INT(TcHookTileHighlightOpacity, tc_hook_tile_highlight_opacity, 70, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Hooked terrain highlight opacity (%)")
-MACRO_CONFIG_INT(TcHookTileHighlightRgb, tc_hook_tile_highlight_rgb, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Cycle the hooked tile highlight through RGB colors")
-MACRO_CONFIG_INT(TcHookTileHighlightRgbSpeed, tc_hook_tile_highlight_rgb_speed, 30, 1, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Hooked tile RGB cycle speed (30 ≈ one cycle every 20 s)")
+MACRO_CONFIG_INT(TcHookTileHighlightRgb, tc_hook_tile_highlight_rgb, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Legacy switch for rainbow cycling the hooked tile highlight (only read while tc_hook_tile_highlight_mode is -1)")
+MACRO_CONFIG_INT(TcHookTileHighlightRgbSpeed, tc_hook_tile_highlight_rgb_speed, 30, 1, 200, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Hooked tile highlight color animation speed (30 ≈ one rainbow cycle every 20 s)")
+MACRO_CONFIG_INT(TcHookTileHighlightMode, tc_hook_tile_highlight_mode, -1, -1, 4, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Hooked tile color animation: -1 follow legacy rainbow switch, 0 fixed color, 1 rainbow cycle, 2 breathing, 3 pulsing, 4 color swing")
+MACRO_CONFIG_INT(TcHookTileHighlightThrottle, tc_hook_tile_highlight_throttle, 0, 0, 1000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Minimum milliseconds between hooked tile highlight rebuilds (0 = off; limits rebuild churn while sweeping the crosshair)")
 MACRO_CONFIG_INT(TcHookTileHighlightGlow, tc_hook_tile_highlight_glow, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Glow around the hooked tile")
 MACRO_CONFIG_INT(TcHookTileHighlightPredict, tc_hook_tile_highlight_predict, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Prediction mode: before the hook is fired, highlight the spot a hook toward the crosshair would grab")
 

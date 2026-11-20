@@ -2144,17 +2144,32 @@ Hooked tile color
 Hooked tile opacity
 == 砖块高亮不透明度
 
-Cycle highlight through RGB colors
-== 高亮颜色按 RGB 循环
+Color animation mode
+== 颜色变化模式
 
-RGB cycle speed
-== RGB 循环速度
+Fixed color
+== 固定颜色
+
+Rainbow cycle
+== 彩虹循环
+
+Breathing
+== 呼吸闪烁
+
+Pulsing
+== 脉冲闪烁
+
+Color swing
+== 颜色摆动
+
+Animation speed
+== 变化速度
 
 Glow around the hooked tile
 == 钩住砖块的外圈光晕
 
-Covers the hooked tiles with a soft colored glow. RGB cycling and an outer glow are optional.
-== 用柔和的颜色光晕覆盖钩住的砖块；RGB 循环与外圈光晕可选。
+Covers the hooked tiles with a soft colored glow. Color animation modes and an outer glow are optional.
+== 用柔和的颜色光晕覆盖钩住的砖块；颜色变化模式与外圈光晕可选。
 
 Frozen
 == 冻结

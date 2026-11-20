@@ -4380,11 +4380,43 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightPredict, TCLocalize("Prediction mode (show hook landing before firing)"), &g_Config.m_TcHookTileHighlightPredict, &LeftView, LineSize);
 		static CButtonContainer s_HookTileColor;
 		DoLine_ColorPicker(&s_HookTileColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Hooked tile color"), &g_Config.m_TcHookTileHighlightColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightColor)), false);
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightRgb, TCLocalize("Cycle highlight through RGB colors"), &g_Config.m_TcHookTileHighlightRgb, &LeftView, LineSize);
-		if(g_Config.m_TcHookTileHighlightRgb)
+		// 颜色变化模式下拉（照快速输入的下拉交互）；-1 是旧 rainbow 开关的
+		// 迁移值，只映射显示、不在下拉中改写，选中任意模式后覆盖为 0..4。
 		{
-			LeftView.HSplitTop(LineSize, &Button, &LeftView);
-			Ui()->DoScrollbarOption(&g_Config.m_TcHookTileHighlightRgbSpeed, &g_Config.m_TcHookTileHighlightRgbSpeed, &Button, TCLocalize("RGB cycle speed"), 1, 200, &CUi::ms_LinearScrollbarScale, 0, "");
+			static const std::vector<int> s_vColorModeValues = {0, 1, 2, 3, 4};
+			static std::vector<const char *> s_vColorModeNames;
+			s_vColorModeNames = {TCLocalize("Fixed color"), TCLocalize("Rainbow cycle"), TCLocalize("Breathing"), TCLocalize("Pulsing"), TCLocalize("Color swing")};
+			static CUi::SDropDownState s_ColorModeDropDownState;
+			static CScrollRegion s_ColorModeDropDownScrollRegion;
+			s_ColorModeDropDownState.m_SelectionPopupContext.m_pScrollRegion = &s_ColorModeDropDownScrollRegion;
+
+			int EffectiveMode = g_Config.m_TcHookTileHighlightMode;
+			if(EffectiveMode < 0)
+				EffectiveMode = g_Config.m_TcHookTileHighlightRgb ? 1 : 0;
+			int ColorModeSelectedOld = -1;
+			for(int i = 0; i < (int)s_vColorModeValues.size(); ++i)
+			{
+				if(s_vColorModeValues[i] == EffectiveMode)
+				{
+					ColorModeSelectedOld = i;
+					break;
+				}
+			}
+
+			CUIRect ColorModeRect;
+			LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+			LeftView.HSplitTop(LineSize, &ColorModeRect, &LeftView);
+			ColorModeRect.VSplitLeft(120.0f, &Label, &ColorModeRect);
+			Ui()->DoLabel(&Label, TCLocalize("Color animation mode"), EditBoxFontSize, TEXTALIGN_ML);
+			const int ColorModeSelectedNew = Ui()->DoDropDown(&ColorModeRect, ColorModeSelectedOld, s_vColorModeNames.data(), s_vColorModeNames.size(), s_ColorModeDropDownState);
+			if(ColorModeSelectedNew >= 0 && ColorModeSelectedNew < (int)s_vColorModeValues.size())
+				g_Config.m_TcHookTileHighlightMode = s_vColorModeValues[ColorModeSelectedNew];
+			if(EffectiveMode != 0)
+			{
+				LeftView.HSplitTop(LineSize, &Button, &LeftView);
+				Ui()->DoScrollbarOption(&g_Config.m_TcHookTileHighlightRgbSpeed, &g_Config.m_TcHookTileHighlightRgbSpeed, &Button, TCLocalize("Animation speed"), 1, 200, &CUi::ms_LinearScrollbarScale, 0, "");
+			}
+			LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
 		}
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightGlow, TCLocalize("Glow around the hooked tile"), &g_Config.m_TcHookTileHighlightGlow, &LeftView, LineSize);
 		LeftView.HSplitTop(LineSize, &Button, &LeftView);

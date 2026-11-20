@@ -56,13 +56,10 @@ class CTClientDrownBoard
 		int m_StatPrevJumpedTotal = -1;
 		int m_HookFrozenMateTicks = 0; // >0：最近 SAVE_WINDOW_TICKS tick 内钩住过冻结队友
 		int m_HookFrozenMateId = -1;
-		// 救援待确认（2026-11-21 用户口径）：解冻只是第一阶段，被救的 tee 要
-		// 恢复行动（自己出钩/被钩/明显移动）才算“活”；锤/激光击打可跳过恢复期。
-		// 确认不设时限，死亡/再次冻结/角色消失/轮次重置才作废——覆盖“钩住吊在
-		// 平台上等自然解冻”的救援手法。
-		unsigned long long m_PendingRescuers = 0;
-		float m_PendingSaveX = 0.0f;
-		float m_PendingSaveY = 0.0f;
+		// 冻结期间最后钩住本玩家的本队成员（不限时限）——解冻归因用：
+		// "拉到平台上等自然解冻"的等待期可长达数秒，任何短窗口都会漏。
+		// 2026-11-21 用户口径：把 tee 从冻结状态救活就算一次。
+		int m_FrozenLastHookerId = -1;
 		bool m_LastCounted = false; // 本轮“坚持”已计数
 	};
 	std::array<SPlayer, MAX_CLIENTS> m_aPlayers{};
@@ -220,6 +217,7 @@ public:
 		if(m_aPlayers[ClientId].m_Deaths < std::numeric_limits<int>::max())
 			++m_aPlayers[ClientId].m_Deaths;
 		m_aPlayers[ClientId].m_PendingRescuers = 0; // 死亡：救援确认作废
+		m_aPlayers[ClientId].m_FrozenLastHookerId = -1;
 		if(m_AledEpisodeDone && m_aEpisodeMembers[ClientId])
 			m_aEpisodeDeaths[ClientId] = true;
 	}
@@ -307,11 +305,12 @@ public:
 
 		const float HookHitRadius2 = HOOK_HIT_RADIUS * HOOK_HIT_RADIUS;
 
-	// 1) 救援归因（解冻 tick）：解冻瞬间 25 tick 窗口内钩住过它的本队成员
-	// 记入待确认集；真正计数在被救者「进入活的状态」时（见第 2 段，不设时限）
-	// （2026-11-21 用户口径：把 tee 从冻结状态救活就算一次，锤/激光击打可让
-	// 被救者跳过恢复期立刻行动，同样落入触发条件）。覆盖：拉出冻结砖、钩住
-	// 吊到平台上等自然解冻、空中反复拉活、锤救、钩拽加速融化。
+	// 1) 救援归因（解冻 tick）：归因给冻结期间最后钩住它的本队成员（不设
+	// 时限——"拉到平台上等自然解冻"的等待期可长达数秒）；真正计数在被救者
+	// 「进入活的状态」时（见第 2 段）。2026-11-21 用户口径：把 tee 从冻结
+	// 状态救活就算一次。覆盖：拉出冻结砖、钩住吊到平台上等自然解冻、空中
+	// 反复拉活、钩拽加速融化。已知漏计：深冻被锤敲/激光解除且无钩（他人
+	// 开火无网络信号）。
 	for(int VictimId = 0; VictimId < MAX_CLIENTS; ++VictimId)
 	{
 		SPlayer &Victim = m_aPlayers[VictimId];
@@ -320,22 +319,16 @@ public:
 			continue;
 		if(!VictimTick.m_Active || !VictimTick.m_HasCharacter || VictimTick.m_Frozen)
 			continue;
-		unsigned long long Mask = 0;
-		for(int RescuerId = 0; RescuerId < MAX_CLIENTS; ++RescuerId)
-		{
-			const SPlayer &Rescuer = m_aPlayers[RescuerId];
-			if(RescuerId == VictimId || Rescuer.m_HookFrozenMateTicks < ElapsedTicks || Rescuer.m_HookFrozenMateId != VictimId)
-				continue;
-			if(Rescuer.m_Team != Victim.m_Team || !IsTrackedTeam(Rescuer.m_Team, IncludeTeamZero))
-				continue;
-			Mask |= 1ULL << RescuerId;
-		}
-		if(Mask)
-		{
-			Victim.m_PendingRescuers = Mask;
-			Victim.m_PendingSaveX = VictimTick.m_X;
-			Victim.m_PendingSaveY = VictimTick.m_Y;
-		}
+		const int HookerId = Victim.m_FrozenLastHookerId;
+		Victim.m_FrozenLastHookerId = -1;
+		if(HookerId < 0 || HookerId >= MAX_CLIENTS)
+			continue;
+		const SPlayer &Rescuer = m_aPlayers[HookerId];
+		if(Rescuer.m_Team != Victim.m_Team || !IsTrackedTeam(Rescuer.m_Team, IncludeTeamZero))
+			continue;
+		Victim.m_PendingRescuers = 1ULL << HookerId;
+		Victim.m_PendingSaveX = VictimTick.m_X;
+		Victim.m_PendingSaveY = VictimTick.m_Y;
 	}
 
 		// 2) 逐玩家计数与状态推进。

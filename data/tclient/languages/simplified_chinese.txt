@@ -2138,6 +2138,15 @@ Highlight hooked tiles (both tiles at seams)
 Prediction mode (show hook landing before firing)
 == 预判模式（出钩前显示将勾到的落点）
 
+Highlight hookable frozen tees (water hammer style)
+== 高亮可钩住的冻结玩家（卡锤高亮样式）
+
+Frozen tee highlight body color
+== 冻结玩家高亮身体颜色
+
+Frozen tee highlight feet color
+== 冻结玩家高亮脚部颜色
+
 Hooked tile color
 == 钩住砖块的高亮颜色
 

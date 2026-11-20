@@ -4378,6 +4378,17 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlight, TCLocalize("Highlight hooked tiles (both tiles at seams)"), &g_Config.m_TcHookTileHighlight, &LeftView, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightPredict, TCLocalize("Prediction mode (show hook landing before firing)"), &g_Config.m_TcHookTileHighlightPredict, &LeftView, LineSize);
+		if(g_Config.m_TcHookTileHighlightPredict)
+		{
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcHookTileHighlightFreeze, TCLocalize("Highlight hookable frozen tees (water hammer style)"), &g_Config.m_TcHookTileHighlightFreeze, &LeftView, LineSize);
+			if(g_Config.m_TcHookTileHighlightFreeze)
+			{
+				static CButtonContainer s_HookTileFreezeBodyColor;
+				DoLine_ColorPicker(&s_HookTileFreezeBodyColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Frozen tee highlight body color"), &g_Config.m_TcHookTileHighlightFreezeBodyColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightFreezeBodyColor)), false);
+				static CButtonContainer s_HookTileFreezeFeetColor;
+				DoLine_ColorPicker(&s_HookTileFreezeFeetColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Frozen tee highlight feet color"), &g_Config.m_TcHookTileHighlightFreezeFeetColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightFreezeFeetColor)), false);
+			}
+		}
 		static CButtonContainer s_HookTileColor;
 		DoLine_ColorPicker(&s_HookTileColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Hooked tile color"), &g_Config.m_TcHookTileHighlightColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcHookTileHighlightColor)), false);
 		// 颜色变化模式下拉（照快速输入的下拉交互）；-1 是旧 rainbow 开关的

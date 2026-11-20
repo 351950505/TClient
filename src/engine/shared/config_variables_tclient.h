@@ -200,6 +200,9 @@ MACRO_CONFIG_INT(TcHookTileHighlightMode, tc_hook_tile_highlight_mode, -1, -1, 4
 MACRO_CONFIG_INT(TcHookTileHighlightThrottle, tc_hook_tile_highlight_throttle, 0, 0, 1000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Minimum milliseconds between hooked tile highlight rebuilds (0 = off; limits rebuild churn while sweeping the crosshair)")
 MACRO_CONFIG_INT(TcHookTileHighlightGlow, tc_hook_tile_highlight_glow, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Glow around the hooked tile")
 MACRO_CONFIG_INT(TcHookTileHighlightPredict, tc_hook_tile_highlight_predict, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Prediction mode: before the hook is fired, highlight the spot a hook toward the crosshair would grab")
+MACRO_CONFIG_INT(TcHookTileHighlightFreeze, tc_hook_tile_highlight_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Prediction mode: color hookable frozen tees the hook would grab, like the water hammer highlight")
+MACRO_CONFIG_COL(TcHookTileHighlightFreezeBodyColor, tc_hook_tile_highlight_freeze_body_color, 589706, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Frozen tee hook prediction highlight body color")
+MACRO_CONFIG_COL(TcHookTileHighlightFreezeFeetColor, tc_hook_tile_highlight_freeze_feet_color, 1441679, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Frozen tee hook prediction highlight feet color")
 
 MACRO_CONFIG_INT(TcColorFreeze, tc_color_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use skin colors for frozen tees")
 MACRO_CONFIG_INT(TcColorFreezeDarken, tc_color_freeze_darken, 90, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Makes color of tees darker when in freeze (0-100)")

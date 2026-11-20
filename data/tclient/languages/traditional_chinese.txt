@@ -1002,6 +1002,15 @@ Players
 Prediction mode (show hook landing before firing)
 == 預判模式（出鉤前顯示將鉤到的落點）
 
+Highlight hookable frozen tees (water hammer style)
+== 高亮可鉤住的凍結玩家（卡錘高亮樣式）
+
+Frozen tee highlight body color
+== 凍結玩家高量身體顏色
+
+Frozen tee highlight feet color
+== 凍結玩家高量腳部顏色
+
 Color animation mode
 == 顏色變化模式
 

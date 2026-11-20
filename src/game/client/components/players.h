@@ -64,9 +64,18 @@ public:
 	void OnRender() override;
 	void RenderHookTileHighlight(int ClientId);
 	void HookTileHighlightReset();
-	// 预判模式：未出钩时按准星方向模拟一次钩子飞行，返回将勾住的钩点
-	// （round_to_int 对齐网络整数钩点）。
-	std::optional<vec2> PredictHookLanding(int ClientId);
+	// 预判模式：未出钩时按准星方向模拟一次钩子飞行。命中砖块返回钩点
+	// （round_to_int 对齐网络整数钩点）；命中可钩玩家返回玩家 id（m_Pos 为
+	// 命中位置）——冻结 tee 的染色高亮与"钩玩家时不报砖块"都基于此。
+	struct SHookLandingPrediction
+	{
+		vec2 m_Pos;
+		int m_PlayerId = -1;
+	};
+	std::optional<SHookLandingPrediction> PredictHookLanding(int ClientId);
+	// 预判结果帧缓存：染色路径（OnRender）与砖块高亮路径（maplayers）同帧
+	// 共用一次模拟，返回 nullptr 表示本帧无落点。
+	const SHookLandingPrediction *HookLandingPrediction(int ClientId);
 	// 钩砖高亮动态颜色（模式：固定/彩虹/呼吸/脉冲/摆动），渲染时整体调制。
 	ColorRGBA HookTileHighlightColor(float Time);
 	// 钩住砖块高亮缓存容器：抓住期间零重建，只在选择砖块/钩点/配置变化时重建
@@ -80,6 +89,15 @@ public:
 	unsigned long long m_HookTileHighlightKey = 0;
 	// 重建节流（tc_hook_tile_highlight_throttle）上一次重建的 LocalTime。
 	float m_HookTileHighlightLastRebuild = -1.0f;
+	// 预判冻结 tee 染色高亮（water hammer 同款机制）：alpha 快速渐入渐出，
+	// base 保存染色前的 RenderInfo 用于双绘制交叉淡化。
+	float m_aHookPredictHighlightAlpha[MAX_CLIENTS]{};
+	CTeeRenderInfo m_aHookPredictBaseRenderInfo[MAX_CLIENTS];
+	// 预判结果帧缓存（见 HookLandingPrediction）。
+	float m_HookPredictCacheFrame = -1.0f;
+	int m_HookPredictCacheClientId = -1;
+	bool m_HookPredictCacheValid = false;
+	SHookLandingPrediction m_HookPredictCache;
 
 	const std::shared_ptr<CManagedTeeRenderInfo> &NinjaTeeRenderInfo() const { return m_pNinjaTeeRenderInfo; }
 	const std::shared_ptr<CManagedTeeRenderInfo> &SpectatorTeeRenderInfo() const { return m_pSpectatorTeeRenderInfo; }

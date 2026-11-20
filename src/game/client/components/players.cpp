@@ -599,16 +599,20 @@ void CPlayers::RenderHook(
 	RenderHand(&RenderInfo, Position, normalize(HookPos - Pos), -pi / 2, vec2(20, 0), Alpha);
 }
 
-// 预判模式：从玩家当前位置沿当前准星方向模拟一次钩子飞行，返回第一个
-// 可勾住的钩点（round_to_int 对齐网络整数钩点）。飞行与碰撞语义对齐
-// CCharacterCore::Tick 的 HOOK_FLYING 分支（gamecore.cpp）：起跳点 =
-// 玩家位置 + 方向 × 1.5 × PhysicalSize，每 tick 前进 m_HookFireSpeed，
-// 超长 tick 直接收钩（不会再抓砖），TILE_NOHOOK 收钩，TILE_TELEINHOOK
-// 穿送且长度基准重置。段起点每 tick 取整、方向在第一 tick 后量化到
-// 1/256，与 DDNet hookline 的实现保持一致。两个已知近似（与 hookline
-// 相同）：长度基准固定在出钩瞬间位置，不模拟钩住玩家。
-std::optional<vec2> CPlayers::PredictHookLanding(int ClientId)
+// 预判模式：从玩家当前位置沿当前准星方向模拟一次钩子飞行。命中砖块返回
+// 钩点（round_to_int 对齐网络整数钩点）；命中可钩玩家返回玩家 id 与命中
+// 位置。飞行与碰撞语义对齐 CCharacterCore::Tick 的 HOOK_FLYING 分支
+// （gamecore.cpp）：起跳点 = 玩家位置 + 方向 × 1.5 × PhysicalSize，每 tick
+// 前进 m_HookFireSpeed，超长 tick 直接收钩（不会再抓砖），TILE_NOHOOK 收钩，
+// TILE_TELEINHOOK 穿送且长度基准重置；同 tick 玩家优先于地面（gamecore 顺序），
+// 玩家检查走 IntersectCharacter（团队/自身排除与 DDNet hookline 同款）。
+// 段起点每 tick 取整、方向在第一 tick 后量化到 1/256，与 hookline 一致。
+// 两个已知近似（与 hookline 相同）：长度基准固定在出钩瞬间位置，不模拟
+// 钩住玩家后的拖拽。
+std::optional<CPlayers::SHookLandingPrediction> CPlayers::PredictHookLanding(int ClientId)
 {
+	if(!in_range(ClientId, MAX_CLIENTS - 1))
+		return std::nullopt;
 	const auto &Data = GameClient()->m_aClients[ClientId];
 	const float Intra = Data.m_IsPredicted ? Client()->PredIntraGameTick(g_Config.m_ClDummy) : Client()->IntraGameTick(g_Config.m_ClDummy);
 	const vec2 Direction = direction(GetPlayerTargetAngle(&Data.m_RenderPrev, &Data.m_RenderCur, ClientId, Intra));
@@ -636,6 +640,15 @@ std::optional<vec2> CPlayers::PredictHookLanding(int ClientId)
 		int Tele = 0;
 		const int Hit = pCollision->IntersectLineTeleHook(SegStart, SegEnd, &HitPos, nullptr, &Tele);
 		if(!Hit)
+			HitPos = SegEnd; // 无砖：整段都可命中玩家（gamecore 的玩家检查在全段）
+		// 玩家优先于地面抓取（gamecore：玩家命中直接 HOOK_GRABBED，
+		// 地面结果丢弃）。命中未冻结玩家时同样返回玩家命中——砖块高亮
+		// 不显示（避免误报玩家身后的砖），冻结染色由渲染层按配置处理。
+		vec2 PlayerHitPos;
+		const int HookedPlayer = GameClient()->IntersectCharacter(SegStart, HitPos, SegEnd, ClientId, &PlayerHitPos);
+		if(HookedPlayer != -1)
+			return SHookLandingPrediction{PlayerHitPos, HookedPlayer};
+		if(!Hit)
 		{
 			SegStart = SegEnd;
 			SegStart.x = round_to_int(SegStart.x);
@@ -659,9 +672,33 @@ std::optional<vec2> CPlayers::PredictHookLanding(int ClientId)
 			LengthBase = SegStart;
 			continue;
 		}
-		return vec2(round_to_int(HitPos.x), round_to_int(HitPos.y));
+		return SHookLandingPrediction{vec2(round_to_int(HitPos.x), round_to_int(HitPos.y)), -1};
 	}
 	return std::nullopt;
+}
+
+// 预判结果帧缓存：砖块高亮（maplayers 渲染时机）与冻结 tee 染色（OnRender
+// 时机）都需要同一份预判，同帧只模拟一次；ClientId 变化（切观战对象）即失效。
+const CPlayers::SHookLandingPrediction *CPlayers::HookLandingPrediction(int ClientId)
+{
+	const float Frame = Client()->RenderFrameTime();
+	if(m_HookPredictCacheFrame != Frame || m_HookPredictCacheClientId != ClientId)
+	{
+		m_HookPredictCacheFrame = Frame;
+		m_HookPredictCacheClientId = ClientId;
+		m_HookPredictCacheValid = false;
+		m_HookPredictCache = SHookLandingPrediction{};
+		if(g_Config.m_TcHookTileHighlight && g_Config.m_TcHookTileHighlightPredict)
+		{
+			const auto Result = PredictHookLanding(ClientId);
+			if(Result)
+			{
+				m_HookPredictCache = *Result;
+				m_HookPredictCacheValid = true;
+			}
+		}
+	}
+	return m_HookPredictCacheValid ? &m_HookPredictCache : nullptr;
 }
 
 // 钩砖高亮动态颜色：容器顶点色已白化（RGB=1），此颜色经 Ex 渲染路径整体
@@ -745,13 +782,15 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 	else if(Predict)
 	{
 		// 预判模式：未出钩（空闲/飞行/收钩）时按准星方向模拟出钩落点。
-		const std::optional<vec2> Predicted = PredictHookLanding(ClientId);
-		if(!Predicted)
+		// 命中玩家（冻结或未冻结）时无砖块高亮——冻结 tee 的染色高亮在
+		// OnRender 处理，未冻结玩家钩住也不该报其身后的砖。
+		const SHookLandingPrediction *pPredicted = HookLandingPrediction(ClientId);
+		if(!pPredicted || pPredicted->m_PlayerId != -1)
 		{
 			HookTileHighlightReset();
 			return;
 		}
-		HookPos = *Predicted;
+		HookPos = pPredicted->m_Pos;
 	}
 	else
 	{
@@ -1413,11 +1452,18 @@ void CPlayers::RenderPlayer(
 	}
 
 	const float HighlightAlpha = in_range(ClientId, MAX_CLIENTS - 1) ? m_aWaterHammerHighlightAlpha[ClientId] : 0.0f;
+	const float HookPredictHighlightAlpha = in_range(ClientId, MAX_CLIENTS - 1) ? m_aHookPredictHighlightAlpha[ClientId] : 0.0f;
 	if(HighlightAlpha > 0.001f && HighlightAlpha < 0.999f)
 	{
 		// 原皮肤与可染色皮肤交叉淡化，避免切换贴图时瞬间变灰。
 		RenderTools()->RenderTee(&State, &m_aWaterHammerBaseRenderInfo[ClientId], Player.m_Emote, Direction, Position, Alpha * (1.0f - HighlightAlpha), Local);
 		RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, Position, Alpha * HighlightAlpha, Local);
+	}
+	else if(HighlightAlpha <= 0.001f && HookPredictHighlightAlpha > 0.001f && HookPredictHighlightAlpha < 0.999f)
+	{
+		// 预判冻结 tee 染色：同款交叉淡化；卡锤染色优先（与染色层同帧一致）。
+		RenderTools()->RenderTee(&State, &m_aHookPredictBaseRenderInfo[ClientId], Player.m_Emote, Direction, Position, Alpha * (1.0f - HookPredictHighlightAlpha), Local);
+		RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, Position, Alpha * HookPredictHighlightAlpha, Local);
 	}
 	else
 		RenderTools()->RenderTee(&State, &RenderInfo, Player.m_Emote, Direction, Position, Alpha, Local);
@@ -1521,6 +1567,14 @@ void CPlayers::OnRender()
 	CNetObj_Character aFrozenKatanaCharacters[MAX_CLIENTS];
 	const CNetObj_Character *apRenderCharacters[MAX_CLIENTS];
 	const bool IsTeamPlay = GameClient()->IsTeamPlay();
+
+	// 预判冻结 tee 高亮目标：视角主人（本地或被观战玩家）的预判命中玩家。
+	// 与 RenderHookTileHighlight 共用帧缓存（同帧只模拟一次）；freeze 开关
+	// 关闭时不触发模拟，由砖块高亮路径按需填充缓存。
+	const int HookPredictViewId = (GameClient()->m_Snap.m_SpecInfo.m_Active && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW) ? GameClient()->m_Snap.m_SpecInfo.m_SpectatorId : GameClient()->m_Snap.m_LocalClientId;
+	const SHookLandingPrediction *pHookPredictLanding = (g_Config.m_TcHookTileHighlight && g_Config.m_TcHookTileHighlightPredict && g_Config.m_TcHookTileHighlightFreeze) ? HookLandingPrediction(HookPredictViewId) : nullptr;
+	const int HookPredictTargetId = (g_Config.m_TcHookTileHighlightFreeze && pHookPredictLanding) ? pHookPredictLanding->m_PlayerId : -1;
+
 	for(int i = 0; i < MAX_CLIENTS; ++i)
 	{
 		aRenderInfo[i] = GameClient()->m_aClients[i].m_RenderInfo;
@@ -1614,6 +1668,31 @@ void CPlayers::OnRender()
 		}
 		else
 			Alpha = 0.0f;
+
+		// 预判冻结 tee 染色：预判模拟命中可钩冻结 tee 时，按卡锤高亮同款
+		// 0.12s 节奏渐入渐出。卡锤染色优先——实际出锤/出钩的真实反馈压过
+		// 预判；染色层与渲染层读同一 alpha 值判优先级，同帧一致不错乱。
+		const bool HookPredictFrozenMarked = i == HookPredictTargetId &&
+			(GameClient()->m_aClients[i].m_FreezeEnd != 0 || GameClient()->m_aClients[i].m_LiveFrozen);
+		float &HookPredictAlpha = m_aHookPredictHighlightAlpha[i];
+		HookPredictAlpha = TcAdvanceWaterHammerHighlight(HookPredictAlpha, HookPredictFrozenMarked, Client()->RenderFrameTime());
+		if(Alpha <= 0.001f && HookPredictAlpha > 0.001f)
+		{
+			const ColorRGBA HookPredictBodyColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcHookTileHighlightFreezeBodyColor));
+			const ColorRGBA HookPredictFeetColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcHookTileHighlightFreezeFeetColor));
+			m_aHookPredictBaseRenderInfo[i] = aRenderInfo[i];
+			aRenderInfo[i].m_CustomColoredSkin = true;
+			aRenderInfo[i].m_ColorBody = HookPredictBodyColor;
+			aRenderInfo[i].m_ColorFeet = HookPredictFeetColor;
+			for(int HookPredictPart : {protocol7::SKINPART_BODY, protocol7::SKINPART_FEET})
+			{
+				const ColorRGBA HookPredictTarget = HookPredictPart == protocol7::SKINPART_BODY ? HookPredictBodyColor : HookPredictFeetColor;
+				aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aUseCustomColors[HookPredictPart] = true;
+				aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].m_aColors[HookPredictPart] = HookPredictTarget;
+			}
+		}
+		else if(HookPredictAlpha <= 0.001f)
+			HookPredictAlpha = 0.0f;
 	}
 
 	// get screen edges to avoid rendering offscreen

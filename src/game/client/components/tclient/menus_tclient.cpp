@@ -511,9 +511,9 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 
 void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 {
-	CUIRect Label, Left, Right, Row;
+	CUIRect Label, Left, Right, Row, Column;
 
-	// 与设置页同款：滚动容器 + 分节底色，Modern UI 与地图图层两个分节区分开。
+	// 照 ME 设置页同款：滚动容器 + 左右两列自然流动，两节上下排开。
 	static CScrollRegion s_ScrollRegion;
 	CScrollRegionParams ScrollParams;
 	ScrollParams.m_ScrollUnit = 60.0f;
@@ -521,37 +521,15 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	ScrollParams.m_ScrollbarMargin = 5.0f;
 	s_ScrollRegion.Begin(&MainView, &ScrollParams);
 
-	static std::vector<CUIRect> s_SectionBoxes;
-	const float ScrollOffset = MainView.y;
-	static float s_PrevScrollOffset = 0.0f;
-
-	MainView.VSplitRight(5.0f, &MainView, nullptr); // Padding for scrollbar
-	MainView.VSplitLeft(5.0f, nullptr, &MainView);
-
-	for(CUIRect &Section : s_SectionBoxes)
-	{
-		float Padding = MarginBetweenViews * 0.6666f;
-		Section.w += Padding;
-		Section.h += Padding;
-		Section.x -= Padding * 0.5f;
-		Section.y -= Padding * 0.5f;
-		Section.y -= s_PrevScrollOffset - ScrollOffset;
-		Section.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f), IGraphics::CORNER_ALL, 10.0f);
-	}
-	s_PrevScrollOffset = ScrollOffset;
-	s_SectionBoxes.clear();
-
+	const float ContentTop = MainView.y;
 	MainView.Margin(Margin, &MainView);
 
 	// ***** 分节一：Modern UI 原有内容 ***** //
-	CUIRect ModernBox = MainView;
-	s_SectionBoxes.push_back(ModernBox);
-	MainView.HSplitTop(Margin, nullptr, &MainView);
 	MainView.HSplitTop(HeadlineHeight, &Label, &MainView);
 	Ui()->DoLabel(&Label, TCLocalize("Modern UI"), HeadlineFontSize, TEXTALIGN_ML);
 	MainView.HSplitTop(LineSize * 2, &Label, &MainView);
 	Ui()->DoLabel(&Label, TCLocalize("Choose modern or classic weapons, freeze timer, chat and voting."), EditBoxFontSize, TEXTALIGN_ML);
-	MainView.VSplitMid(&Left, &Right, MarginBetweenSections);
+	MainView.VSplitMid(&Left, &Right, MarginBetweenViews);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernGuns, TCLocalize("Modern Guns"), &g_Config.m_TcModernGuns, &Left, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernFreezeTimer, TCLocalize("Modern Freeze Timer"), &g_Config.m_TcModernFreezeTimer, &Left, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcModernChat, TCLocalize("Modern Chat"), &g_Config.m_TcModernChat, &Left, LineSize);
@@ -577,10 +555,16 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	Right.HSplitTop(LineSize, &Row, &Right);
 	Ui()->DoScrollbarOption(&g_Config.m_TcUiBackgroundOpacity, &g_Config.m_TcUiBackgroundOpacity, &Row, TCLocalize("Panel background opacity"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
 
+	// 左右两列排完后把 MainView 前进到两列底部（VSplitMid 不消费 MainView，
+	// 不前进的话下一个分节会从标题下方开始、与两列内容重叠）。
+	{
+		const float ColumnsBottom = std::max(Left.y, Right.y);
+		MainView.h -= ColumnsBottom - MainView.y;
+		MainView.y = ColumnsBottom;
+	}
+
 	// ***** 分节二：地图图层（自 ME 设置页迁入，含全部钩砖高亮开关与颜色控件）***** //
 	MainView.HSplitTop(MarginBetweenSections, nullptr, &MainView);
-	CUIRect MapLayersBox = MainView;
-	s_SectionBoxes.push_back(MapLayersBox);
 	MainView.HSplitTop(Margin, nullptr, &MainView);
 	MainView.HSplitTop(HeadlineHeight, &Label, &MainView);
 	Ui()->DoLabel(&Label, TCLocalize("Map Layers"), HeadlineFontSize, TEXTALIGN_ML);
@@ -588,7 +572,7 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 
 	// 左右两列（照设置页排布），控件分摊两列节省纵向空间。
 	MainView.VSplitMid(&Left, &Right, MarginBetweenViews);
-	CUIRect Column = Left;
+	Column = Left;
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowTuneZoneColors, TCLocalize("Show tune zone colors"), &g_Config.m_TcShowTuneZoneColors, &Column, LineSize);
 	Column.HSplitTop(LineSize, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
@@ -654,8 +638,12 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	Column.HSplitTop(LineSize * 2, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("Tile highlight, landing preview and frozen-tee tint are independent toggles."), EditBoxFontSize, TEXTALIGN_TL);
 
-	CUIRect EndPad{MainView.x, MainView.y, MainView.w, 5.0f};
-	s_ScrollRegion.AddRect(EndPad);
+	// 滚动内容总框照 ME 页模式记账：两列的消费高度取最大（滚动后列剩余
+	// 高度可能为负，只有消费掉的高度算内容）。
+	CUIRect Content = MainView;
+	Content.y = ContentTop;
+	Content.h = std::max(Left.y, Right.y) - ContentTop + Margin;
+	s_ScrollRegion.AddRect(Content);
 	s_ScrollRegion.End();
 }
 

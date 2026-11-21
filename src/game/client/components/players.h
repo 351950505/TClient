@@ -7,6 +7,7 @@
 #include <base/vmath.h>
 #include <game/client/component.h>
 #include <game/client/render.h>
+#include <game/client/components/tclient/frozen_entry_highlight.h>
 
 #include <optional>
 
@@ -45,6 +46,8 @@ class CPlayers : public CComponent
 	int m_aWeaponSpriteMuzzleQuadContainerIndex[NUM_WEAPONS];
 	float m_aWaterHammerHighlightAlpha[MAX_CLIENTS]{};
 	CTeeRenderInfo m_aWaterHammerBaseRenderInfo[MAX_CLIENTS];
+	tclient_frozen_entry::CHighlight m_aLocalFreezeEntryHighlight[NUM_DUMMIES];
+	int m_aFreezeEntryClientId[NUM_DUMMIES] = {-1, -1};
 
 	void CreateNinjaTeeRenderInfo();
 	void CreateSpectatorTeeRenderInfo();
@@ -61,7 +64,10 @@ public:
 
 	int Sizeof() const override { return sizeof(*this); }
 	void OnInit() override;
+	void OnStateChange(int NewState, int OldState) override;
+	void OnMapLoad() override;
 	void OnRender() override;
+	void RenderFreezeEntryTileHighlight();
 	void RenderHookTileHighlight(int ClientId);
 	void HookTileHighlightReset();
 	// 预判模式：未出钩时按准星方向模拟一次钩子飞行。命中砖块返回钩点

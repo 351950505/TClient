@@ -559,10 +559,20 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	Ui()->DoLabel(&Label, TCLocalize("Map Layers"), HeadlineFontSize, TEXTALIGN_ML);
 	Column.HSplitTop(MarginSmall, nullptr, &Column);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowTuneZoneColors, TCLocalize("Show tune zone colors"), &g_Config.m_TcShowTuneZoneColors, &Column, LineSize);
-	Column.HSplitTop(LineSize, &Label, &Column);
-	Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
-	Column.HSplitTop(MarginSmall, nullptr, &Column);
-	// ***** 左列 · 钩子显示 ***** //
+		Column.HSplitTop(LineSize, &Label, &Column);
+		Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
+		Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
+		Column.HSplitTop(HeadlineHeight, &Label, &Column);
+		Ui()->DoLabel(&Label, TCLocalize("Freeze tile highlight"), HeadlineFontSize, TEXTALIGN_ML);
+		Column.HSplitTop(MarginSmall, nullptr, &Column);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFreezeEntryHighlight, TCLocalize("Highlight the freeze tile you touch"), &g_Config.m_TcFreezeEntryHighlight, &Column, LineSize);
+		if(g_Config.m_TcFreezeEntryHighlight)
+		{
+			static CButtonContainer s_FreezeEntryHighlightColor;
+			DoLine_ColorPicker(&s_FreezeEntryHighlightColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Freeze tile highlight color"), &g_Config.m_TcFreezeEntryHighlightColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcFreezeEntryHighlightColor)), false);
+		}
+		Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
+		// ***** 左列 · 钩子显示 ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
 	Column.HSplitTop(HeadlineHeight, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("Hook display"), HeadlineFontSize, TEXTALIGN_ML);

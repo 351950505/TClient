@@ -71,5 +71,6 @@ void CMapLayers::OnRender()
 		const auto &Snap = GameClient()->m_Snap;
 		const int ClientId = Snap.m_SpecInfo.m_Active ? Snap.m_SpecInfo.m_SpectatorId : Snap.m_LocalClientId;
 		GameClient()->m_Players.RenderHookTileHighlight(ClientId);
+		GameClient()->m_Players.RenderFreezeEntryTileHighlight();
 	}
 }

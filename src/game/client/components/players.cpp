@@ -31,6 +31,7 @@
 
 // TClient
 #include <game/client/components/tclient/rainbow.h>
+#include <game/client/components/tclient/frozen_entry_highlight.h>
 #include <game/client/components/tclient/hook_tile_highlight.h>
 #include <game/client/prediction/entities/character.h>
 
@@ -1006,6 +1007,85 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 	Graphics()->SetColor(1, 1, 1, 1);
 }
 
+void CPlayers::RenderFreezeEntryTileHighlight()
+{
+	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+		return;
+
+	const CCollision *pCollision = Collision();
+	const int Width = pCollision->GetWidth();
+	const int Height = pCollision->GetHeight();
+	int aTileIndices[NUM_DUMMIES] = {-1, -1};
+	float aTileAlphas[NUM_DUMMIES] = {};
+	const bool ActiveLocalView = !GameClient()->m_Snap.m_SpecInfo.m_Active && Width > 0 && Height > 0;
+
+	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
+	{
+		const int ClientId = GameClient()->m_aLocalIds[Dummy];
+		if(m_aFreezeEntryClientId[Dummy] != ClientId)
+		{
+			m_aLocalFreezeEntryHighlight[Dummy].Reset();
+			m_aFreezeEntryClientId[Dummy] = ClientId;
+		}
+		const bool Active = ActiveLocalView && in_range(ClientId, MAX_CLIENTS - 1) &&
+			GameClient()->m_aClients[ClientId].m_Active && GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
+		bool Frozen = false;
+		int FreezeTileIndex = -1;
+		if(Active)
+		{
+			const CCharacterCore &Core = g_Config.m_TcFastInput ?
+				GameClient()->m_aClients[ClientId].m_RegularPredicted : GameClient()->m_aClients[ClientId].m_Predicted;
+			Frozen = Core.m_FreezeEnd != 0 || Core.m_LiveFrozen;
+			const vec2 Pos = Core.m_Pos;
+			if(Frozen && Pos.x >= 0.0f && Pos.y >= 0.0f && Pos.x < Width * 32.0f && Pos.y < Height * 32.0f)
+			{
+				const int MapIndex = pCollision->GetMapIndex(Pos);
+				const auto IsFreezeTile = [](int Tile) { return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE; };
+				if(MapIndex >= 0 && (IsFreezeTile(pCollision->GetTileIndex(MapIndex)) || IsFreezeTile(pCollision->GetFrontTileIndex(MapIndex))))
+					FreezeTileIndex = MapIndex;
+			}
+		}
+
+		aTileAlphas[Dummy] = m_aLocalFreezeEntryHighlight[Dummy].Update(
+			Active, Frozen, FreezeTileIndex, Client()->LocalTime(), g_Config.m_TcFreezeEntryHighlight != 0);
+		aTileIndices[Dummy] = m_aLocalFreezeEntryHighlight[Dummy].TileIndex();
+		if(Dummy > 0 && aTileIndices[Dummy] >= 0 && aTileIndices[Dummy] == aTileIndices[0])
+		{
+			aTileAlphas[0] = std::max(aTileAlphas[0], aTileAlphas[Dummy]);
+			aTileIndices[Dummy] = -1;
+		}
+	}
+
+	const ColorRGBA Color = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcFreezeEntryHighlightColor));
+	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
+	{
+		const int MapIndex = aTileIndices[Dummy];
+		const float Alpha = aTileAlphas[Dummy];
+		if(MapIndex < 0 || Alpha <= 0.0f)
+			continue;
+		const float X = (MapIndex % Width) * 32.0f;
+		const float Y = (MapIndex / Width) * 32.0f;
+		Graphics()->TextureClear();
+		Graphics()->QuadsBegin();
+		Graphics()->SetColor(Color.WithAlpha(0.42f * Alpha));
+		const IGraphics::CQuadItem Fill(X + 1.0f, Y + 1.0f, 30.0f, 30.0f);
+		Graphics()->QuadsDrawTL(&Fill, 1);
+		Graphics()->QuadsEnd();
+
+		Graphics()->LinesBegin();
+		Graphics()->SetColor(Color.WithAlpha(Alpha));
+		const IGraphics::CLineItem aEdges[] = {
+			{X + 1.0f, Y + 1.0f, X + 31.0f, Y + 1.0f},
+			{X + 31.0f, Y + 1.0f, X + 31.0f, Y + 31.0f},
+			{X + 31.0f, Y + 31.0f, X + 1.0f, Y + 31.0f},
+			{X + 1.0f, Y + 31.0f, X + 1.0f, Y + 1.0f},
+		};
+		Graphics()->LinesDraw(aEdges, std::size(aEdges));
+		Graphics()->LinesEnd();
+		Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
+	}
+}
+
 void CPlayers::RenderPlayer(
 	const CScreenRect &ScreenRect,
 	const CNetObj_Character *pPrevChar,
@@ -1557,6 +1637,24 @@ inline bool CPlayers::IsPlayerInfoAvailable(int ClientId) const
 	return GameClient()->m_Snap.m_aCharacters[ClientId].m_Active &&
 	       GameClient()->m_Snap.m_apPrevPlayerInfos[ClientId] != nullptr &&
 	       GameClient()->m_Snap.m_apPlayerInfos[ClientId] != nullptr;
+}
+
+void CPlayers::OnStateChange(int, int)
+{
+	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
+	{
+		m_aLocalFreezeEntryHighlight[Dummy].Reset();
+		m_aFreezeEntryClientId[Dummy] = -1;
+	}
+}
+
+void CPlayers::OnMapLoad()
+{
+	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
+	{
+		m_aLocalFreezeEntryHighlight[Dummy].Reset();
+		m_aFreezeEntryClientId[Dummy] = -1;
+	}
 }
 
 void CPlayers::OnRender()

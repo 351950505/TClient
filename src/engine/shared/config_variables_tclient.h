@@ -208,6 +208,8 @@ MACRO_CONFIG_COL(TcHookTileHighlightFreezeFeetColor, tc_hook_tile_highlight_free
 MACRO_CONFIG_INT(TcColorFreeze, tc_color_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use skin colors for frozen tees")
 MACRO_CONFIG_INT(TcColorFreezeDarken, tc_color_freeze_darken, 90, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Makes color of tees darker when in freeze (0-100)")
 MACRO_CONFIG_INT(TcColorFreezeFeet, tc_color_freeze_feet, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Also use color for frozen tee feet")
+MACRO_CONFIG_INT(TcFreezeEntryHighlight, tc_freeze_entry_highlight, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Flash the freeze tile entered by your own tee")
+MACRO_CONFIG_COL(TcFreezeEntryHighlightColor, tc_freeze_entry_highlight_color, 15775124, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Local freeze tile flash color")
 MACRO_CONFIG_INT(TcWaterHammerHighlight, tc_water_hammer_highlight, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight frozen teammates, yourself and your dummy holding hammer fire")
 MACRO_CONFIG_INT(TcWaterHookHighlight, tc_water_hook_highlight, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight frozen teammates, yourself and your dummy holding hook")
 MACRO_CONFIG_INT(TcWaterHammerHighlightSelf, tc_water_hammer_highlight_self, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight your own frozen tee and dummy")

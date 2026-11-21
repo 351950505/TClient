@@ -3738,6 +3738,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     datafile_test.cpp
     dbg_test.cpp
     editor_test.cpp
+    frozen_entry_highlight.cpp
     fs_test.cpp
     gameworld_test.cpp
     git_revision_test.cpp

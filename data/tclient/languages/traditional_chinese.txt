@@ -209,6 +209,15 @@ Show skin names in nameplate
 Freeze stars
 == 
 
+Freeze tile highlight
+== 凍結磚塊高亮
+
+Highlight the freeze tile you touch
+== 高亮自己触發凍結的磚塊
+
+Freeze tile highlight color
+== 凍結磚塊高亮顏色
+
 Color frozen tee skins
 == 
 

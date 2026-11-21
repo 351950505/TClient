@@ -123,6 +123,15 @@ Show skin names in nameplate
 Freeze stars
 == 显示冻结效果的星星动画
 
+Freeze tile highlight
+== 冻结砖块高亮
+
+Highlight the freeze tile you touch
+== 高亮自己触发冻结的砖块
+
+Freeze tile highlight color
+== 冻结砖块高亮颜色
+
 Color frozen tee skins
 == 被冻结的皮肤使用自定义颜色（未设置默认灰黑色）
 

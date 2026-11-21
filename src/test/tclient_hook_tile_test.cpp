@@ -16,6 +16,15 @@ namespace
 	}
 }
 
+TEST(ClientHookTile, PredictionCacheKeyChangesForNextFrameAndTarget)
+{
+	using tclient_hook_tile::PredictionCacheKeyChanged;
+	EXPECT_FALSE(PredictionCacheKeyChanged(12, 4, 12, 4));
+	EXPECT_TRUE(PredictionCacheKeyChanged(12, 4, 13, 4));
+	EXPECT_TRUE(PredictionCacheKeyChanged(12, 4, 12, 5));
+	EXPECT_TRUE(PredictionCacheKeyChanged(UINT64_MAX - 1, 4, UINT64_MAX, 4));
+}
+
 TEST(ClientHookTile, InteriorSelectsOnlyOne)
 {
 	const auto Result = tclient_hook_tile::Select(vec2(48, 48), 4, 4, [](int, int) { return true; });

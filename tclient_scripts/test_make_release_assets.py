@@ -141,11 +141,17 @@ class ReleaseAssetsTest(unittest.TestCase):
 		self.assertEqual((output / assets.HELPER_NAME).read_bytes(), (self.source / assets.HELPER_NAME).read_bytes())
 		for filename in [assets.MANIFEST_NAME, assets.MANIFEST_SIG_NAME]:
 			self.assertEqual((output / "update" / filename).read_bytes(), (output / filename).read_bytes())
-		for archive in [output / assets.ASSET_NAME, full_zip]:
-			with zipfile.ZipFile(archive) as package:
-				self.assertIn("DDNet.exe", package.namelist())
-				self.assertEqual(package.read(assets.HELPER_NAME), (output / assets.HELPER_NAME).read_bytes())
-				self.assertNotIn("cfg/private.cfg", package.namelist())
+		with zipfile.ZipFile(output / assets.ASSET_NAME) as update_package:
+			self.assertIn("DDNet.exe", update_package.namelist())
+			self.assertEqual(update_package.read(assets.HELPER_NAME), (output / assets.HELPER_NAME).read_bytes())
+			self.assertNotIn("cfg/private.cfg", update_package.namelist())
+		with zipfile.ZipFile(full_zip) as full_package:
+			self.assertTrue(all(name.startswith("9.8.7/") for name in full_package.namelist()))
+			self.assertIn("9.8.7/DDNet.exe", full_package.namelist())
+			self.assertNotIn("DDNet.exe", full_package.namelist())
+			self.assertEqual(full_package.read("9.8.7/" + assets.HELPER_NAME), (output / assets.HELPER_NAME).read_bytes())
+			self.assertNotIn("9.8.7/cfg/private.cfg", full_package.namelist())
+		self.assertEqual(assets.strip_root_prefix("9.8.7/DDNet.exe", "9.8.7"), "DDNet.exe")
 		second = self.root / "second"
 		self.assertEqual(self.package(second), (0, ""))
 		for filename in [assets.ASSET_NAME, assets.MANIFEST_NAME, assets.MANIFEST_SIG_NAME, assets.HELPER_NAME]:
@@ -365,9 +371,10 @@ class ReleaseAssetsTest(unittest.TestCase):
 		output = self.root / "signed"
 		full_zip = self.root / "full.zip"
 		self.assertEqual(self.package(output, full_zip=full_zip), (0, ""))
-		for path in [output / assets.ASSET_NAME, full_zip]:
-			with zipfile.ZipFile(path) as archive:
-				self.assertEqual(archive.read(vendor.name), vendor.read_bytes())
+		with zipfile.ZipFile(output / assets.ASSET_NAME) as update_archive:
+			self.assertEqual(update_archive.read(vendor.name), vendor.read_bytes())
+		with zipfile.ZipFile(full_zip) as full_archive:
+			self.assertEqual(full_archive.read("9.8.7/" + vendor.name), vendor.read_bytes())
 		self.assertEqual((output / "DDNet.exe").read_bytes(), (self.source / "DDNet.exe").read_bytes())
 
 	def test_zip_byte_gate_rejects_changes_even_when_name_and_size_match(self):
@@ -376,6 +383,14 @@ class ReleaseAssetsTest(unittest.TestCase):
 			archive.writestr("DDNet.exe", b"bad! client")
 		with self.assertRaisesRegex(assets.PackageError, "byte mismatch"):
 			assets.verify_zip_contents(path, [("DDNet.exe", self.source / "DDNet.exe")])
+
+	def test_full_archive_prefix_rejects_unsafe_version_directories(self):
+		files = [("DDNet.exe", self.source / "DDNet.exe")]
+		for root in ["", ".", "..", "../1.2.3", "1.2/3", "1.2\\3", "C:"]:
+			with self.subTest(root=root), self.assertRaises(assets.PackageError):
+				assets.prefix_files(files, root)
+		with self.assertRaisesRegex(assets.PackageError, "outside its version directory"):
+			assets.strip_root_prefix("DDNet.exe", "9.8.7")
 
 	def test_archive_paths_cannot_escape_or_alias_files(self):
 		for name in ["../escape.dll", "/absolute.dll", "C:/root.dll", "a\\b.dll", "a./file.dll", "a /file.dll", "a//file.dll"]:

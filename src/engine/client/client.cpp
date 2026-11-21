@@ -4120,6 +4120,7 @@ void CClient::Run()
 				if(GfxRefreshRate)
 					NextRenderTime = std::max(NextRenderTime + time_freq() / GfxRefreshRate, Now);
 				m_LastRenderTime = Now;
+				++m_RenderFrameId;
 
 				Render();
 				m_pGraphics->Swap();

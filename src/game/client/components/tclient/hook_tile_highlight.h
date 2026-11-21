@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 
 namespace tclient_hook_tile
 {
@@ -20,6 +21,11 @@ namespace tclient_hook_tile
 		std::array<STile, 2> m_aTiles{};
 		int m_Count = 0;
 	};
+
+	inline bool PredictionCacheKeyChanged(uint64_t CachedFrame, int CachedClientId, uint64_t CurrentFrame, int ClientId)
+	{
+		return CachedFrame != CurrentFrame || CachedClientId != ClientId;
+	}
 
 	// 网络钩点为整数，碰撞按 round_to_int 取整；容许接缝两侧各 1.5 世界单位。
 	// 只检查钩点附近，不能从玩家当前位置重新射线（钩传送/绕角后路径可能已改变）。

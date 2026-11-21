@@ -254,6 +254,7 @@ def phase_package(spec, paths, state):
     inventory = helper.validate_stage(stage, paths["stage_inventory"])
     require(Path(inventory["roots"]["monitor"]) == Path(spec["monitor_path"]), "stage monitor origin differs from the spec")
     full_files = assets.collect_files(stage, None)
+    full_archive_files = assets.prefix_files(full_files, version)
     update_files = assets.collect_files(stage, assets.UPDATE_DATA_SUBDIRS)
     require({name for name, _ in full_files} == {entry["path"] for entry in inventory["files"]}, "full inventory differs from stage")
     require({name for name, _ in update_files}.issubset({name for name, _ in full_files}), "update package is not a subset")
@@ -285,7 +286,7 @@ def phase_package(spec, paths, state):
     metadata = {"product": "TClient", "channel": "stable", "version": version, "platform": "win64"}
     output.mkdir()
     assets.write_zip(update_files, output / assets.ASSET_NAME)
-    assets.write_zip(full_files, full)
+    assets.write_zip(full_archive_files, full)
     for name in ("DDNet.exe", assets.HELPER_NAME):
         shutil.copyfile(stage / name, output / name)
     notes = Path(spec["notes_path"]).read_text(encoding="utf-8").strip()
@@ -306,11 +307,11 @@ def phase_package(spec, paths, state):
     pair = assets.verify_release_assets(output, metadata)
     require(pair == (manifest_bytes, signature), "manifest pair mismatch")
     assets.verify_zip_contents(output / assets.ASSET_NAME, update_files)
-    assets.verify_zip_contents(full, full_files)
+    assets.verify_zip_contents(full, full_archive_files)
     # 签名版 stage 的一方 EXE 字节已被 Authenticode 改写；只在该阶段放行 first-party
     # 差异（build origin 校验已在 package 开头完成）。
     helper.validate_stage(stage, paths["stage_inventory"], allow_first_party_changes=bool(spec.get("signed_expected")))
-    for path, expected in ((output / assets.ASSET_NAME, update_files), (full, full_files)):
+    for path, expected in ((output / assets.ASSET_NAME, update_files), (full, full_archive_files)):
         with zipfile.ZipFile(path) as archive:
             entries = assets.archive_entries(archive)
             require(archive.testzip() is None, "ZIP CRC failed: " + str(path))

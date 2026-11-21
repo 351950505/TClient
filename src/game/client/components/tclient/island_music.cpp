@@ -1968,7 +1968,8 @@ public:
 				pName != nullptr && pName->type == json_string ? pName->u.string.ptr : "",
 				pArtist != nullptr && pArtist->type == json_string ? pArtist->u.string.ptr : "",
 				pAlbum != nullptr && pAlbum->type == json_string ? pAlbum->u.string.ptr : "",
-				pDur != nullptr && pDur->type == json_integer ? pDur->u.integer * 1000 : 0);
+				pDur != nullptr && pDur->type == json_integer && pDur->u.integer > 0 ?
+					std::min<int64_t>(pDur->u.integer, std::numeric_limits<int64_t>::max() / 1000) * 1000 : 0);
 			if(Score > BestScore)
 			{
 				BestScore = Score;

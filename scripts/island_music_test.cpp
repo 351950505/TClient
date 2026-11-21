@@ -15,6 +15,7 @@
 #include <functional>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -856,15 +857,21 @@ int main()
 			Check(Lines[0].m_Text.substr(Words[0].m_CharBegin, Words[0].m_CharLen) == "听", "first karaoke word sliced wrong after conversion");
 			Check(Lines[0].m_Text.substr(Words[1].m_CharBegin, Words[1].m_CharLen) == "话", "second karaoke word sliced wrong after conversion");
 		});
-		Tests.Case("the traditional switch converts to traditional", [&] {
-			std::vector<SLyricLine> Lines;
-			Check(ParseSyncedLyrics("[00:01.00]听妈妈的话", Lines, true), "simplified lrc rejected");
-			Check(Lines.size() == 1 && Lines[0].m_Text == "聽媽媽的話", "simplified text was not converted to traditional");
-			Check(!Lines[0].m_IsSimplifiedChinese, "traditional line flagged simplified");
-			std::vector<SLyricLine> Already;
-			Check(ParseSyncedLyrics("[00:01.00]聽媽媽的話", Already, true), "traditional lrc rejected");
-			Check(Already.size() == 1 && Already[0].m_Text == "聽媽媽的話", "traditional text was altered in traditional mode");
-		});
+			Tests.Case("the traditional switch converts to traditional", [&] {
+				std::vector<SLyricLine> Lines;
+				Check(ParseSyncedLyrics("[00:01.00]听妈妈的话", Lines, true), "simplified lrc rejected");
+				Check(Lines.size() == 1 && Lines[0].m_Text == "聽媽媽的話", "simplified text was not converted to traditional");
+				Check(!Lines[0].m_IsSimplifiedChinese, "traditional line flagged simplified");
+				std::vector<SLyricLine> Already;
+				Check(ParseSyncedLyrics("[00:01.00]聽媽媽的話", Already, true), "traditional lrc rejected");
+				Check(Already.size() == 1 && Already[0].m_Text == "聽媽媽的話", "traditional text was altered in traditional mode");
+			});
+			Tests.Case("traditional body suppresses identical simplified provider translation", [&] {
+				std::vector<SLyricLine> Lines;
+				Check(ParseSyncedLyrics("[00:01.00]聽媽媽的話", Lines, true), "traditional body rejected");
+				TcLyric::AttachTranslatedLyrics(Lines, "[00:01.00]听妈妈的话");
+				Check(Lines.size() == 1 && Lines[0].m_Translation.empty(), "identical translation was attached in a different script");
+			});
 	});
 	Tests.Group("production text width cache invalidation", [&] {
 		Tests.Case("font changes invalidate and stable fonts reuse widths", [&] {
@@ -1059,8 +1066,16 @@ int main()
 			Check(Score(120000, 190000) < CMusic::TC_MATCH_ACCEPT_SCORE, "a version ten seconds off still matched");
 			Check(Score(120000, 180000) < CMusic::TC_MATCH_ACCEPT_SCORE, "a version a minute off still matched");
 		});
-		Tests.Case("lrclib array candidates are scored instead of taking the first synced hit", [&] {
-			const char *pBody = R"([{"trackName":"TrackA","artistName":"Artist","duration":190,"syncedLyrics":"[00:01.00]wrong version"},{"trackName":"TrackA","artistName":"Artist","duration":120,"syncedLyrics":"[00:01.00]right version"}])";
+			Tests.Case("lrclib duration conversion saturates before millisecond scaling", [&] {
+				const std::string Body = "[{\"trackName\":\"TrackA\",\"artistName\":\"\",\"duration\":" + std::to_string(std::numeric_limits<int64_t>::max()) + ",\"syncedLyrics\":\"[00:01.00]duration match\"},{\"trackName\":\"TrackA Extended\",\"artistName\":\"\",\"duration\":1,\"syncedLyrics\":\"[00:01.00]wrong duration\"}]";
+				json_value *pRoot = json_parse(Body.c_str(), (int)Body.size());
+				Check(pRoot != nullptr && pRoot != &json_value_none, "large-duration fixture JSON failed to parse");
+				const char *pPicked = CMusic::TcPickLrclibSynced(pRoot, "TrackA Extended", "", "", std::numeric_limits<int64_t>::max());
+				Check(std::string(pPicked).find("duration match") != std::string::npos, "saturated duration did not make the matching-length candidate win");
+				json_value_free(pRoot);
+			});
+			Tests.Case("lrclib array candidates are scored instead of taking the first synced hit", [&] {
+				const char *pBody = R"([{"trackName":"TrackA","artistName":"Artist","duration":190,"syncedLyrics":"[00:01.00]wrong version"},{"trackName":"TrackA","artistName":"Artist","duration":120,"syncedLyrics":"[00:01.00]right version"}])";
 			json_value *pRoot = json_parse(pBody, strlen(pBody));
 			Check(pRoot != nullptr && pRoot != &json_value_none, "fixture JSON failed to parse");
 			Check(std::string(CMusic::TcPickLrclibSynced(pRoot, "TrackA", "Artist", "", 120000)).find("right version") != std::string::npos, "lrclib picked the wrong-duration version");

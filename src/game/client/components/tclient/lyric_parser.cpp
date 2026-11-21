@@ -576,7 +576,8 @@ void AttachTranslatedLyrics(std::vector<SLyricLine> &vLines, const char *pTransl
 			SLyricLine &Line = vLines[i];
 			if(!Line.m_Translation.empty())
 				continue;
-			const size_t Match = vTranslations[Group.m_First.m_Index].m_Text != Line.m_Text ? Group.m_First.m_Index : Group.m_Second.m_Index;
+				const std::string ComparableLine = SimplifyChinese(Line.m_Text);
+				const size_t Match = vTranslations[Group.m_First.m_Index].m_Text != ComparableLine ? Group.m_First.m_Index : Group.m_Second.m_Index;
 			if(Match != None)
 				Line.m_Translation = vTranslations[Match].m_Text;
 		}

@@ -2123,8 +2123,9 @@ void CTClient::UpdateDrownBoard()
 		Tick.m_InFreezeTile = InFreezeTile;
 		Tick.m_FreezeEndTick = Player.m_FreezeEnd;
 		Tick.m_OnStart = OnStart;
-		Tick.m_HookState = Character.m_Active ? Character.m_Cur.m_HookState : HOOK_IDLE;
-		Tick.m_JumpedTotal = Character.m_HasExtendedData ? Character.m_ExtendedData.m_JumpedTotal : -1;
+			Tick.m_HookState = Character.m_Active ? Character.m_Cur.m_HookState : HOOK_IDLE;
+			Tick.m_HookedPlayerId = Character.m_Active ? Character.m_Cur.m_HookedPlayer : -1;
+			Tick.m_JumpedTotal = Character.m_HasExtendedData ? Character.m_ExtendedData.m_JumpedTotal : -1;
 		Tick.m_X = Character.m_Active ? (float)Character.m_Cur.m_X : 0.0f;
 		Tick.m_Y = Character.m_Active ? (float)Character.m_Cur.m_Y : 0.0f;
 		Tick.m_HookX = Character.m_Active ? (float)Character.m_Cur.m_HookX : 0.0f;

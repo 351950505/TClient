@@ -94,7 +94,7 @@ public:
 	float m_aHookPredictHighlightAlpha[MAX_CLIENTS]{};
 	CTeeRenderInfo m_aHookPredictBaseRenderInfo[MAX_CLIENTS];
 	// 预判结果帧缓存（见 HookLandingPrediction）。
-	float m_HookPredictCacheFrame = -1.0f;
+	uint64_t m_HookPredictCacheFrame = 0;
 	int m_HookPredictCacheClientId = -1;
 	bool m_HookPredictCacheValid = false;
 	SHookLandingPrediction m_HookPredictCache;

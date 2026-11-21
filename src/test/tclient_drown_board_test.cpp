@@ -325,7 +325,7 @@ namespace
 {
 	using CTickArray = std::array<CTClientDrownBoard::SDrownStatTick, MAX_CLIENTS>;
 
-	CTClientDrownBoard::SDrownStatTick MakeStatTick(bool Frozen = false, bool OnStart = false, int HookState = HOOK_IDLE, int JumpedTotal = -1, float X = 0.0f, float Y = 0.0f, float HookX = 0.0f, float HookY = 0.0f)
+	CTClientDrownBoard::SDrownStatTick MakeStatTick(bool Frozen = false, bool OnStart = false, int HookState = HOOK_IDLE, int JumpedTotal = -1, float X = 0.0f, float Y = 0.0f, float HookX = 0.0f, float HookY = 0.0f, bool InFreezeTile = false, int FreezeEndTick = -1, int HookedPlayerId = -1)
 	{
 		CTClientDrownBoard::SDrownStatTick Tick;
 		Tick.m_Active = true;
@@ -333,11 +333,14 @@ namespace
 		Tick.m_Frozen = Frozen;
 		Tick.m_OnStart = OnStart;
 		Tick.m_HookState = HookState;
+		Tick.m_HookedPlayerId = HookedPlayerId;
 		Tick.m_JumpedTotal = JumpedTotal;
 		Tick.m_X = X;
 		Tick.m_Y = Y;
 		Tick.m_HookX = HookX;
 		Tick.m_HookY = HookY;
+		Tick.m_InFreezeTile = InFreezeTile;
+		Tick.m_FreezeEndTick = FreezeEndTick;
 		return Tick;
 	}
 
@@ -349,9 +352,9 @@ namespace
 			Tick.m_HookState == HOOK_FLYING || Tick.m_HookState == HOOK_GRABBED, Tick.m_OnStart, IncludeTeamZero);
 	}
 
-	void RunStats(CTClientDrownBoard &Tracker, const CTickArray &aTicks, int LocalTeam = 1, bool IncludeTeamZero = true, bool ResetOnWipe = false)
+	void RunStats(CTClientDrownBoard &Tracker, const CTickArray &aTicks, int LocalTeam = 1, bool IncludeTeamZero = true, bool ResetOnWipe = false, int GameTick = 100)
 	{
-		Tracker.ObserveStats(aTicks.data(), LocalTeam, IncludeTeamZero, ResetOnWipe);
+		Tracker.ObserveStats(aTicks.data(), LocalTeam, IncludeTeamZero, ResetOnWipe, 1, GameTick);
 	}
 }
 
@@ -380,17 +383,17 @@ TEST(ClientDrownBoard, HookLaunchesAndPlayerHooks)
 	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick());
 	RunStats(Tracker, aTicks);
 	// 队友站在 (100,100)：出钩 +1（钩尖指向队友）。
-	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_FLYING, -1, 50.0f, 50.0f, 100.0f, 100.0f));
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_FLYING, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
 	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f));
 	RunStats(Tracker, aTicks);
 	EXPECT_EQ(Tracker.Stats(1).m_HooksLaunched, 1);
 	EXPECT_EQ(Tracker.Stats(1).m_PlayerHooks, 0);
 	// 钩住瞬间且钩尖在队友位置 → 钩人 +1。
-	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f));
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
 	RunStats(Tracker, aTicks);
 	EXPECT_EQ(Tracker.Stats(1).m_PlayerHooks, 1);
 	// 持续 GRABBED 不重复计钩人。
-	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f));
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
 	RunStats(Tracker, aTicks);
 	EXPECT_EQ(Tracker.Stats(1).m_PlayerHooks, 1);
 }
@@ -413,21 +416,20 @@ TEST(ClientDrownBoard, JumpsFollowCumulativeCounterAndRespawnResetsBaseline)
 	EXPECT_EQ(Tracker.Stats(1).m_Jumps, 8);
 }
 
-TEST(ClientDrownBoard, SaveCreditedToHookerWhenFrozenMateUnfreezes)
+TEST(ClientDrownBoard, SaveWaitsUntilRescuedTeeBecomesActive)
 {
 	CTClientDrownBoard Tracker;
 	CTickArray aTicks{};
 	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
-	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true));
-	RunStats(Tracker, aTicks);
-	// 钩手出钩并钩住冻结队友（钩尖在队友位置）。
-	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_FLYING, -1, 50.0f, 50.0f, 100.0f, 100.0f));
-	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f));
-	RunStats(Tracker, aTicks);
-	// 队友解冻 → 救援 +1。
-	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f));
-	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f));
-	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 99);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, false, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 132.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 101);
 	EXPECT_EQ(Tracker.Stats(1).m_Saves, 1);
 	EXPECT_EQ(Tracker.Stats(2).m_Saves, 0);
 }
@@ -440,14 +442,232 @@ TEST(ClientDrownBoard, SaveDoesNotTransferToAnotherFrozenTeammate)
 	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f));
 	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 500.0f, 100.0f));
 	RunStats(Tracker, aTicks);
-	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f));
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
 	RunStats(Tracker, aTicks);
 	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 500.0f, 100.0f));
 	RunStats(Tracker, aTicks);
 	EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
-	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f));
-	RunStats(Tracker, aTicks);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, false, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 132.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 101);
 	EXPECT_EQ(Tracker.Stats(1).m_Saves, 1);
+}
+
+TEST(ClientDrownBoard, HookAtThawDoesNotImmediatelyConfirmSave)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 99);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 100.0f, 100.0f, 0.0f, 0.0f, false, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 132.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 101);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 1);
+}
+
+TEST(ClientDrownBoard, NaturalThawInsideFreezeTileDoesNotCount)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, 100));
+	RunStats(Tracker, aTicks, 1, true, false, 99);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, 100));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 132.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 101);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
+}
+
+TEST(ClientDrownBoard, DeepFreezeRescueOnFreezeTileCounts)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, -1));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
+	RunStats(Tracker, aTicks, 1, true, false, 101);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, -1));
+	RunStats(Tracker, aTicks, 1, true, false, 102);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 132.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 103);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 1);
+}
+
+TEST(ClientDrownBoard, HookerRecordedWhenVictimFreezesOnSameTick)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 1));
+	RunStats(Tracker, aTicks, 1, true, false, 98);
+
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, 200));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 1));
+	RunStats(Tracker, aTicks, 1, true, false, 99);
+
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 1));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, false, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 132.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 101);
+	EXPECT_EQ(Tracker.Stats(2).m_Saves, 1);
+}
+
+TEST(ClientDrownBoard, LastHookerDuringFreezeGetsCredit)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 99);
+		FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 3));
+		RunStats(Tracker, aTicks, 1, true, false, 100);
+		// Rescuer 1 keeps holding; rescuer 2 grabs later and becomes the last hooker.
+		FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 3));
+		FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 150.0f, 50.0f, 100.0f, 100.0f, false, -1, 3));
+		RunStats(Tracker, aTicks, 1, true, false, 101);
+		FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 3));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick()); // rescuer 2 releases before thaw
+	RunStats(Tracker, aTicks, 1, true, false, 102);
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, false, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 103);
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 132.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 104);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
+	EXPECT_EQ(Tracker.Stats(2).m_Saves, 1);
+}
+
+TEST(ClientDrownBoard, HookOnDifferentTeeDoesNotCreditNearbyFrozenBystander)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 110.0f, 100.0f, 0.0f, 0.0f, true, 200));
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 99);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 3));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 110.0f, 100.0f, 0.0f, 0.0f, false, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 142.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 101);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
+}
+
+TEST(ClientDrownBoard, DeadRescuerCannotReattributeFromStaleGrab)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 99);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	Tracker.FeedDeath(1);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	RunStats(Tracker, aTicks, 1, true, false, 101);
+	// A stale idle-to-grabbed snapshot arrives after the death message while the
+	// victim is still frozen and in range.
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
+	RunStats(Tracker, aTicks, 1, true, false, 102);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, false, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 102);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 132.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 103);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
+}
+
+TEST(ClientDrownBoard, RescuerEligibilityReturnsOnlyAfterCharacterRespawns)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 99);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+	Tracker.FeedDeath(1);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	RunStats(Tracker, aTicks, 1, true, false, 101);
+
+	CTClientDrownBoard::SDrownStatTick Missing = MakeStatTick();
+	Missing.m_HasCharacter = false;
+	Tracker.Observe(1, true, "player", "clan", 1, false, false, false, false, true);
+	aTicks[1] = Missing;
+	RunStats(Tracker, aTicks, 1, true, false, 102);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	RunStats(Tracker, aTicks, 1, true, false, 103);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
+	RunStats(Tracker, aTicks, 1, true, false, 104);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, false, 200));
+	RunStats(Tracker, aTicks, 1, true, false, 104);
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 132.0f, 100.0f));
+	RunStats(Tracker, aTicks, 1, true, false, 105);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 1);
+}
+
+TEST(ClientDrownBoard, SlotDisconnectOrIdentityChangeClearsHookAttribution)
+{
+	for(bool ChangeIdentity : {false, true})
+	{
+		SCOPED_TRACE(ChangeIdentity);
+		CTClientDrownBoard Tracker;
+		CTickArray aTicks{};
+		FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+		FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, 200));
+		RunStats(Tracker, aTicks, 1, true, false, 99);
+		FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_GRABBED, -1, 50.0f, 50.0f, 100.0f, 100.0f, false, -1, 2));
+		RunStats(Tracker, aTicks, 1, true, false, 100);
+		if(ChangeIdentity)
+			Tracker.Observe(1, true, "replacement", "clan", 1, false, false, false, false, true);
+		else
+			Tracker.Observe(1, false, "player", "clan", 1, false, false, false, false, true);
+		// Reuse the slot with its original identity before thaw, so later eligibility
+		// checks cannot hide a stale frozen-hooker reference.
+		FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+		FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, false, 200));
+		RunStats(Tracker, aTicks, 1, true, false, 101);
+		FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 132.0f, 100.0f));
+		RunStats(Tracker, aTicks, 1, true, false, 102);
+		EXPECT_EQ(Tracker.Stats(1).m_Saves, 0);
+	}
+}
+
+TEST(ClientDrownBoard, TeamZeroDeathResetsWhenLocalTeamIsDifferent)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, TEAM_FLOCK, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, TEAM_FLOCK, MakeStatTick(true));
+	RunStats(Tracker, aTicks, 1, true);
+	ASSERT_EQ(Tracker.Stats(2).m_Freezes, 1);
+	Tracker.FeedDeath(2);
+	FeedTick(Tracker, aTicks, 2, TEAM_FLOCK, MakeStatTick(false, true)); // stale pre-death snapshot
+	RunStats(Tracker, aTicks, 1, true);
+	EXPECT_EQ(Tracker.Stats(2).m_Freezes, 1);
+	CTClientDrownBoard::SDrownStatTick Missing = MakeStatTick();
+	Missing.m_HasCharacter = false;
+	Tracker.Observe(2, true, "player", "clan", TEAM_FLOCK, false, false, false, false, true);
+	aTicks[2] = Missing;
+	RunStats(Tracker, aTicks, 1, true);
+	FeedTick(Tracker, aTicks, 2, TEAM_FLOCK, MakeStatTick(false, true));
+	RunStats(Tracker, aTicks, 1, true);
+	EXPECT_EQ(Tracker.Stats(2).m_Freezes, 0);
 }
 
 TEST(ClientDrownBoard, LastsAndAledsPerTeamEpisode)

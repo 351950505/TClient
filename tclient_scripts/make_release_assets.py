@@ -196,6 +196,19 @@ def write_zip(files: list[tuple[str, Path]], destination: Path) -> None:
 	temporary.replace(destination)
 
 
+def prefix_files(files: list[tuple[str, Path]], root: str) -> list[tuple[str, Path]]:
+	if not root or root in (".", "..") or any(character in root for character in ("/", "\\", ":")) or root.rstrip(" .") != root:
+		raise PackageError(f"invalid release archive root: {root!r}")
+	return [(f"{root}/{relative}", absolute) for relative, absolute in files]
+
+
+def strip_root_prefix(relative: str, root: str) -> str:
+	prefix = root + "/"
+	if not relative.startswith(prefix) or not relative[len(prefix):]:
+		raise PackageError(f"release archive entry is outside its version directory: {relative}")
+	return relative[len(prefix):]
+
+
 def human_size(size: int) -> str:
 	for unit in ("B", "KiB", "MiB", "GiB"):
 		if size < 1024 or unit == "GiB":
@@ -460,7 +473,7 @@ def verify_zip_contents(path: Path, files: list[tuple[str, Path]]) -> None:
 		raise PackageError(f"invalid release archive {path}: {error}") from error
 
 
-def verify_packaged_windows(output: Path, full_path: Path, inventory_path: Path) -> None:
+def verify_packaged_windows(output: Path, full_path: Path, inventory_path: Path, version: str) -> None:
 	helper = load_stage_helper()
 	try:
 		inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
@@ -470,7 +483,8 @@ def verify_packaged_windows(output: Path, full_path: Path, inventory_path: Path)
 			source = Path(temporary)
 			with zipfile.ZipFile(full_path) as archive:
 				for name, entry in archive_entries(archive).items():
-					destination = source.joinpath(*name.split("/"))
+					relative = strip_root_prefix(name, version)
+					destination = source.joinpath(*relative.split("/"))
 					destination.parent.mkdir(parents=True, exist_ok=True)
 					with archive.open(entry) as content, destination.open("xb") as target:
 						shutil.copyfileobj(content, target)
@@ -550,7 +564,7 @@ def main(argv: list[str]) -> int:
 		if args.verify:
 			pair = verify_release_assets(output, expected_metadata)
 			if args.require_authenticode:
-				verify_packaged_windows(output, Path(args.full_zip).resolve(), Path(args.stage_inventory).resolve())
+				verify_packaged_windows(output, Path(args.full_zip).resolve(), Path(args.stage_inventory).resolve(), args.version)
 			# Old releases need not contain output/update; if present it must agree too.
 			if (output / "update").exists():
 				verify_matching_pair(read_manifest_pair(output / "update"), pair, expected_metadata, str(output / "update"))
@@ -592,6 +606,7 @@ def main(argv: list[str]) -> int:
 		full_files = collect_files(source, None)
 		if {name for name, _ in full_files} != {entry["path"] for entry in inventory["files"]}:
 			raise PackageError("release stage contains files excluded from the full package; prepare a clean stage")
+		full_archive_files = prefix_files(full_files, args.version)
 		for destination in [output, Path(args.full_zip).resolve() if args.full_zip else None]:
 			if destination is not None and (destination == source or source in destination.parents):
 				raise PackageError("release outputs must be outside the prepared stage")
@@ -654,7 +669,7 @@ def main(argv: list[str]) -> int:
 			if full_missing:
 				raise PackageError(f"required files missing from the full package: {', '.join(full_missing)}")
 			full_path.parent.mkdir(parents=True, exist_ok=True)
-			write_zip(full_files, full_path)
+			write_zip(full_archive_files, full_path)
 			full_size = full_path.stat().st_size
 			full_digest = sha256_of(full_path)
 			if not args.quiet:
@@ -668,7 +683,7 @@ def main(argv: list[str]) -> int:
 			raise PackageError("release stage changed while packaging")
 		verify_zip_contents(zip_path, files)
 		if full_path is not None:
-			verify_zip_contents(full_path, full_files)
+			verify_zip_contents(full_path, full_archive_files)
 		if client_output.read_bytes() != (source / "DDNet.exe").read_bytes():
 			raise PackageError("standalone client differs from the signed stage")
 		pair = verify_release_assets(output, expected_metadata)

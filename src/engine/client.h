@@ -103,6 +103,7 @@ protected:
 	float m_LocalTime = 0.0f;
 	float m_GlobalTime = 0.0f;
 	float m_RenderFrameTime = 0.0001f;
+	uint64_t m_RenderFrameId = 0;
 	float m_FrameTimeAverage = 0.0001f;
 
 	TLoadingCallback m_LoadingCallback = nullptr;
@@ -208,6 +209,7 @@ public:
 	 * Duration in seconds of the previous render cycle.
 	 */
 	float RenderFrameTime() const { return m_RenderFrameTime; }
+	uint64_t RenderFrameId() const { return m_RenderFrameId; }
 	/**
 	 * Exponentially weighted average of frame times.
 	 */

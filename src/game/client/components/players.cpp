@@ -699,8 +699,8 @@ std::optional<CPlayers::SHookLandingPrediction> CPlayers::PredictHookLanding(int
 // 时机）都需要同一份预判，同帧只模拟一次；ClientId 变化（切观战对象）即失效。
 const CPlayers::SHookLandingPrediction *CPlayers::HookLandingPrediction(int ClientId)
 {
-	const float Frame = Client()->RenderFrameTime();
-	if(m_HookPredictCacheFrame != Frame || m_HookPredictCacheClientId != ClientId)
+	const uint64_t Frame = Client()->RenderFrameId();
+	if(tclient_hook_tile::PredictionCacheKeyChanged(m_HookPredictCacheFrame, m_HookPredictCacheClientId, Frame, ClientId))
 	{
 		m_HookPredictCacheFrame = Frame;
 		m_HookPredictCacheClientId = ClientId;

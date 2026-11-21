@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.100",
+  "version": "1.7.8.101",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17449926,
-  "sha256": "5d879dbf4abb3f6291ed91cf96d3ebf805e402a89f84c4a79abad756eaa3b600",
-  "notes": "# TClient v1.7.8.100\n\n- 钩住冻结玩家高亮开关现在同时控制预测命中和当前钩住目标。\n- 冻结高亮条件结束后改为 0.5 秒渐出，渐入保持快速响应；身体色和脚部色可分别自定义。",
+  "size": 17452419,
+  "sha256": "4c8f09a1b900d83de4acf3e8188c19f89f814ccdf6858a4d01c8016085a2a32c",
+  "notes": "# TClient v1.7.8.101\n\n- 将本地冻结砖块高亮设置移至 ME → Visuals 页面。\n- 保留冻结入场触发、0.5 秒淡出、5 秒冷却和可自定义颜色。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 451584,

@@ -24,7 +24,16 @@ namespace tclient_frozen_entry
 
 		int TileIndex() const { return m_TileIndex; }
 
-		float Update(bool Active, bool Frozen, int FreezeTileIndex, float Now, bool Enabled)
+		float Alpha(float Now) const
+		{
+			if(m_FlashStart < 0.0f)
+				return 0.0f;
+			const float Elapsed = std::max(Now - m_FlashStart, 0.0f);
+			return Elapsed >= FLASH_SECONDS ? 0.0f : 1.0f - Elapsed / FLASH_SECONDS;
+		}
+
+		template<typename FGetFreezeTile>
+		float Update(bool Active, bool Frozen, float Now, bool Enabled, FGetFreezeTile GetFreezeTile)
 		{
 			if(!Active)
 			{
@@ -50,24 +59,23 @@ namespace tclient_frozen_entry
 				m_TileIndex = -1;
 				return 0.0f;
 			}
-			if(EnteredFreeze && FreezeTileIndex >= 0 && Now >= m_CooldownUntil)
+			if(EnteredFreeze && Enabled && Now >= m_CooldownUntil)
 			{
-				m_FlashStart = Now;
-				m_CooldownUntil = Now + COOLDOWN_SECONDS;
-				m_TileIndex = FreezeTileIndex;
+				const int FreezeTileIndex = GetFreezeTile();
+				if(FreezeTileIndex >= 0)
+				{
+					m_FlashStart = Now;
+					m_CooldownUntil = Now + COOLDOWN_SECONDS;
+					m_TileIndex = FreezeTileIndex;
+				}
 			}
 
-			if(m_FlashStart < 0.0f)
-				return 0.0f;
-
-			const float Elapsed = std::max(Now - m_FlashStart, 0.0f);
-			if(Elapsed >= FLASH_SECONDS)
+			if(m_FlashStart >= 0.0f && Now - m_FlashStart >= FLASH_SECONDS)
 			{
 				m_FlashStart = -1.0f;
 				m_TileIndex = -1;
-				return 0.0f;
 			}
-			return 1.0f - Elapsed / FLASH_SECONDS;
+			return Alpha(Now);
 		}
 	};
 }

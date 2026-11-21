@@ -51,6 +51,7 @@ class CPlayers : public CComponent
 
 	void CreateNinjaTeeRenderInfo();
 	void CreateSpectatorTeeRenderInfo();
+	void UpdateFreezeEntryTileHighlight();
 
 	std::shared_ptr<CManagedTeeRenderInfo> m_pNinjaTeeRenderInfo;
 	std::shared_ptr<CManagedTeeRenderInfo> m_pSpectatorTeeRenderInfo;
@@ -66,6 +67,7 @@ public:
 	void OnInit() override;
 	void OnStateChange(int NewState, int OldState) override;
 	void OnMapLoad() override;
+	void OnUpdate() override;
 	void OnRender() override;
 	void RenderFreezeEntryTileHighlight();
 	void RenderHookTileHighlight(int ClientId);

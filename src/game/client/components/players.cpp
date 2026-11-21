@@ -1007,17 +1007,21 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 	Graphics()->SetColor(1, 1, 1, 1);
 }
 
-void CPlayers::RenderFreezeEntryTileHighlight()
+void CPlayers::OnUpdate()
 {
-	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
-		return;
+	UpdateFreezeEntryTileHighlight();
+}
 
+void CPlayers::UpdateFreezeEntryTileHighlight()
+{
+	const int State = Client()->State();
+	const bool InGame = State == IClient::STATE_ONLINE || State == IClient::STATE_DEMOPLAYBACK;
 	const CCollision *pCollision = Collision();
 	const int Width = pCollision->GetWidth();
 	const int Height = pCollision->GetHeight();
-	int aTileIndices[NUM_DUMMIES] = {-1, -1};
-	float aTileAlphas[NUM_DUMMIES] = {};
-	const bool ActiveLocalView = !GameClient()->m_Snap.m_SpecInfo.m_Active && Width > 0 && Height > 0;
+	const bool ActiveLocalView = InGame && !GameClient()->m_Snap.m_SpecInfo.m_Active && Width > 0 && Height > 0;
+	const float Now = Client()->LocalTime();
+	const bool Enabled = g_Config.m_TcFreezeEntryHighlight != 0;
 
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
 	{
@@ -1029,51 +1033,75 @@ void CPlayers::RenderFreezeEntryTileHighlight()
 		}
 		const bool Active = ActiveLocalView && in_range(ClientId, MAX_CLIENTS - 1) &&
 			GameClient()->m_aClients[ClientId].m_Active && GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
-		bool Frozen = false;
-		int FreezeTileIndex = -1;
-		if(Active)
+		if(!Active)
 		{
-			const CCharacterCore &Core = g_Config.m_TcFastInput ?
-				GameClient()->m_aClients[ClientId].m_RegularPredicted : GameClient()->m_aClients[ClientId].m_Predicted;
-			Frozen = Core.m_FreezeEnd != 0 || Core.m_LiveFrozen;
-			const vec2 Pos = Core.m_Pos;
-			if(Frozen && Pos.x >= 0.0f && Pos.y >= 0.0f && Pos.x < Width * 32.0f && Pos.y < Height * 32.0f)
-			{
-				const int MapIndex = pCollision->GetMapIndex(Pos);
-				const auto IsFreezeTile = [](int Tile) { return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE; };
-				if(MapIndex >= 0 && (IsFreezeTile(pCollision->GetTileIndex(MapIndex)) || IsFreezeTile(pCollision->GetFrontTileIndex(MapIndex))))
-					FreezeTileIndex = MapIndex;
-			}
+			m_aLocalFreezeEntryHighlight[Dummy].Update(false, false, Now, Enabled, [] { return -1; });
+			continue;
 		}
 
-		aTileAlphas[Dummy] = m_aLocalFreezeEntryHighlight[Dummy].Update(
-			Active, Frozen, FreezeTileIndex, Client()->LocalTime(), g_Config.m_TcFreezeEntryHighlight != 0);
+		const CCharacterCore &Core = g_Config.m_TcFastInput ?
+			GameClient()->m_aClients[ClientId].m_RegularPredicted : GameClient()->m_aClients[ClientId].m_Predicted;
+		const bool Frozen = Core.m_FreezeEnd != 0 || Core.m_DeepFrozen || Core.m_LiveFrozen;
+		m_aLocalFreezeEntryHighlight[Dummy].Update(Active, Frozen, Now, Enabled, [&] {
+			const vec2 Pos = Core.m_Pos;
+			if(!Frozen || Pos.x < 0.0f || Pos.y < 0.0f || Pos.x >= Width * 32.0f || Pos.y >= Height * 32.0f)
+				return -1;
+			const int MapIndex = pCollision->GetMapIndex(Pos);
+			const auto IsFreezeTile = [](int Tile) { return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE; };
+			return MapIndex >= 0 && (IsFreezeTile(pCollision->GetTileIndex(MapIndex)) || IsFreezeTile(pCollision->GetFrontTileIndex(MapIndex))) ? MapIndex : -1;
+		});
+	}
+}
+
+void CPlayers::RenderFreezeEntryTileHighlight()
+{
+	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+		return;
+
+	const int Width = Collision()->GetWidth();
+	if(Width <= 0)
+		return;
+	int aTileIndices[NUM_DUMMIES] = {-1, -1};
+	float aTileAlphas[NUM_DUMMIES] = {};
+	const float Now = Client()->LocalTime();
+	bool HasFlash = false;
+	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
+	{
 		aTileIndices[Dummy] = m_aLocalFreezeEntryHighlight[Dummy].TileIndex();
+		aTileAlphas[Dummy] = m_aLocalFreezeEntryHighlight[Dummy].Alpha(Now);
 		if(Dummy > 0 && aTileIndices[Dummy] >= 0 && aTileIndices[Dummy] == aTileIndices[0])
 		{
 			aTileAlphas[0] = std::max(aTileAlphas[0], aTileAlphas[Dummy]);
 			aTileIndices[Dummy] = -1;
 		}
+		HasFlash |= aTileIndices[Dummy] >= 0 && aTileAlphas[Dummy] > 0.0f;
 	}
+	if(!HasFlash)
+		return;
 
 	const ColorRGBA Color = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcFreezeEntryHighlightColor));
+	Graphics()->TextureClear();
+	Graphics()->QuadsBegin();
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
 	{
-		const int MapIndex = aTileIndices[Dummy];
-		const float Alpha = aTileAlphas[Dummy];
-		if(MapIndex < 0 || Alpha <= 0.0f)
+		if(aTileIndices[Dummy] < 0 || aTileAlphas[Dummy] <= 0.0f)
 			continue;
-		const float X = (MapIndex % Width) * 32.0f;
-		const float Y = (MapIndex / Width) * 32.0f;
-		Graphics()->TextureClear();
-		Graphics()->QuadsBegin();
-		Graphics()->SetColor(Color.WithAlpha(0.42f * Alpha));
+		const float X = (aTileIndices[Dummy] % Width) * 32.0f;
+		const float Y = (aTileIndices[Dummy] / Width) * 32.0f;
+		Graphics()->SetColor(Color.WithAlpha(0.42f * aTileAlphas[Dummy]));
 		const IGraphics::CQuadItem Fill(X + 1.0f, Y + 1.0f, 30.0f, 30.0f);
 		Graphics()->QuadsDrawTL(&Fill, 1);
-		Graphics()->QuadsEnd();
+	}
+	Graphics()->QuadsEnd();
 
-		Graphics()->LinesBegin();
-		Graphics()->SetColor(Color.WithAlpha(Alpha));
+	Graphics()->LinesBegin();
+	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
+	{
+		if(aTileIndices[Dummy] < 0 || aTileAlphas[Dummy] <= 0.0f)
+			continue;
+		const float X = (aTileIndices[Dummy] % Width) * 32.0f;
+		const float Y = (aTileIndices[Dummy] / Width) * 32.0f;
+		Graphics()->SetColor(Color.WithAlpha(aTileAlphas[Dummy]));
 		const IGraphics::CLineItem aEdges[] = {
 			{X + 1.0f, Y + 1.0f, X + 31.0f, Y + 1.0f},
 			{X + 31.0f, Y + 1.0f, X + 31.0f, Y + 31.0f},
@@ -1081,9 +1109,9 @@ void CPlayers::RenderFreezeEntryTileHighlight()
 			{X + 1.0f, Y + 31.0f, X + 1.0f, Y + 1.0f},
 		};
 		Graphics()->LinesDraw(aEdges, std::size(aEdges));
-		Graphics()->LinesEnd();
-		Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 	}
+	Graphics()->LinesEnd();
+	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
 void CPlayers::RenderPlayer(

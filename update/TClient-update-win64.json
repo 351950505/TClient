@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.99",
+  "version": "1.7.8.100",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17449924,
-  "sha256": "fcc06bf734ae76c40354e8c82cb167fdb3afb38757e805655e60daf444e317c8",
-  "notes": "# TClient v1.7.8.99\n\n- 修复落水榜救援计数与钩手归因，并校正 Team 0 玩家重置时机。\n- 修复钩砖高亮预测缓存的帧失效判定。\n- 修复歌词简繁重复翻译和 LRCLIB 时长边界处理。\n- 完整安装包解压后统一放在 `1.7.8.99` 版本目录中；在线更新包结构不变。",
+  "size": 17449926,
+  "sha256": "5d879dbf4abb3f6291ed91cf96d3ebf805e402a89f84c4a79abad756eaa3b600",
+  "notes": "# TClient v1.7.8.100\n\n- 钩住冻结玩家高亮开关现在同时控制预测命中和当前钩住目标。\n- 冻结高亮条件结束后改为 0.5 秒渐出，渐入保持快速响应；身体色和脚部色可分别自定义。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 451584,

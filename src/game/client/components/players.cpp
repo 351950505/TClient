@@ -1687,11 +1687,12 @@ void CPlayers::OnRender()
 		// 0.12s 节奏渐入渐出。卡锤染色优先——实际出锤/出钩的真实反馈压过
 		// 预判；染色层与渲染层读同一 alpha 值判优先级，同帧一致不错乱。
 		// Marked = 预判命中该冻结 tee，或视角主人正钩住它（救活拉扯中准星
-		// 离移不再熄灭）；渐出放缓到 0.2s——快速扫掠时轻微离开也不抖。
-		const bool HookPredictFrozenMarked = (i == HookPredictTargetId || i == HookHeldId) &&
-			(GameClient()->m_aClients[i].m_FreezeEnd != 0 || GameClient()->m_aClients[i].m_LiveFrozen);
+		// 离移不再熄灭）；目标解除冻结或离开高亮条件后，渐出用时 0.5s。
+		const bool HookPredictFrozenMarked = tclient_hook_tile::FreezeHighlightMarked(
+			g_Config.m_TcHookTileHighlightFreeze != 0, i == HookPredictTargetId, i == HookHeldId,
+			GameClient()->m_aClients[i].m_FreezeEnd != 0 || GameClient()->m_aClients[i].m_LiveFrozen);
 		float &HookPredictAlpha = m_aHookPredictHighlightAlpha[i];
-		HookPredictAlpha = TcAdvanceHighlightTimed(HookPredictAlpha, HookPredictFrozenMarked, Client()->RenderFrameTime(), 0.04f, 0.2f);
+		HookPredictAlpha = TcAdvanceHighlightTimed(HookPredictAlpha, HookPredictFrozenMarked, Client()->RenderFrameTime(), 0.04f, 0.5f);
 		if(Alpha <= 0.001f && HookPredictAlpha > 0.001f)
 		{
 			const ColorRGBA HookPredictBodyColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcHookTileHighlightFreezeBodyColor));

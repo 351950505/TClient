@@ -25,6 +25,17 @@ TEST(ClientHookTile, PredictionCacheKeyChangesForNextFrameAndTarget)
 	EXPECT_TRUE(PredictionCacheKeyChanged(UINT64_MAX - 1, 4, UINT64_MAX, 4));
 }
 
+TEST(ClientHookTile, FreezeHighlightToggleGatesPredictedAndHookHeldTargets)
+{
+	using tclient_hook_tile::FreezeHighlightMarked;
+	EXPECT_FALSE(FreezeHighlightMarked(false, true, false, true));
+	EXPECT_FALSE(FreezeHighlightMarked(false, false, true, true));
+	EXPECT_FALSE(FreezeHighlightMarked(true, false, false, true));
+	EXPECT_FALSE(FreezeHighlightMarked(true, false, true, false));
+	EXPECT_TRUE(FreezeHighlightMarked(true, true, false, true));
+	EXPECT_TRUE(FreezeHighlightMarked(true, false, true, true));
+}
+
 TEST(ClientHookTile, InteriorSelectsOnlyOne)
 {
 	const auto Result = tclient_hook_tile::Select(vec2(48, 48), 4, 4, [](int, int) { return true; });

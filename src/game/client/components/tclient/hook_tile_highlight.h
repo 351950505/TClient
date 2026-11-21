@@ -27,6 +27,11 @@ namespace tclient_hook_tile
 		return CachedFrame != CurrentFrame || CachedClientId != ClientId;
 	}
 
+	inline bool FreezeHighlightMarked(bool Enabled, bool PredictedTarget, bool HookHeldTarget, bool Frozen)
+	{
+		return Enabled && (PredictedTarget || HookHeldTarget) && Frozen;
+	}
+
 	// 网络钩点为整数，碰撞按 round_to_int 取整；容许接缝两侧各 1.5 世界单位。
 	// 只检查钩点附近，不能从玩家当前位置重新射线（钩传送/绕角后路径可能已改变）。
 	template<typename FHookable>

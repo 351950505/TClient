@@ -208,7 +208,7 @@ MACRO_CONFIG_COL(TcHookTileHighlightFreezeFeetColor, tc_hook_tile_highlight_free
 MACRO_CONFIG_INT(TcColorFreeze, tc_color_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use skin colors for frozen tees")
 MACRO_CONFIG_INT(TcColorFreezeDarken, tc_color_freeze_darken, 90, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Makes color of tees darker when in freeze (0-100)")
 MACRO_CONFIG_INT(TcColorFreezeFeet, tc_color_freeze_feet, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Also use color for frozen tee feet")
-MACRO_CONFIG_INT(TcFreezeEntryHighlight, tc_freeze_entry_highlight, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Flash the freeze tile entered by your own tee")
+MACRO_CONFIG_INT(TcFreezeEntryHighlight, tc_freeze_entry_highlight, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Flash the freeze tile entered by your own tee")
 MACRO_CONFIG_COL(TcFreezeEntryHighlightColor, tc_freeze_entry_highlight_color, 15775124, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Local freeze tile flash color")
 MACRO_CONFIG_INT(TcWaterHammerHighlight, tc_water_hammer_highlight, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight frozen teammates, yourself and your dummy holding hammer fire")
 MACRO_CONFIG_INT(TcWaterHookHighlight, tc_water_hook_highlight, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Highlight frozen teammates, yourself and your dummy holding hook")
@@ -453,7 +453,7 @@ MACRO_CONFIG_INT(TcShowhudDummySpeed, tc_showhud_dummy_speed, 0, 0, 1, CFGFLAG_C
 MACRO_CONFIG_INT(TcShowhudDummyAngle, tc_showhud_dummy_angle, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show ingame HUD (Dummy Aim Angle)")
 
 // Dynamic Island (music player HUD)
-MACRO_CONFIG_INT(TcIslandEnable, tc_island_enable, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island music HUD")
+MACRO_CONFIG_INT(TcIslandEnable, tc_island_enable, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island music HUD")
 MACRO_CONFIG_INT(TcIslandNotch, tc_island_notch, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island notch style (attach to top edge)")
 MACRO_CONFIG_INT(TcIslandShowLyrics, tc_island_show_lyrics, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island show synced lyrics")
 MACRO_CONFIG_INT(TcIslandDoubleLyrics, tc_island_double_lyrics, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show the current lyric above a dim preview of the next lyric instead of the song title")

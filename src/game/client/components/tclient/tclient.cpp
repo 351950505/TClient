@@ -2103,33 +2103,60 @@ void CTClient::UpdateDrownBoard()
 		const bool Hooking = Character.m_Active && (Character.m_Cur.m_HookState == HOOK_FLYING || Character.m_Cur.m_HookState == HOOK_GRABBED);
 		bool OnStart = false;
 		bool InFreezeTile = false;
+		bool OnSafeGround = false;
 		if(Active && Character.m_Active && pCollision != nullptr)
 		{
-			const int Index = pCollision->GetPureMapIndex(vec2((float)Character.m_Cur.m_X, (float)Character.m_Cur.m_Y));
+			const vec2 Pos((float)Character.m_Cur.m_X, (float)Character.m_Cur.m_Y);
+			const int Index = pCollision->GetPureMapIndex(Pos);
 			OnStart = pCollision->GetTileIndex(Index) == TILE_START || pCollision->GetFrontTileIndex(Index) == TILE_START;
 			// 服务器语义：普通冻结离开瓦片即解冻；解冻时仍在冻结瓦片内=自然融化。
 			const int GameTile = pCollision->GetTileIndex(Index);
 			const int FrontTile = pCollision->GetFrontTileIndex(Index);
 			InFreezeTile = GameTile == TILE_FREEZE || GameTile == TILE_DFREEZE || GameTile == TILE_LFREEZE ||
 				FrontTile == TILE_FREEZE || FrontTile == TILE_DFREEZE || FrontTile == TILE_LFREEZE;
+			const float Size = CCharacterCore::PhysicalSize();
+			OnSafeGround = !InFreezeTile && (pCollision->IsOnGround(Pos, Size) ||
+				(pCollision->GetMoveRestrictions(Pos + vec2(0, Size / 2 + 4), 0.0f) & CANTMOVE_DOWN) != 0);
 		}
-		m_DrownBoard.Observe(ClientId, Active, Player.m_aName, Player.m_aClan, GameClient()->m_Teams.Team(ClientId),
-			Character.m_Active, Player.m_FreezeEnd != 0, Hooking, OnStart, IncludeTeamZero);
+			m_DrownBoard.Observe(ClientId, Active, Player.m_aName, Player.m_aClan, GameClient()->m_Teams.Team(ClientId),
+				Character.m_Active, Player.m_FreezeEnd != 0, Hooking, OnStart, IncludeTeamZero,
+				Character.m_Active && Character.m_Cur.m_Direction != 0);
 
 		CTClientDrownBoard::SDrownStatTick &Tick = aStatTicks[ClientId];
 		Tick.m_Active = Active;
 		Tick.m_HasCharacter = Character.m_Active;
 		Tick.m_Frozen = Player.m_FreezeEnd != 0;
 		Tick.m_InFreezeTile = InFreezeTile;
+		Tick.m_OnSafeGround = OnSafeGround;
 		Tick.m_FreezeEndTick = Player.m_FreezeEnd;
 		Tick.m_OnStart = OnStart;
-			Tick.m_HookState = Character.m_Active ? Character.m_Cur.m_HookState : HOOK_IDLE;
-			Tick.m_HookedPlayerId = Character.m_Active ? Character.m_Cur.m_HookedPlayer : -1;
-			Tick.m_JumpedTotal = Character.m_HasExtendedData ? Character.m_ExtendedData.m_JumpedTotal : -1;
+		Tick.m_HookState = Character.m_Active ? Character.m_Cur.m_HookState : HOOK_IDLE;
+		Tick.m_HookedPlayerId = Character.m_Active ? Character.m_Cur.m_HookedPlayer : -1;
+		Tick.m_AttackTick = Character.m_Active ? Character.m_Cur.m_AttackTick : -1;
+		Tick.m_Weapon = Character.m_Active ? Character.m_Cur.m_Weapon : -1;
+		Tick.m_JumpedTotal = Character.m_HasExtendedData ? Character.m_ExtendedData.m_JumpedTotal : -1;
 		Tick.m_X = Character.m_Active ? (float)Character.m_Cur.m_X : 0.0f;
 		Tick.m_Y = Character.m_Active ? (float)Character.m_Cur.m_Y : 0.0f;
 		Tick.m_HookX = Character.m_Active ? (float)Character.m_Cur.m_HookX : 0.0f;
 		Tick.m_HookY = Character.m_Active ? (float)Character.m_Cur.m_HookY : 0.0f;
+	}
+
+	std::array<CTClientDrownBoard::SHammerHit, MAX_CLIENTS> aHammerHits{};
+	int NumHammerHits = 0;
+	const int NumSnapItems = Client()->SnapNumItems(IClient::SNAP_CURRENT);
+	for(int ItemIndex = 0; ItemIndex < NumSnapItems && NumHammerHits < MAX_CLIENTS; ++ItemIndex)
+	{
+		const IClient::CSnapItem Item = Client()->SnapGetItem(IClient::SNAP_CURRENT, ItemIndex);
+		if(Item.m_Type != NETEVENTTYPE_HAMMERHIT)
+			continue;
+		const auto *pEvent = static_cast<const CNetEvent_HammerHit *>(Item.m_pData);
+		aHammerHits[NumHammerHits++] = {(float)pEvent->m_X, (float)pEvent->m_Y};
+	}
+	for(int VictimId = 0; VictimId < MAX_CLIENTS; ++VictimId)
+	{
+		const auto HammerRescue = m_DrownBoard.FindHammerRescuer(VictimId, aStatTicks, aHammerHits.data(), NumHammerHits, IncludeTeamZero, GameTick);
+		aStatTicks[VictimId].m_HammerHit = HammerRescue.m_Hit;
+		aStatTicks[VictimId].m_HammerRescuerId = HammerRescue.m_RescuerId;
 	}
 
 	const int LocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy] >= 0 ? GameClient()->m_aLocalIds[g_Config.m_ClDummy] : GameClient()->m_Snap.m_LocalClientId;

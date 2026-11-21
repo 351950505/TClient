@@ -12,6 +12,8 @@ namespace tclient_frozen_entry
 		float m_CooldownUntil = 0.0f;
 		float m_FlashStart = -1.0f;
 		int m_TileIndex = -1;
+		int m_PendingTileIndex = -1;
+		int m_PendingFreezeEnd = -1;
 
 	public:
 		static constexpr float FLASH_SECONDS = 0.5f;
@@ -33,7 +35,7 @@ namespace tclient_frozen_entry
 		}
 
 		template<typename FGetFreezeTile>
-		float Update(bool Active, bool Frozen, float Now, bool Enabled, FGetFreezeTile GetFreezeTile)
+		float Update(bool Active, bool Frozen, int FreezeEnd, int CurrentTick, float Now, bool Enabled, FGetFreezeTile GetFreezeTile)
 		{
 			if(!Active)
 			{
@@ -41,6 +43,8 @@ namespace tclient_frozen_entry
 				m_WasFrozen = false;
 				m_FlashStart = -1.0f;
 				m_TileIndex = -1;
+				m_PendingTileIndex = -1;
+				m_PendingFreezeEnd = -1;
 				return 0.0f;
 			}
 
@@ -51,25 +55,53 @@ namespace tclient_frozen_entry
 				return 0.0f;
 			}
 
-			const bool EnteredFreeze = !m_WasFrozen && Frozen;
-			m_WasFrozen = Frozen;
 			if(!Enabled)
 			{
+				m_WasFrozen = Frozen;
 				m_FlashStart = -1.0f;
 				m_TileIndex = -1;
+				m_PendingTileIndex = -1;
+				m_PendingFreezeEnd = -1;
 				return 0.0f;
 			}
-			if(EnteredFreeze && Enabled && Now >= m_CooldownUntil)
+
+			if(!m_WasFrozen && Frozen)
 			{
-				const int FreezeTileIndex = GetFreezeTile();
-				if(FreezeTileIndex >= 0)
+				m_PendingTileIndex = -1;
+				m_PendingFreezeEnd = -1;
+				if(FreezeEnd > 0)
+				{
+					m_PendingTileIndex = GetFreezeTile();
+					if(m_PendingTileIndex >= 0)
+						m_PendingFreezeEnd = FreezeEnd;
+				}
+			}
+			else if(m_WasFrozen && Frozen && m_PendingTileIndex >= 0)
+			{
+				if(FreezeEnd <= 0)
+				{
+					m_PendingTileIndex = -1;
+					m_PendingFreezeEnd = -1;
+				}
+				else if(FreezeEnd > m_PendingFreezeEnd)
+				{
+					m_PendingFreezeEnd = FreezeEnd;
+				}
+			}
+			else if(m_WasFrozen && !Frozen)
+			{
+				const bool FreezeCompleted = m_PendingTileIndex >= 0 && m_PendingFreezeEnd > 0 && CurrentTick >= m_PendingFreezeEnd;
+				if(FreezeCompleted && Now >= m_CooldownUntil)
 				{
 					m_FlashStart = Now;
 					m_CooldownUntil = Now + COOLDOWN_SECONDS;
-					m_TileIndex = FreezeTileIndex;
+					m_TileIndex = m_PendingTileIndex;
 				}
+				m_PendingTileIndex = -1;
+				m_PendingFreezeEnd = -1;
 			}
 
+			m_WasFrozen = Frozen;
 			if(m_FlashStart >= 0.0f && Now - m_FlashStart >= FLASH_SECONDS)
 			{
 				m_FlashStart = -1.0f;

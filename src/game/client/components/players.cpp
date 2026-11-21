@@ -1035,14 +1035,15 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 			GameClient()->m_aClients[ClientId].m_Active && GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
 		if(!Active)
 		{
-			m_aLocalFreezeEntryHighlight[Dummy].Update(false, false, Now, Enabled, [] { return -1; });
+			m_aLocalFreezeEntryHighlight[Dummy].Update(false, false, 0, 0, Now, Enabled, [] { return -1; });
 			continue;
 		}
 
 		const CCharacterCore &Core = g_Config.m_TcFastInput ?
 			GameClient()->m_aClients[ClientId].m_RegularPredicted : GameClient()->m_aClients[ClientId].m_Predicted;
 		const bool Frozen = Core.m_FreezeEnd != 0 || Core.m_DeepFrozen || Core.m_LiveFrozen;
-		m_aLocalFreezeEntryHighlight[Dummy].Update(Active, Frozen, Now, Enabled, [&] {
+		m_aLocalFreezeEntryHighlight[Dummy].Update(
+			Active, Frozen, Core.m_FreezeEnd, Client()->PredGameTick(Dummy), Now, Enabled, [&] {
 			const vec2 Pos = Core.m_Pos;
 			if(!Frozen || Pos.x < 0.0f || Pos.y < 0.0f || Pos.x >= Width * 32.0f || Pos.y >= Height * 32.0f)
 				return -1;

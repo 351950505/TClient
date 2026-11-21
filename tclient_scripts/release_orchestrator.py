@@ -85,10 +85,17 @@ def git(repo, *args):
 
 
 def previous_version(version):
-    """Return the version one patch step below ``version``, keeping its prefix."""
-    parts = version.rsplit(".", 1)
-    require(len(parts) == 2 and parts[1].isdigit() and int(parts[1]) >= 1, "cannot derive the previous version from " + version)
-    return parts[0] + "." + str(int(parts[1]) - 1)
+    """Return the previous version, rolling a zero suffix back to .99."""
+    parts = version.split(".")
+    require(len(parts) >= 2 and all(part.isdigit() for part in parts), "cannot derive the previous version from " + version)
+    for index in range(len(parts) - 1, 0, -1):
+        if int(parts[index]) == 0:
+            continue
+        parts[index] = str(int(parts[index]) - 1)
+        for suffix in range(index + 1, len(parts)):
+            parts[suffix] = "99"
+        return ".".join(parts)
+    raise RuntimeError("cannot derive the previous version from " + version)
 
 
 def check_helper_lock(spec):
@@ -268,8 +275,7 @@ def phase_package(spec, paths, state):
     verify_client_phase(state, "stage", client_path)
     client = client_path.read_bytes()
     mirrors = verify_mirror_inputs(spec, paths, state, client=client, fresh=True)
-    # 版本串绑定：previous 从 version 自身推导（不再写死 1.7.8. 前缀），
-    # 段号耗尽（如 1.7.9.0）时显式失败，而不是静默跳过残留检查。
+	# 版本串绑定：previous 从 version 自身推导；末段归零时回退到前段的 .99。
     previous = previous_version(version)
     require(f"{version}\0".encode() in client and f"{previous}\0".encode() not in client, "stage client version is wrong")
     require(git(repo, "rev-parse", "--short", spec["target_commit"]).encode() in client, "stage client lacks the release commit")

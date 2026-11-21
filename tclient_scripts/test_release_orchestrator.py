@@ -82,11 +82,10 @@ class SpecValidationTests(unittest.TestCase):
         self.assertEqual(plan[-2:], ["publish", "master_sync"])
 
     def test_version_step_policy_helper(self):
-        # 发行版只 +0.0.1：.59 的后继必须是 .60（orchestrator 的 previous 推导用）
         self.assertEqual(release_orchestrator.previous_version("1.7.8.59"), "1.7.8.58")
         self.assertEqual(release_orchestrator.previous_version("2.0.10.3"), "2.0.10.2")
-        with self.assertRaises(RuntimeError):
-            release_orchestrator.previous_version("1.7.9.0")
+        self.assertEqual(release_orchestrator.previous_version("1.7.8.100"), "1.7.8.99")
+        self.assertEqual(release_orchestrator.previous_version("1.7.9.0"), "1.7.8.99")
         with self.assertRaises(RuntimeError):
             release_orchestrator.previous_version("1.7.8.x")
 

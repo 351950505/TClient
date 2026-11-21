@@ -20,11 +20,19 @@
 // 换图、切换 Gores 模式或玩家换队/离开起点会重置。
 class CTClientDrownBoard
 {
-	// 救援归因窗口（tick）：队友解冻前这么多个 tick 内钩住过其冻结位置的本队
-	// 成员都记一次救援。2026-11-21 用户口径放宽为 0.5 秒（25 tick）——
-	// “把 tee 从冻结状态救活就算一次”，钩一下就走的救援也能归因。
-		// 钩尖/钩点与目标的判定半径，与物理 ProximityRadius 一致。
+	// 钩尖/钩点与目标的判定半径，与物理 ProximityRadius 一致。
 	static constexpr float HOOK_HIT_RADIUS = 28.0f;
+	static constexpr float HAMMER_HIT_RADIUS = 32.0f;
+	static constexpr float HAMMER_RESCUE_RANGE = 52.0f; // FireWeapon hit-marker reach tops out near 49 units.
+	static constexpr int HOOK_RELEASE_GRACE_TICKS = SERVER_TICK_SPEED / 2; // 0.5 seconds
+
+	class SFrozenHook
+	{
+	public:
+		int m_ClientId = -1;
+		int m_LastHeldTick = -1;
+		int m_ReleaseTick = -1;
+	};
 
 	struct SPlayer
 	{
@@ -51,18 +59,12 @@ class CTClientDrownBoard
 		// 统计侧状态，与冻结计数的基线字段分开，互不干扰。
 		bool m_StatHasPrev = false;
 		bool m_StatPrevFrozen = false;
+		bool m_StatPrevOnSafeGround = false;
 		int m_StatPrevHookState = HOOK_IDLE;
+		int m_StatPrevHookedPlayerId = -1;
 		int m_StatPrevJumpedTotal = -1;
-		int m_FrozenLastHookerId = -1;
-		std::string m_FrozenLastHookerName;
-		std::string m_FrozenLastHookerClan;
-		int m_PendingRescuerId = -1;
-		std::string m_PendingRescuerName;
-		std::string m_PendingRescuerClan;
-		int m_PendingRescuerTeam = -1;
-		int m_PendingRescueHookState = HOOK_IDLE;
-		float m_PendingRescueX = 0.0f;
-		float m_PendingRescueY = 0.0f;
+		SFrozenHook m_FrozenHook;
+		int m_PlatformRescuerId = -1;
 		int m_StatPrevFreezeEnd = -1;
 		// Team 0（散人）逐玩家重置：死亡后在起点重新出现即重组个人统计。
 		bool m_DiedAwaitingSpawn = false;
@@ -98,15 +100,34 @@ public:
 		bool m_HasCharacter = false;
 		bool m_Frozen = false;
 		bool m_InFreezeTile = false; // 该位置是否冻结瓦片（区分自然融化与被拉出/锤/激光解除）
+		bool m_OnSafeGround = false;
 		bool m_OnStart = false;
 		int m_HookState = HOOK_IDLE;
 		int m_HookedPlayerId = -1;
+		bool m_HammerHit = false;
+		int m_HammerRescuerId = -1;
+		int m_AttackTick = -1;
+		int m_Weapon = -1;
 		int m_JumpedTotal = -1;
 		int m_FreezeEndTick = -1; // 冻结到期绝对 tick（<=GameTick 表示到期解冻，< 表示提前解冻）
 		float m_X = 0.0f;
 		float m_Y = 0.0f;
 		float m_HookX = 0.0f;
 		float m_HookY = 0.0f;
+	};
+
+	class SHammerHit
+	{
+	public:
+		float m_X = 0.0f;
+		float m_Y = 0.0f;
+	};
+
+	class SHammerRescue
+	{
+	public:
+		bool m_Hit = false;
+		int m_RescuerId = -1;
 	};
 
 	// 榜单只支持服务器声明的 Gores 模式；Team 0 的统计与显示共用同一过滤策略。
@@ -123,6 +144,63 @@ public:
 	static bool IsBoardVisible(bool GoresGameMode, bool HasLocalClient, int LocalTeam, bool IncludeTeamZero)
 	{
 		return GoresGameMode && HasLocalClient && IsTrackedTeam(LocalTeam, IncludeTeamZero);
+	}
+
+	SHammerRescue FindHammerRescuer(int VictimId, const SDrownStatTick *pTicks, const SHammerHit *pHits, int NumHits, bool IncludeTeamZero, int GameTick) const
+	{
+		if(!pTicks || !pHits || NumHits <= 0 || VictimId < 0 || VictimId >= MAX_CLIENTS || GameTick < 0)
+			return {};
+
+		const SPlayer &Victim = m_aPlayers[VictimId];
+		const SDrownStatTick &VictimTick = pTicks[VictimId];
+		if(!Victim.m_StatHasPrev || !Victim.m_StatPrevFrozen || !VictimTick.m_Active || !VictimTick.m_HasCharacter || VictimTick.m_Frozen || !IsTrackedTeam(Victim.m_Team, IncludeTeamZero))
+			return {};
+
+		const float HitRadius2 = HAMMER_HIT_RADIUS * HAMMER_HIT_RADIUS;
+		const float RescueRange2 = HAMMER_RESCUE_RANGE * HAMMER_RESCUE_RANGE;
+		SHammerRescue Result;
+		for(int HitIndex = 0; HitIndex < NumHits; ++HitIndex)
+		{
+			const SHammerHit &Hit = pHits[HitIndex];
+			const float VictimDX = VictimTick.m_X - Hit.m_X;
+			const float VictimDY = VictimTick.m_Y - Hit.m_Y;
+			const float VictimDistance2 = VictimDX * VictimDX + VictimDY * VictimDY;
+			if(VictimDistance2 > HitRadius2)
+				continue;
+
+			Result.m_Hit = true;
+			for(int OtherId = 0; OtherId < MAX_CLIENTS; ++OtherId)
+			{
+				if(OtherId == VictimId || !pTicks[OtherId].m_Active || !pTicks[OtherId].m_HasCharacter)
+					continue;
+				const float OtherDX = pTicks[OtherId].m_X - Hit.m_X;
+				const float OtherDY = pTicks[OtherId].m_Y - Hit.m_Y;
+				if(OtherDX * OtherDX + OtherDY * OtherDY <= VictimDistance2)
+					return Result;
+			}
+
+			int CandidateId = -1;
+			for(int RescuerId = 0; RescuerId < MAX_CLIENTS; ++RescuerId)
+			{
+				if(RescuerId == VictimId || m_aPlayers[RescuerId].m_DeathAwaitingCharacter || m_aPlayers[RescuerId].m_Team != Victim.m_Team || !IsTrackedTeam(m_aPlayers[RescuerId].m_Team, IncludeTeamZero))
+					continue;
+				const SDrownStatTick &RescuerTick = pTicks[RescuerId];
+				if(!RescuerTick.m_Active || !RescuerTick.m_HasCharacter || RescuerTick.m_AttackTick != GameTick || RescuerTick.m_Weapon != WEAPON_HAMMER)
+					continue;
+				const float RescuerDX = RescuerTick.m_X - Hit.m_X;
+				const float RescuerDY = RescuerTick.m_Y - Hit.m_Y;
+				if(RescuerDX * RescuerDX + RescuerDY * RescuerDY > RescueRange2)
+					continue;
+				if(CandidateId >= 0)
+					return Result;
+				CandidateId = RescuerId;
+			}
+
+			if(CandidateId < 0 || (Result.m_RescuerId >= 0 && Result.m_RescuerId != CandidateId))
+				return Result;
+			Result.m_RescuerId = CandidateId;
+		}
+		return Result;
 	}
 
 	void Reset()
@@ -159,7 +237,7 @@ public:
 		return Stats;
 	}
 
-	void Observe(int ClientId, bool Active, std::string_view Name, std::string_view Clan, int Team, bool HasCharacter, bool Frozen, bool Hooking, bool OnStart, bool IncludeTeamZero)
+		void Observe(int ClientId, bool Active, std::string_view Name, std::string_view Clan, int Team, bool HasCharacter, bool Frozen, bool Hooking, bool OnStart, bool IncludeTeamZero, bool Moving = false)
 	{
 		if(ClientId < 0 || ClientId >= MAX_CLIENTS)
 			return;
@@ -223,11 +301,11 @@ public:
 				++Player.m_Count;
 			Player.m_Armed = false;
 		}
-		else if(Hooking && !Player.m_Hooking)
-		{
-			// 救起后实际重新出钩才允许下一次落水，冻结中出钩不会重新解锁。
-			Player.m_Armed = true;
-		}
+			else if((Hooking && !Player.m_Hooking) || Moving)
+			{
+				// 解冻后重新出钩或按方向键移动，才允许下一次落水计数。
+				Player.m_Armed = true;
+			}
 		Player.m_Frozen = Frozen;
 		Player.m_Hooking = Hooking;
 	}
@@ -344,37 +422,68 @@ public:
 		{
 			SPlayer &Victim = m_aPlayers[VictimId];
 			const SDrownStatTick &Now = pTicks[VictimId];
-			if(!Victim.m_StatHasPrev || !Victim.m_StatPrevFrozen || !Now.m_Active || !Now.m_HasCharacter || Now.m_Frozen)
+			if(!Victim.m_StatHasPrev || !Victim.m_StatPrevFrozen || Victim.m_DeathAwaitingCharacter || !Now.m_Active || !Now.m_HasCharacter)
 				continue;
 
-			const bool ThawEarly = Victim.m_StatPrevFreezeEnd == -1 || (GameTick >= 0 && Victim.m_StatPrevFreezeEnd > GameTick);
-			const bool RescueThaw = ThawEarly || !Now.m_InFreezeTile;
-			const int HookerId = Victim.m_FrozenLastHookerId;
-			const std::string HookerName = std::move(Victim.m_FrozenLastHookerName);
-			const std::string HookerClan = std::move(Victim.m_FrozenLastHookerClan);
-			Victim.m_FrozenLastHookerId = -1;
-			if(!RescueThaw || HookerId < 0 || HookerId >= MAX_CLIENTS || HookerId == VictimId)
-				continue;
-			const SPlayer &Rescuer = m_aPlayers[HookerId];
-			if(Rescuer.m_Team != Victim.m_Team || Rescuer.m_Name != HookerName || Rescuer.m_Clan != HookerClan || !IsTrackedTeam(Rescuer.m_Team, IncludeTeamZero))
+			SFrozenHook &Hook = Victim.m_FrozenHook;
+			if(Hook.m_LastHeldTick >= 0 && !IsHookingPlayer(pTicks[Hook.m_ClientId], VictimId))
+			{
+				// A long snapshot gap cannot establish when the release happened.
+				if(GameTick >= Hook.m_LastHeldTick && GameTick - Hook.m_LastHeldTick <= HOOK_RELEASE_GRACE_TICKS)
+					Hook.m_ReleaseTick = GameTick;
+				Hook.m_LastHeldTick = -1;
+			}
+			if(Now.m_Frozen)
 				continue;
 
-			Victim.m_PendingRescuerId = HookerId;
-			Victim.m_PendingRescuerName = HookerName;
-			Victim.m_PendingRescuerClan = HookerClan;
-			Victim.m_PendingRescuerTeam = Rescuer.m_Team;
-			Victim.m_PendingRescueHookState = Now.m_HookState;
-			Victim.m_PendingRescueX = Now.m_X;
-			Victim.m_PendingRescueY = Now.m_Y;
+			const bool TimedThaw = Victim.m_StatPrevFreezeEnd > 0 && GameTick >= Victim.m_StatPrevFreezeEnd;
+			// Use the expiry tick, not the potentially later thaw snapshot.
+			const bool ReleasedNearThaw = Hook.m_ReleaseTick >= 0 && Hook.m_ReleaseTick <= Victim.m_StatPrevFreezeEnd &&
+				Victim.m_StatPrevFreezeEnd - Hook.m_ReleaseTick <= HOOK_RELEASE_GRACE_TICKS;
+			int AirHookerId = -1;
+			bool AmbiguousAirHook = false;
+			if(!Now.m_InFreezeTile)
+			{
+				for(int RescuerId = 0; RescuerId < MAX_CLIENTS; ++RescuerId)
+				{
+					if(RescuerId == VictimId || m_aPlayers[RescuerId].m_DeathAwaitingCharacter || m_aPlayers[RescuerId].m_Team != Victim.m_Team || !IsTrackedTeam(m_aPlayers[RescuerId].m_Team, IncludeTeamZero))
+						continue;
+					if(!IsHookingPlayer(pTicks[RescuerId], VictimId))
+						continue;
+					if(AirHookerId >= 0)
+					{
+						AmbiguousAirHook = true;
+						break;
+					}
+					AirHookerId = RescuerId;
+				}
+			}
+			int RescuerId = -1;
+			if(Now.m_HammerHit)
+				RescuerId = Now.m_HammerRescuerId;
+			else if(TimedThaw && !Now.m_InFreezeTile && Now.m_OnSafeGround && Victim.m_PlatformRescuerId >= 0)
+				RescuerId = Victim.m_PlatformRescuerId;
+			else if(TimedThaw && !Now.m_InFreezeTile && !AmbiguousAirHook && ReleasedNearThaw)
+				RescuerId = Hook.m_ClientId;
+			else if(!AmbiguousAirHook && AirHookerId >= 0)
+				RescuerId = AirHookerId;
+			ClearRescueState(Victim);
+			if(RescuerId < 0 || RescuerId >= MAX_CLIENTS || RescuerId == VictimId)
+				continue;
+
+			SPlayer &Rescuer = m_aPlayers[RescuerId];
+			const SDrownStatTick &RescuerTick = pTicks[RescuerId];
+			if(Rescuer.m_DeathAwaitingCharacter || !RescuerTick.m_Active || !RescuerTick.m_HasCharacter || !IsSameTrackedTeam(Victim.m_Team, Rescuer.m_Team, IncludeTeamZero))
+				continue;
+			if(Rescuer.m_Saves < std::numeric_limits<int>::max())
+				++Rescuer.m_Saves;
 		}
 
 		// Establish every new-freeze baseline before hook scans, independent of ClientId order.
-		std::array<bool, MAX_CLIENTS> aNewlyFrozen{};
 		for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
 		{
 			SPlayer &Player = m_aPlayers[ClientId];
-			aNewlyFrozen[ClientId] = Player.m_StatHasPrev && !Player.m_StatPrevFrozen && pTicks[ClientId].m_Frozen;
-			if(aNewlyFrozen[ClientId])
+			if(!Player.m_StatHasPrev || !Player.m_StatPrevFrozen)
 				ClearRescueState(Player);
 		}
 
@@ -423,22 +532,6 @@ public:
 					Player.m_Jumps += std::min(Now.m_JumpedTotal - Player.m_StatPrevJumpedTotal, 255);
 				Player.m_StatPrevJumpedTotal = Now.m_JumpedTotal;
 			}
-				if(Player.m_PendingRescuerId >= 0 && Now.m_Frozen)
-					ClearRescueState(Player);
-				else if(Player.m_PendingRescuerId >= 0)
-				{
-					const bool Hooked = Now.m_HookState == HOOK_GRABBED && Player.m_PendingRescueHookState != HOOK_GRABBED;
-					Player.m_PendingRescueHookState = Now.m_HookState;
-					const float DX = Now.m_X - Player.m_PendingRescueX;
-					const float DY = Now.m_Y - Player.m_PendingRescueY;
-					if(Hooked || DX * DX + DY * DY >= 32.0f * 32.0f)
-					{
-						SPlayer &Rescuer = m_aPlayers[Player.m_PendingRescuerId];
-						if(Rescuer.m_Team == Player.m_Team && Rescuer.m_Team == Player.m_PendingRescuerTeam && Rescuer.m_Name == Player.m_PendingRescuerName && Rescuer.m_Clan == Player.m_PendingRescuerClan && IsTrackedTeam(Rescuer.m_Team, IncludeTeamZero) && Rescuer.m_Saves < std::numeric_limits<int>::max())
-							++Rescuer.m_Saves;
-						ClearRescueState(Player);
-					}
-				}
 			if(Now.m_OnStart && Player.m_DiedAwaitingSpawn && Player.m_DiedSawMissingCharacter && Player.m_Team == TEAM_FLOCK)
 			{
 				ResetCounters(Player);
@@ -451,34 +544,47 @@ public:
 				else
 					Player.m_TicksAlive += std::min(ElapsedTicks, std::numeric_limits<int>::max() - Player.m_TicksAlive);
 
-			const bool NewGrab = Player.m_StatHasPrev && Player.m_StatPrevHookState != HOOK_GRABBED;
+			const int MateId = Now.m_HookedPlayerId;
+			const bool NewGrab = !Player.m_StatHasPrev || Player.m_StatPrevHookState != HOOK_GRABBED || Player.m_StatPrevHookedPlayerId != MateId;
 			Player.m_StatPrevFrozen = Now.m_Frozen;
 			Player.m_StatPrevHookState = Now.m_HookState;
+			Player.m_StatPrevHookedPlayerId = MateId;
 			Player.m_StatPrevFreezeEnd = Now.m_FreezeEndTick;
 			Player.m_StatHasPrev = true;
-			if(Now.m_HookState == HOOK_GRABBED && !Player.m_DeathAwaitingCharacter)
-			{
-				for(int MateId = 0; MateId < MAX_CLIENTS; ++MateId)
+			if(Now.m_HookState != HOOK_GRABBED || Player.m_DeathAwaitingCharacter || MateId < 0 || MateId >= MAX_CLIENTS || MateId == ClientId)
+				continue;
+
+			SPlayer &Mate = m_aPlayers[MateId];
+			const SDrownStatTick &MateTick = pTicks[MateId];
+			if(!MateTick.m_Active || !MateTick.m_HasCharacter || !MateTick.m_Frozen || Mate.m_DeathAwaitingCharacter || Mate.m_Team != Player.m_Team)
+				continue;
+
+				SFrozenHook &Hook = Mate.m_FrozenHook;
+				if(Hook.m_ClientId == ClientId)
 				{
-					if(MateId == ClientId || Now.m_HookedPlayerId != MateId || (!NewGrab && !aNewlyFrozen[MateId]))
-						continue;
-					SPlayer &Mate = m_aPlayers[MateId];
-					if(Mate.m_Team != Player.m_Team || !IsTrackedTeam(Mate.m_Team, IncludeTeamZero))
-						continue;
-					const SDrownStatTick &MateTick = pTicks[MateId];
-					if(!MateTick.m_Active || !MateTick.m_HasCharacter || !MateTick.m_Frozen)
-						continue;
-					const float DX = MateTick.m_X - Now.m_HookX;
-					const float DY = MateTick.m_Y - Now.m_HookY;
-					if(DX * DX + DY * DY <= HookHitRadius2)
-					{
-						Mate.m_FrozenLastHookerId = ClientId;
-						Mate.m_FrozenLastHookerName = Player.m_Name;
-						Mate.m_FrozenLastHookerClan = Player.m_Clan;
-						break;
-					}
+					Hook.m_LastHeldTick = GameTick;
+					Hook.m_ReleaseTick = -1;
 				}
+				else if(NewGrab || Hook.m_ClientId < 0)
+					Hook = {ClientId, GameTick, -1};
+		}
+
+		// Keep long waits only when the hook actually brought the frozen tee onto safe ground.
+		for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
+		{
+			SPlayer &Player = m_aPlayers[ClientId];
+			const SDrownStatTick &Now = pTicks[ClientId];
+			const bool OnSafeGround = Player.m_StatHasPrev && Now.m_OnSafeGround;
+			if(!OnSafeGround || !Now.m_Frozen)
+				Player.m_PlatformRescuerId = -1;
+			else if(!Player.m_StatPrevOnSafeGround && GameTick >= 0)
+			{
+				const SFrozenHook &Hook = Player.m_FrozenHook;
+				const bool RecentRelease = Hook.m_ReleaseTick >= 0 && Hook.m_ReleaseTick <= GameTick && GameTick - Hook.m_ReleaseTick <= HOOK_RELEASE_GRACE_TICKS;
+				if(Hook.m_LastHeldTick == GameTick || RecentRelease)
+					Player.m_PlatformRescuerId = Hook.m_ClientId;
 			}
+			Player.m_StatPrevOnSafeGround = OnSafeGround;
 		}
 
 		// 3) 坚持 / 全灭（整队轮次，只统计已离开起点的玩家；0 队跳过）。
@@ -538,24 +644,25 @@ public:
 	}
 
 private:
+	static bool IsHookingPlayer(const SDrownStatTick &Tick, int ClientId)
+	{
+		return Tick.m_Active && Tick.m_HasCharacter && Tick.m_HookState == HOOK_GRABBED && Tick.m_HookedPlayerId == ClientId;
+	}
+
 	static void ClearRescueState(SPlayer &Player)
 	{
-		Player.m_FrozenLastHookerId = -1;
-		Player.m_FrozenLastHookerName.clear();
-		Player.m_FrozenLastHookerClan.clear();
-		Player.m_PendingRescuerId = -1;
-		Player.m_PendingRescuerName.clear();
-		Player.m_PendingRescuerClan.clear();
-		Player.m_PendingRescuerTeam = -1;
-		Player.m_PendingRescueHookState = HOOK_IDLE;
+		Player.m_FrozenHook = {};
+		Player.m_PlatformRescuerId = -1;
 	}
 
 	void InvalidateRescuerReferences(int ClientId)
 	{
 		for(SPlayer &Player : m_aPlayers)
 		{
-			if(Player.m_PendingRescuerId == ClientId || Player.m_FrozenLastHookerId == ClientId)
-				ClearRescueState(Player);
+			if(Player.m_FrozenHook.m_ClientId == ClientId)
+				Player.m_FrozenHook = {};
+			if(Player.m_PlatformRescuerId == ClientId)
+				Player.m_PlatformRescuerId = -1;
 		}
 	}
 

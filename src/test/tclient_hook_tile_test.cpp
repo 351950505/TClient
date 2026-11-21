@@ -1,5 +1,7 @@
 #include <game/client/components/tclient/hook_tile_highlight.h>
 
+#include <engine/shared/config.h>
+
 #include <gtest/gtest.h>
 
 #include <limits>
@@ -14,6 +16,19 @@ namespace
 				return true;
 		return false;
 	}
+}
+
+TEST(ClientHookTile, VisualHighlightsAreDisabledByDefault)
+{
+	EXPECT_EQ(DefaultConfig::TcFreezeEntryHighlight, 0);
+	EXPECT_EQ(DefaultConfig::TcHookTileHighlight, 0);
+	EXPECT_EQ(DefaultConfig::TcHookTileHighlightPredict, 0);
+	EXPECT_EQ(DefaultConfig::TcHookTileHighlightFreeze, 0);
+	EXPECT_EQ(DefaultConfig::TcHookTileHighlightGlow, 0);
+	EXPECT_EQ(DefaultConfig::TcHookTileHighlightRgb, 0);
+	EXPECT_EQ(DefaultConfig::TcHookTileHighlightGradient, 0);
+	EXPECT_EQ(DefaultConfig::TcIslandEnable, 0);
+	EXPECT_EQ(DefaultConfig::TcDrownBoard, 0);
 }
 
 TEST(ClientHookTile, PredictionCacheKeyChangesForNextFrameAndTarget)

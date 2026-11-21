@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.8.101",
+  "version": "1.7.8.102",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17452419,
-  "sha256": "4c8f09a1b900d83de4acf3e8188c19f89f814ccdf6858a4d01c8016085a2a32c",
-  "notes": "# TClient v1.7.8.101\n\n- 将本地冻结砖块高亮设置移至 ME → Visuals 页面。\n- 保留冻结入场触发、0.5 秒淡出、5 秒冷却和可自定义颜色。",
+  "size": 17452884,
+  "sha256": "702176c4726f150a16acae4657ca4c05aa5fe9188db21b6f2ca8cc91590b3ad1",
+  "notes": "# TClient v1.7.8.102\n\n- 优化冻结砖块高亮：冻结状态更新与绘制分离，地图地砖只在本地活转冻时查询一次。\n- 合并冻结砖块填色和边框绘制批次；无高亮时跳过图形批次，减少每帧开销。\n- 冻结砖块高亮设置位于 ME → Visuals。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 451584,

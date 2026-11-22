@@ -134,8 +134,8 @@ def phase_preflight(spec, paths, state):
         require(re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", region) and re.fullmatch(r"[A-Za-z0-9_.-]+", host), "invalid regional mirror probe region/SSH alias")
         require(region not in probe_regions, "duplicate regional mirror probe: " + region)
         probe_regions.add(region)
-    if probe_nodes:
-        require(any(region.startswith("cn-") for region in probe_regions), "regional mirror probes must include a China region")
+    required_probe_nodes = set(spec.get("required_mirror_probe_regions", []))
+    require(required_probe_nodes.issubset(probe_regions), "release spec is missing required regional mirror probes")
     check_helper_lock(spec)
     translation_gate = Path(__file__).resolve().parent / "check_translations.py"
     require(translation_gate.is_file(), f"translation gate missing: {translation_gate}")

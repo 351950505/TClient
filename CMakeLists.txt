@@ -3783,6 +3783,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     tclient_console_filter_test.cpp
     tclient_drown_board_test.cpp
     tclient_fastinput_test.cpp
+    tclient_frozen_hud_test.cpp
     tclient_gradient_test.cpp
     tclient_hook_tile_test.cpp
     tclient_jitter_buffer_test.cpp

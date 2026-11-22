@@ -891,9 +891,9 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 		// 梯度焦点：预判模式取所选区域中心（砖块量化，随砖块稳定，避免准星微动
 		// 每帧重建）；抓住模式为真实钩点。
 		const vec2 Contact = Predict ? vec2((MinX + MaxX + 1.0f) * 16.0f, (MinY + MaxY + 1.0f) * 16.0f) :
-						vec2(
-							std::clamp((float)Character.m_HookX, MinX * 32.0f, (MaxX + 1) * 32.0f),
-							std::clamp((float)Character.m_HookY, MinY * 32.0f, (MaxY + 1) * 32.0f));
+					vec2(
+						std::clamp((float)Character.m_HookX, MinX * 32.0f, (MaxX + 1) * 32.0f),
+						std::clamp((float)Character.m_HookY, MinY * 32.0f, (MaxY + 1) * 32.0f));
 		// 顶点 alpha 结构（颜色仍由渲染时整体调制）。默认径向柔光：以钩点为圆心
 		// 分段线性衰减——中心全强度、55% 处 55%、边缘 12%（对齐对比稿
 		// softgradradial 的三段 stop，半径=区域最长边×0.95）；纵向柔光
@@ -1706,8 +1706,7 @@ void CPlayers::OnRender()
 	const int HookPredictViewId = (GameClient()->m_Snap.m_SpecInfo.m_Active && GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW) ? GameClient()->m_Snap.m_SpecInfo.m_SpectatorId : GameClient()->m_Snap.m_LocalClientId;
 	const SHookLandingPrediction *pHookPredictLanding = g_Config.m_TcHookTileHighlightFreeze ? HookLandingPrediction(HookPredictViewId) : nullptr;
 	const int HookPredictTargetId = pHookPredictLanding ? pHookPredictLanding->m_PlayerId : -1;
-	// 视角主人当前钩住的玩家：钩住冻结 tee 期间保持常亮——救活拉扯时准星
-	// 离移不再让染色熄灭（修复来回闪烁）。
+	// 实际钩中的目标用于屏蔽预判染色：只提示尚未被钩中的候选目标。
 	int HookHeldId = -1;
 	if(in_range(HookPredictViewId, MAX_CLIENTS - 1))
 	{
@@ -1810,11 +1809,9 @@ void CPlayers::OnRender()
 		else
 			Alpha = 0.0f;
 
-		// 预判冻结 tee 染色：预判模拟命中可钩冻结 tee 时，按卡锤高亮同款
-		// 0.12s 节奏渐入渐出。卡锤染色优先——实际出锤/出钩的真实反馈压过
-		// 预判；染色层与渲染层读同一 alpha 值判优先级，同帧一致不错乱。
-		// Marked = 预判命中该冻结 tee，或视角主人正钩住它（救活拉扯中准星
-		// 离移不再熄灭）；目标解除冻结或离开高亮条件后，渐出用时 0.5s。
+		// 预判冻结 tee 染色：只提示尚未被实际钩中的预测目标。
+		// 卡锤染色优先——真实出锤/出钩反馈压过预判；目标被钩中、解冻或不再
+		// 符合预判条件后，染色渐出用时 0.5s。
 		const bool HookPredictFrozenMarked = tclient_hook_tile::FreezeHighlightMarked(
 			g_Config.m_TcHookTileHighlightFreeze != 0, i == HookPredictTargetId, i == HookHeldId,
 			GameClient()->m_aClients[i].m_FreezeEnd != 0 || GameClient()->m_aClients[i].m_LiveFrozen);

@@ -5,6 +5,7 @@ Run with python -I (cryptography is required). Downloads stay in disposable,
 per-request directories outside this script's directory and are never executed.
 """
 import argparse
+import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -30,6 +31,114 @@ RAW = "https://raw.githubusercontent.com/351950505/TClient/master/update/" + MAN
 FALLBACKS = ("https://github1.me3.dpdns.org/", "https://github2.me3.dpdns.org/", "https://ghfast.top/")
 LIMITS = {MANIFEST: 65536, MANIFEST + ".sig": 64, PACKAGE: 512 * 1024**2, HELPER: 32 * 1024**2}
 VERSION = r"[0-9]+(?:\.[0-9]+){1,5}"
+
+# Sent to the regional SSH host on stdin. Downloaded update assets are written
+# only to a fresh temporary directory, verified by size/hash/range, and never run.
+REMOTE_REGION_PROBE = r'''import base64, hashlib, json, re, shutil, subprocess, sys, tempfile, time
+from pathlib import Path
+from urllib.parse import urlsplit
+
+Config = json.loads(base64.b64decode("__PAYLOAD__").decode("utf-8"))
+Curl = shutil.which("curl")
+if not Curl:
+    raise RuntimeError("curl is required on regional probe host")
+
+
+def Fetch(Url, Limit, OutPath, ByteRange=None, Resume=False):
+    if urlsplit(Url).scheme != "https":
+        raise RuntimeError("HTTPS required")
+    OutPath = Path(OutPath)
+    HeaderPath = Path(str(OutPath) + ".headers")
+    Command = [Curl, "-q", "--ipv4", "--proto", "=https", "--proto-redir", "=https",
+               "--tlsv1.2", "--location", "--max-redirs", "4", "--connect-timeout", "5",
+               "--max-time", "30", "--max-filesize", str(Limit), "--retry", "0",
+               "--silent", "--show-error", "--fail", "--user-agent", Config["user_agent"],
+               "--header", "Cache-Control: no-cache", "--header", "Accept-Encoding: identity",
+               "--dump-header", str(HeaderPath), "--output", str(OutPath),
+               "--write-out", "%{http_code}\\n%{url_effective}\\n%{time_total}"]
+    if Resume:
+        Command += ["-C", "-"]
+    if ByteRange is not None:
+        Command += ["--range", ByteRange]
+    Command += ["--url", Url]
+    Started = time.monotonic()
+    Result = subprocess.run(Command, capture_output=True, timeout=37)
+    if Result.returncode:
+        raise RuntimeError("curl exit %d: %s" % (Result.returncode, Result.stderr.decode("utf-8", "replace")[-200:]))
+    Output = Result.stdout.decode("utf-8", "replace").splitlines()
+    if len(Output) != 3 or urlsplit(Output[1]).scheme != "https":
+        raise RuntimeError("invalid curl response or non-HTTPS redirect")
+    Blocks = re.split(r"(?m)^HTTP/\S+\s+\d{3}[^\r\n]*\r?\n", HeaderPath.read_text(encoding="latin1"))
+    Fields = [Line.split(":", 1) for Line in Blocks[-1].splitlines() if ":" in Line]
+    if len({Key.lower() for Key, _ in Fields}) != len(Fields):
+        raise RuntimeError("duplicate response headers")
+    Response = {"path": str(OutPath), "headers": {Key.lower(): Value.strip() for Key, Value in Fields},
+                "status": int(Output[0]), "size": OutPath.stat().st_size,
+                "seconds": max(time.monotonic() - Started, 0.000001)}
+    if Response["size"] > Limit or Response["headers"].get("content-encoding", "identity").lower() != "identity":
+        raise RuntimeError("response exceeds size limit or uses content encoding")
+    if Response["status"] not in (200, 206) or (not Resume and ByteRange is None and Response["status"] != 200):
+        raise RuntimeError("unexpected HTTP status")
+    return Response
+
+
+def Digest(PathName):
+    Hash = hashlib.sha256()
+    with open(PathName, "rb") as File:
+        for Block in iter(lambda: File.read(1024 * 1024), b""):
+            Hash.update(Block)
+    return Hash.hexdigest()
+
+
+def Verify(Response, Info):
+    if Response["size"] != Info["size"] or Digest(Response["path"]) != Info["sha256"]:
+        raise RuntimeError("download size/SHA256 mismatch")
+
+
+def CheckRange(Response, Start, End, Total):
+    if (Response["status"] != 206 or Response["headers"].get("content-range") !=
+            "bytes %d-%d/%d" % (Start, End, Total) or Response["size"] != End + 1):
+        raise RuntimeError("invalid Range 206/Content-Range or truncated body")
+
+
+def Probe(Candidate):
+    Result = {"prefix": Candidate["prefix"], "package_ok": False}
+    try:
+        with tempfile.TemporaryDirectory(prefix="tclient-mirror-probe-") as Temporary:
+            Base = Candidate["prefix"] + Config["github_prefix"]
+            Manifest = Fetch(Base + "latest/download/" + Config["manifest"], 65536, Path(Temporary) / "manifest")
+            Signature = Fetch(Base + "latest/download/" + Config["signature"], 64, Path(Temporary) / "signature")
+            if Digest(Manifest["path"]) != Config["manifest_sha256"] or Digest(Signature["path"]) != Config["signature_sha256"]:
+                raise RuntimeError("manifest/signature differs from locally authenticated pair")
+            Reference = Config["reference"]
+            DownloadBase = Base + "download/" + Reference["tag"] + "/"
+            Size, Offset = Reference["size"], 1024 * 1024
+            Full = Fetch(DownloadBase + Reference["asset"], Size, Path(Temporary) / "full.zip")
+            Verify(Full, Reference)
+            Helper = Fetch(DownloadBase + Reference["helper"]["name"], Reference["helper"]["size"], Path(Temporary) / "helper.exe")
+            Verify(Helper, Reference["helper"])
+            Partial = Fetch(DownloadBase + Reference["asset"], Offset, Path(Temporary) / "part.zip", ByteRange="0-%d" % (Offset - 1))
+            CheckRange(Partial, 0, Offset - 1, Size)
+            ResumedPath = Path(Temporary) / "resumed.zip"
+            shutil.copyfile(Partial["path"], ResumedPath)
+            Resumed = Fetch(DownloadBase + Reference["asset"], Size, ResumedPath, Resume=True)
+            CheckRange(Resumed, Offset, Size - 1, Size)
+            Verify(Resumed, Reference)
+            Result.update(package_ok=True, full_seconds=Full["seconds"],
+                          full_bytes_per_second=Size / Full["seconds"],
+                          resume_seconds=Resumed["seconds"],
+                          resume_bytes_per_second=(Size - Offset) / Resumed["seconds"],
+                          combined_bytes_per_second=(2 * Size - Offset) / (Full["seconds"] + Resumed["seconds"]),
+                          range_verified=True, sha256_verified=True, helper_verified=True,
+                          **({"edge": "cloudflare", "edge_code": Full["headers"].get("cf-ray", "").rsplit("-", 1)[-1]} if Full["headers"].get("server", "").lower() == "cloudflare" else {"edge": Full["headers"].get("server", "unknown").lower() or "unknown", "edge_code": ""}))
+    except Exception as Error:
+        Result["error"] = str(Error)[:300]
+    return Result
+
+
+Results = [Probe(Candidate) for Candidate in Config["candidates"]]
+print(json.dumps(Results, separators=(",", ":")))
+'''
 
 
 class ProbeError(Exception):
@@ -304,18 +413,36 @@ def probe_package(curl, row, reference):
     return result
 
 
+def multi_region_score(row, regions):
+    """只给所有测速地区均通过完整性检查的镜像评分，使用最慢地区速度。"""
+    if not row.get("package_ok"):
+        return None
+    speeds = [row.get("combined_bytes_per_second")]
+    for region in regions:
+        probe = row.get("regional_results", {}).get(region)
+        if not probe or not probe.get("package_ok"):
+            return None
+        speeds.append(probe.get("combined_bytes_per_second"))
+    if any(type(speed) not in (int, float) or speed <= 0 for speed in speeds):
+        return None
+    return min(speeds)
+
+
 MIN_GLOBAL_SELECTED = 2
 
 
 def select_mirrors(rows, max_selected, min_global=MIN_GLOBAL_SELECTED):
-    """按本机速度排名选择镜像，但为全球型（Cloudflare）镜像保留名额。
+    """按所有已测区域中的最慢速度排名，并为 Cloudflare 镜像保留名额。
 
-    测速点在国内，速度排名只代表国内玩家的最优顺序；海外玩家优先走官方
-    直链，但镜像列表也不能全是区域线路——入选集合里至少保留 min_global
-    个 Cloudflare 镜像（全球任一地区都能接入），不足时有多少算多少。
-    输出仍按速度排序，国内玩家看到的优先级不变。
+    每个镜像必须在本机和所有指定区域均通过完整包、helper、SHA256 与续传校验；
+    用最慢区域的下载速度排序，避免单个地区的高速度掩盖其他地区的慢线路。
+    未提供远端探测时兼容单点排名。海外玩家优先走官方直链，镜像列表仍保留
+    全球型（Cloudflare）节点名额。
     """
-    ranked = sorted(rows, key=lambda row: (-row["combined_bytes_per_second"], row["prefix"]))
+    def speed(row):
+        return row.get("selection_bytes_per_second", row.get("combined_bytes_per_second"))
+
+    ranked = sorted((row for row in rows if speed(row) is not None), key=lambda row: (-speed(row), row["prefix"]))
     global_ranked = [row for row in ranked if row.get("edge") == "cloudflare"]
     if not global_ranked:
         return ranked[:max_selected]
@@ -335,7 +462,59 @@ def select_mirrors(rows, max_selected, min_global=MIN_GLOBAL_SELECTED):
         if len(selected) >= max_selected:
             break
         take(row)
-    return sorted(selected, key=lambda row: (-row["combined_bytes_per_second"], row["prefix"]))
+    return sorted(selected, key=lambda row: (-speed(row), row["prefix"]))
+
+
+def parse_probe_nodes(values):
+    nodes, seen = [], set()
+    for value in values:
+        region, separator, host = value.partition("=")
+        if not separator or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", region) or not re.fullmatch(r"[A-Za-z0-9_.-]+", host):
+            raise ProbeError("regional probe must be REGION=SSH_ALIAS")
+        if region in seen:
+            raise ProbeError("duplicate regional probe: " + region)
+        seen.add(region)
+        nodes.append({"region": region, "host": host})
+    return nodes
+
+
+def probe_remote_region(node, candidates, user_agent, reference, canonical_pair):
+    ssh = shutil.which("ssh.exe") or shutil.which("ssh")
+    if not ssh:
+        for candidate in ("C:/Program Files/Git/usr/bin/ssh.exe", "C:/Windows/System32/OpenSSH/ssh.exe"):
+            if Path(candidate).is_file():
+                ssh = candidate
+                break
+    if not ssh:
+        raise ProbeError("ssh.exe is required for regional mirror probes")
+    payload = {
+        "candidates": [{"prefix": row["prefix"]} for row in candidates],
+        "github_prefix": GITHUB,
+        "manifest": MANIFEST,
+        "signature": MANIFEST + ".sig",
+        "manifest_sha256": hashlib.sha256(canonical_pair[0]).hexdigest(),
+        "signature_sha256": hashlib.sha256(canonical_pair[1]).hexdigest(),
+        "reference": reference,
+        "user_agent": user_agent,
+    }
+    encoded = base64.b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii")
+    program = REMOTE_REGION_PROBE.replace("__PAYLOAD__", encoded)
+    try:
+        result = subprocess.run([ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", node["host"], "python3 -"],
+                                input=program, capture_output=True, text=True, encoding="utf-8", timeout=3600)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ProbeError(f'regional probe {node["region"]} failed: {error}') from error
+    if result.returncode:
+        raise ProbeError(f'regional probe {node["region"]} failed: {result.stderr[-500:]}')
+    try:
+        rows = json.loads(result.stdout)
+    except ValueError as error:
+        raise ProbeError(f'regional probe {node["region"]} returned invalid JSON') from error
+    if not isinstance(rows, list) or len(rows) != len(candidates):
+        raise ProbeError(f'regional probe {node["region"]} returned an incomplete result set')
+    if {row.get("prefix") for row in rows} != {row["prefix"] for row in candidates}:
+        raise ProbeError(f'regional probe {node["region"]} candidate set differs')
+    return {row["prefix"]: row for row in rows}
 
 
 def make_header(selected):
@@ -404,18 +583,37 @@ def run(args):
             row = future.result()
             results[domains.index(urlsplit(row["prefix"]).netloc)] = row
             print(f"{row['prefix']}: {'verified' if row['package_ok'] else row['error']}", flush=True)
-    selected = select_mirrors([row for row in results if row.get("package_ok")], args.max_selected)
+
+    Regions = [node["region"] for node in args.probe_nodes]
+    for node in args.probe_nodes:
+        Regional = probe_remote_region(node, candidates, user_agent, reference, canonical)
+        for row in candidates:
+            RegionalResult = Regional[row["prefix"]]
+            row.setdefault("regional_results", {})[node["region"]] = RegionalResult
+            Speed = RegionalResult.get("combined_bytes_per_second")
+            Status = f"verified {Speed / 1024**2:.1f} MB/s" if RegionalResult.get("package_ok") else RegionalResult.get("error", "failed")
+            print(f"{node['region']} {row['prefix']}: {Status}", flush=True)
+
+    for row in results:
+        row["selection_bytes_per_second"] = multi_region_score(row, Regions)
+    Qualified = [row for row in results if row.get("selection_bytes_per_second") is not None]
+    selected = select_mirrors(Qualified, args.max_selected)
     if not selected:
-        raise ProbeError("no mirror passed full package/helper/SHA256/real resume verification; refusing old header")
+        raise ProbeError("no mirror passed full package/helper/SHA256/real resume verification in every probe region; refusing old header")
+    RegionsMeasured = ["local", *Regions]
+    Ranking = "minimum combined throughput across probe regions; local-only fallback" if Regions else "(full_bytes + resumed_tail_bytes) / (full_seconds + resume_seconds)"
     report = {"schema": 1, "catalog_url": CATALOG_URL, "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
               "release_version": args.release_version, "source_commit": args.source_commit, "reference": reference,
               "selected": selected, "user_agent": user_agent, "catalog_count": len(domains), "catalog_rejected": rejected,
               "canonical_results": canonical_results, "candidates": [row["prefix"] for row in candidates], "results": results,
+              "probe_regions": RegionsMeasured,
               "test_scope": {"manifest_concurrency": 6, "package_concurrency": 3, "max_candidates": args.max_candidates,
                             "max_selected": args.max_selected, "request_timeout_seconds": 30, "range_offset": 1048576,
                             "checks": ["ed25519", "official_metadata", "canonical_pair", "full_sha256_size", "helper_sha256_size", "range_206_exact", "resumed_sha256_size"],
-                            "ranking": "(full_bytes + resumed_tail_bytes) / (full_seconds + resume_seconds)",
-                            "selection_policy": {"order": "speed, ties by prefix", "global_edge_quota": f"cloudflare >= {min(MIN_GLOBAL_SELECTED, args.max_selected)} when available"},
+                            "ranking": Ranking,
+                            "selection_policy": {"order": "worst-region speed, ties by prefix" if Regions else "speed, ties by prefix",
+                                                 "measured_regions": RegionsMeasured,
+                                                 "global_edge_quota": f"cloudflare >= {min(MIN_GLOBAL_SELECTED, args.max_selected)} when available"},
                             "transient_failures": "this run only"}}
     publish(args.output, args.header, report)
     return report
@@ -429,14 +627,17 @@ def main(argv=None):
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--max-candidates", type=int, default=12)
     parser.add_argument("--max-selected", type=int, default=5)
+    parser.add_argument("--probe-node", action="append", default=[], metavar="REGION=SSH_ALIAS",
+                        help="run the full package/helper/Range/SHA256 probe from an additional region via SSH")
     args = parser.parse_args(argv)
-    if (not 1 <= args.max_candidates <= 12 or not 1 <= args.max_selected <= 5
+    if (not 1 <= args.max_candidates <= 12 or not 1 <= args.max_selected <= 5 or len(args.probe_node) > 4
             or not re.fullmatch(VERSION, args.release_version) or not re.fullmatch(r"[a-fA-F0-9]{40}", args.source_commit)):
-        parser.error("require candidates=1..12, selected=1..5, numeric dotted version and full 40-hex commit")
+        parser.error("require candidates=1..12, selected=1..5, probe nodes=0..4, numeric dotted version and full 40-hex commit")
     args.repo, args.output, args.header = args.repo.resolve(), args.output.resolve(), args.header.resolve()
     if args.output == args.header:
         parser.error("output and header must be different paths")
     try:
+        args.probe_nodes = parse_probe_nodes(args.probe_node)
         run(args)
         return 0
     except (ProbeError, OSError, ValueError, ImportError) as error:

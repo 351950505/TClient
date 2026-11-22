@@ -38,7 +38,7 @@ from urllib.parse import quote
 DEFAULT_REPO = Path("D:/TaterClient-src")
 DEFAULT_WORK_ROOT = Path("D:/kehuduan")
 DEFAULT_PRIVATE_KEY = Path("D:/kehuduan/tclient-update-ed25519-private.pem")
-GH_EXE = Path("D:/kehuduan/release-17856/extract/bin/gh.exe")
+GH_EXE = Path(shutil.which("gh.exe") or shutil.which("gh") or (Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "GitHub CLI" / "gh.exe"))
 HELPER_LOCK = Path(__file__).resolve().parent.parent / "other" / "island_media_monitor" / "helper-lock.json"
 GITHUB_REPO = "351950505/TClient"
 RAW_MANIFEST_URL = "https://raw.githubusercontent.com/" + GITHUB_REPO + "/master/update/TClient-update-win64.json"
@@ -57,6 +57,7 @@ OPTIONAL_SPEC_DEFAULTS = {
     "timestamp_url": "https://timestamp.digicert.com",
     "publish": False,
     "expected_master": "",  # optional: assert master at this SHA before the sync push
+    "mirror_probe_nodes": [],  # additional regional probes (e.g. [{'region': 'cn-guangzhou', 'host': 'aliyun'}])
 }
 
 
@@ -124,6 +125,17 @@ def phase_preflight(spec, paths, state):
     # 时弹 mismatch 弹窗，链上必须提前拦下
     data_version_txt = (repo / "data/tclient/data_version.txt").read_text(encoding="utf-8-sig").strip()
     require(data_version_txt == f'TClient {spec["version"]}', f"data_version.txt says '{data_version_txt}', expected 'TClient {spec['version']}'")
+    probe_nodes = spec.get("mirror_probe_nodes", [])
+    require(isinstance(probe_nodes, list) and len(probe_nodes) <= 4, "release spec supports at most 4 regional mirror probes")
+    probe_regions = set()
+    for node in probe_nodes:
+        require(isinstance(node, dict), "regional mirror probe must be an object")
+        region, host = node.get("region", ""), node.get("host", "")
+        require(re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", region) and re.fullmatch(r"[A-Za-z0-9_.-]+", host), "invalid regional mirror probe region/SSH alias")
+        require(region not in probe_regions, "duplicate regional mirror probe: " + region)
+        probe_regions.add(region)
+    if probe_nodes:
+        require(any(region.startswith("cn-") for region in probe_regions), "regional mirror probes must include a China region")
     check_helper_lock(spec)
     translation_gate = Path(__file__).resolve().parent / "check_translations.py"
     require(translation_gate.is_file(), f"translation gate missing: {translation_gate}")
@@ -132,6 +144,13 @@ def phase_preflight(spec, paths, state):
         capture_output=True, text=True, encoding="utf-8", timeout=300,
     )
     require(gate.returncode == 0, "translation gate failed:\n" + gate.stdout[-2000:] + gate.stderr[-2000:])
+    build_options_test = Path(__file__).resolve().parent / "test_release_build_options.py"
+    require(build_options_test.is_file(), f"release build options test missing: {build_options_test}")
+    build_options = subprocess.run(
+        [sys.executable, "-I", str(build_options_test)],
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    require(build_options.returncode == 0, "release build options test failed:\n" + build_options.stdout[-2000:] + build_options.stderr[-2000:])
     notes = Path(spec["notes_path"])
     require(notes.is_file() and notes.read_text(encoding="utf-8").strip(), "release notes missing or empty")
     require(Path(spec["monitor_path"]).is_file(), "monitor exe missing")
@@ -150,9 +169,16 @@ def verify_mirror_inputs(spec, paths, state, client=None, fresh=False):
     report = json.loads(report_path.read_text(encoding="utf-8"))
     require(report.get("schema") == 1 and report.get("catalog_url") == "https://github.akams.cn/", "mirror report has an unexpected source or schema")
     require(report.get("release_version") == spec["version"] and report.get("source_commit") == spec["target_commit"], "mirror report belongs to a different release or commit")
+    required_regions = {"local", *(node["region"] for node in spec["mirror_probe_nodes"])}
+    measured_regions = set(report.get("probe_regions", []))
+    require(required_regions.issubset(measured_regions), "mirror report lacks required regional measurements")
     require(report.get("header_sha256") == sha256_of(header), "mirror header differs from its tested report; rebuild from a fresh probe")
     selected = report.get("selected", [])
     require(1 <= len(selected) <= 5, "no verified release mirrors selected")
+    for item in selected:
+        regional = item.get("regional_results", {})
+        require(all(regional.get(region, {}).get("package_ok") for region in required_regions - {"local"}),
+                "selected mirror lacks complete package/resume verification in a required region")
     prefixes = [item["prefix"] for item in selected]
     require(len(set(prefixes)) == len(prefixes) and all(re.fullmatch(r"https://[a-z0-9.-]+/", prefix) for prefix in prefixes), "invalid or repeated mirror prefix")
     record = {"report": str(report_path), "report_sha256": sha256_of(report_path), "header_sha256": sha256_of(header), "selected": prefixes, "reference": report["reference"]}
@@ -171,18 +197,30 @@ def verify_mirror_inputs(spec, paths, state, client=None, fresh=False):
     return record
 
 
+def release_mirror_probe_command(python, script, repo, report, header, spec):
+    command = [
+        str(python), "-I", str(script), "--repo", str(repo),
+        "--output", str(report), "--header", str(header),
+        "--release-version", spec["version"], "--source-commit", spec["target_commit"],
+    ]
+    for node in spec["mirror_probe_nodes"]:
+        command += ["--probe-node", f'{node["region"]}={node["host"]}']
+    return command
+
+
 def phase_mirror_probe(spec, paths, state):
     script = Path(spec["repo"]) / "tclient_scripts/probe_update_mirrors.py"
     require(script.is_file(), f"mirror probe missing: {script}")
     report, header = mirror_files(spec, paths)
-    subprocess.run([
-        sys.executable, "-I", str(script), "--repo", str(spec["repo"]),
-        "--output", str(report), "--header", str(header),
-        "--release-version", spec["version"], "--source-commit", spec["target_commit"],
-    ], check=True, timeout=1800)
+    subprocess.run(release_mirror_probe_command(sys.executable, script, spec["repo"], report, header, spec),
+                   check=True, timeout=5400)
     record = verify_mirror_inputs(spec, paths, state, fresh=True)
     shutil.copyfile(header, paths["root"] / "update-mirrors.h")
     return record
+
+
+def release_cmake_configure_command(cmake, repo, build_dir):
+    return [str(cmake), "-S", str(repo), "-B", str(build_dir), "-DTCLIENT_RELEASE_MIRRORS=ON", "-DVULKAN=ON"]
 
 
 def phase_build(spec, paths, state):
@@ -190,7 +228,9 @@ def phase_build(spec, paths, state):
     require(cmake.is_file(), "VS2026 cmake not found")
     verify_mirror_inputs(spec, paths, state, fresh=True)
     build_dir = Path(spec["build_dir"])
-    subprocess.run([str(cmake), "-S", str(spec["repo"]), "-B", str(build_dir), "-DTCLIENT_RELEASE_MIRRORS=ON"], check=True, timeout=600)
+    subprocess.run(release_cmake_configure_command(cmake, spec["repo"], build_dir), check=True, timeout=600)
+    cache = (build_dir / "CMakeCache.txt").read_text(encoding="utf-8-sig")
+    require(re.search(r"^VULKAN:BOOL=ON$", cache, re.M), "release build did not enable the Vulkan backend")
     subprocess.run([str(cmake), "--build", str(build_dir), "--config", "Release", "--target", "game-client", "TClientUpdater", "testrunner", "--parallel"], check=True, timeout=3600)
     repo = Path(spec["repo"])
     libs = repo / "ddnet-libs"

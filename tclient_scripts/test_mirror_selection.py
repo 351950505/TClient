@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from probe_update_mirrors import MIN_GLOBAL_SELECTED, select_mirrors
+from probe_update_mirrors import MIN_GLOBAL_SELECTED, multi_region_score, select_mirrors
 
 
 def row(prefix, speed, edge):
@@ -78,7 +78,26 @@ def main():
     tied = [row("t2.example/", 50.0, "cloudflare"), row("t1.example/", 50.0, "cloudflare")]
     assert [entry["prefix"] for entry in select_mirrors(tied, 2)] == ["t1.example/", "t2.example/"], "tie broken by prefix"
 
-    print(f"OK: mirror selection keeps {MIN_GLOBAL_SELECTED} global-edge slots, speed order and degeneration verified")
+    # 7) 国内多点按最慢已测区域评分；任一地区不可达则不选
+    local_fast = row("local-fast.example/", 1000.0, "cloudflare")
+    local_fast["package_ok"] = True
+    local_fast["regional_results"] = {"cn-guangzhou": {"package_ok": True, "combined_bytes_per_second": 100.0}}
+    balanced = row("balanced.example/", 300.0, "cloudflare")
+    balanced["package_ok"] = True
+    balanced["regional_results"] = {"cn-guangzhou": {"package_ok": True, "combined_bytes_per_second": 250.0}}
+    unreachable = row("unreachable.example/", 900.0, "cloudflare")
+    unreachable["package_ok"] = True
+    unreachable["regional_results"] = {"cn-guangzhou": {"package_ok": False, "error": "timeout"}}
+    local_fast["selection_bytes_per_second"] = multi_region_score(local_fast, ["cn-guangzhou"])
+    balanced["selection_bytes_per_second"] = multi_region_score(balanced, ["cn-guangzhou"])
+    unreachable["selection_bytes_per_second"] = multi_region_score(unreachable, ["cn-guangzhou"])
+    assert local_fast["selection_bytes_per_second"] == 100.0, "score should use worst measured region"
+    assert balanced["selection_bytes_per_second"] == 250.0, "balanced score incorrect"
+    assert unreachable["selection_bytes_per_second"] is None, "regionally unreachable mirror must be excluded"
+    selected = select_mirrors([local_fast, balanced, unreachable], 1)
+    assert selected[0]["prefix"] == "balanced.example/", "selection should favor a mirror that is fast in both regions"
+
+    print(f"OK: mirror selection keeps {MIN_GLOBAL_SELECTED} global-edge slots, balances measured regions and preserves speed-order fallback")
     return 0
 
 

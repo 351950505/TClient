@@ -27,9 +27,9 @@ namespace tclient_hook_tile
 		return CachedFrame != CurrentFrame || CachedClientId != ClientId;
 	}
 
-	inline bool FreezeHighlightMarked(bool Enabled, bool PredictedTarget, bool HookHeldTarget, bool Frozen)
+	inline bool FreezeHighlightMarked(bool Enabled, bool PredictedTarget, bool HookedTarget, bool Frozen)
 	{
-		return Enabled && (PredictedTarget || HookHeldTarget) && Frozen;
+		return Enabled && PredictedTarget && !HookedTarget && Frozen;
 	}
 
 	// 网络钩点为整数，碰撞按 round_to_int 取整；容许接缝两侧各 1.5 世界单位。

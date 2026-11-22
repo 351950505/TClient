@@ -40,7 +40,7 @@ TEST(ClientHookTile, PredictionCacheKeyChangesForNextFrameAndTarget)
 	EXPECT_TRUE(PredictionCacheKeyChanged(UINT64_MAX - 1, 4, UINT64_MAX, 4));
 }
 
-TEST(ClientHookTile, FreezeHighlightToggleGatesPredictedAndHookHeldTargets)
+TEST(ClientHookTile, FreezeHighlightRequiresEnabledPredictedUnhookedFrozenTarget)
 {
 	using tclient_hook_tile::FreezeHighlightMarked;
 	EXPECT_FALSE(FreezeHighlightMarked(false, true, false, true));
@@ -48,7 +48,14 @@ TEST(ClientHookTile, FreezeHighlightToggleGatesPredictedAndHookHeldTargets)
 	EXPECT_FALSE(FreezeHighlightMarked(true, false, false, true));
 	EXPECT_FALSE(FreezeHighlightMarked(true, false, true, false));
 	EXPECT_TRUE(FreezeHighlightMarked(true, true, false, true));
-	EXPECT_TRUE(FreezeHighlightMarked(true, false, true, true));
+	EXPECT_FALSE(FreezeHighlightMarked(true, false, true, true));
+}
+
+TEST(ClientHookTile, HookedFrozenPredictionTargetIsNotHighlighted)
+{
+	using tclient_hook_tile::FreezeHighlightMarked;
+	EXPECT_TRUE(FreezeHighlightMarked(true, true, false, true));
+	EXPECT_FALSE(FreezeHighlightMarked(true, true, true, true));
 }
 
 TEST(ClientHookTile, InteriorSelectsOnlyOne)

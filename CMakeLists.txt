@@ -2857,6 +2857,8 @@ if(CLIENT)
     components/menus.cpp
     components/menus.h
     components/menus_browser.cpp
+    components/menus_checkbox_help.cpp
+    components/menus_checkbox_help.h
     components/menus_demo.cpp
     components/menus_ingame.cpp
     components/menus_ingame_touch_controls.cpp
@@ -3777,6 +3779,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     str_test.cpp
     swap_endian_test.cpp
     tclient_auto_session_log_test.cpp
+    tclient_checkbox_help_test.cpp
     tclient_console_filter_test.cpp
     tclient_drown_board_test.cpp
     tclient_fastinput_test.cpp
@@ -3811,6 +3814,8 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     src/engine/client/sqlite.cpp
     src/game/client/components/censor.cpp
     src/game/client/components/censor.h
+    src/game/client/components/menus_checkbox_help.cpp
+    src/game/client/components/menus_checkbox_help.h
     src/game/client/components/tclient/gradient_math.cpp
     src/game/client/components/tclient/gradient_math.h
     src/game/client/skin.cpp

@@ -1,0 +1,173 @@
+/* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
+/* If you are missing that file, acquire a complete release at teeworlds.com.                */
+#include "menus_checkbox_help.h"
+
+#include <engine/shared/config.h>
+
+// 只收录绑定真实配置变量的复选框（勾选后立刻生效的开关）。
+// 滑块、包装开关（局部临时变量）与普通 UI 复选框不在表内，不显示悬停说明。
+// 死开关（无运行时读取点，如 tc_pred_margin_in_freeze）不入表，避免对玩家做假承诺。
+// 文案按成员名排序；新增条目须同时补 data/tclient/languages 两本词典
+// （scripts/test_checkbox_tooltip_wiring.js 会校验词典覆盖）。
+const SCheckBoxHelpEntry g_aCheckBoxHelp[] = {
+	{&g_Config.m_ClFreezeStars, "Show legacy star particles on frozen tees."},
+	{&g_Config.m_ClSubTickAiming, "Send aiming data at sub-tick accuracy."},
+	{&g_Config.m_MeClientBadge, "Show the TClient penguin beside TClient players on your scoreboard; this does not change the identity broadcast."},
+	{&g_Config.m_MeMuteFinishFeed, "Hide race-finish messages from your local display."},
+	{&g_Config.m_MeMuteKillFeed, "Hide kill-feed messages from your local display."},
+	{&g_Config.m_MeMuteSystemChat, "Hide system and server chat messages from your local display."},
+	{&g_Config.m_MeMuteTeamChat, "Hide team-chat messages from your local display."},
+	{&g_Config.m_MeMuteWhisper, "Hide whisper messages from your local display."},
+	{&g_Config.m_MeSteamHide, "Keep the client disconnected from Steam so friends cannot see you playing; turning this off reconnects immediately, but a failed reconnect requires a restart."},
+	{&g_Config.m_MeStreamerFilterWords, "Filter sensitive words in chat, player names, and clans, including words from an optional custom list; requires Streamer Mode."},
+	{&g_Config.m_MeStreamerHideNames, "Replace non-friends' in-game names with client IDs and hide their clans; server-list names use asterisks, while you and friends remain visible. Requires Streamer Mode."},
+	{&g_Config.m_MeStreamerHideSkins, "Show non-friends with the default skin; your skin and friends' skins are unaffected. Requires Streamer Mode."},
+	{&g_Config.m_MeStreamerMode, "Enable streamer privacy handling: country flags stay hidden, sub-options take effect, and your name and skin remain visible to you and friends."},
+	{&g_Config.m_TcAncientInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcAntiPingImproved, "Use TClient's alternate antiping smoothing algorithm."},
+	{&g_Config.m_TcAntiPingNegativeBuffer, "Retain instability information longer for more cautious prediction."},
+	{&g_Config.m_TcAntiPingStableDirection, "Use more optimistic prediction along a tee's stable direction."},
+	{&g_Config.m_TcAutoMargin, "Adjust the prediction margin from measured latency and jitter; restore its previous value when disabled or disconnected."},
+	{&g_Config.m_TcAutoReplyMinimized, "Auto-answer whispers while the window is hidden."},
+	{&g_Config.m_TcAutoReplyMuted, "Auto-answer whispers from players you muted."},
+	{&g_Config.m_TcAutoVoteWhenFar, "Vote no on map votes after enough playtime."},
+	{&g_Config.m_TcAzureInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcBestInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcChangeNameNearFinish, "Rename you to the finish name near the finish."},
+	{&g_Config.m_TcCloudInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcColorFreeze, "Keep frozen tees in their own skin colors."},
+	{&g_Config.m_TcDeltaInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcDrownBoard, "Show your team's board on Gores maps; drownings are inferred from death events, alongside saves and player hooks."},
+	{&g_Config.m_TcDrownBoardIncludeTeam0, "Include Team 0 players and their stats in the board."},
+	{&g_Config.m_TcDrownBoardShowTee, "Show each player's Tee beside their row in the board."},
+	{&g_Config.m_TcFInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcFastInput, "Predict your tee from your input before the next game tick."},
+	{&g_Config.m_TcFastInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcFastInputRepredictHook, "Re-predict Fast Input when hook direction changes mid-tick; unavailable with Sub-Tick aiming."},
+	{&g_Config.m_TcFreezeEntryHighlight, "Flash the freeze tile when your own Tee enters it."},
+	{&g_Config.m_TcFrozenHudTeamOnly, "Show the panel only while in a team."},
+	{&g_Config.m_TcFrozenKatana, "Frozen players visibly hold a katana."},
+	{&g_Config.m_TcFrozenTeesAliveOnly, "List only unfrozen teammates in the panel."},
+	{&g_Config.m_TcGradientClan, "Animate player clan names with the selected gradient; the Apply to setting determines whose clans change."},
+	{&g_Config.m_TcGradientEverything, "Apply the selected gradient to text without an explicit color; text with its own color is left unchanged."},
+	{&g_Config.m_TcGradientName, "Animate player names with the selected gradient; the Apply to setting determines whose names change."},
+	{&g_Config.m_TcGradientSkin, "Animate Tee body and feet colors with the selected gradient; the Apply to setting determines whose skins change."},
+	{&g_Config.m_TcHideFrozenGhosts, "Hide ghosts while that player is frozen."},
+	{&g_Config.m_TcHookTileHighlight, "Color the tile your hook is holding; at a seam, both adjacent tiles are highlighted."},
+	{&g_Config.m_TcHookTileHighlightFreeze, "Tint a frozen Tee when the current hook prediction can reach it; this is separate from tile highlighting and landing preview."},
+	{&g_Config.m_TcHookTileHighlightGlow, "Add a glow around a shown hooked or previewed tile; a tile highlight or landing preview must be visible."},
+	{&g_Config.m_TcHookTileHighlightPredict, "Preview the tile your aim would hook before firing; it shares the hooked-tile color and opacity settings."},
+	{&g_Config.m_TcIndicatorHideVisible, "Hide indicators for tees already on screen."},
+	{&g_Config.m_TcIndicatorTeamOnly, "Show indicators only after joining a team."},
+	{&g_Config.m_TcIndicatorTees, "Draw tiny tees instead of circles."},
+	{&g_Config.m_TcIndicatorVariableDistance, "Push indicators outward as players get farther."},
+	{&g_Config.m_TcInputLinearVisual, "Use linear interpolation for players and flying hooks, independently of input mode."},
+	{&g_Config.m_TcIslandDoubleLyrics, "Preview the next lyric under the current one."},
+	{&g_Config.m_TcIslandEnable, "Show the Dynamic Island music capsule."},
+	{&g_Config.m_TcIslandLinkStatus, "Show probe loss, snapshot gaps and RTT."},
+	{&g_Config.m_TcIslandLocalClock, "Show your computer's local time."},
+	{&g_Config.m_TcIslandLyricTraditional, "Render fetched lyrics in traditional Chinese."},
+	{&g_Config.m_TcIslandNotch, "Dock the capsule against the screen top edge."},
+	{&g_Config.m_TcIslandShowLyrics, "Display lyrics synced to the song."},
+	{&g_Config.m_TcIslandShowProgress, "Show the round timer on the island."},
+	{&g_Config.m_TcIslandShowSongProgress, "Add a song progress rail at the bottom."},
+	{&g_Config.m_TcIslandTransparent, "Drop the black capsule, use outlined text."},
+	{&g_Config.m_TcJitterBuffer, "Adapt snapshot interpolation delay when network timing varies, to smooth motion."},
+	{&g_Config.m_TcJukkiInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcLightAncientInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcLightInputHook, "Use a separate prediction amount for Light hook interactions."},
+	{&g_Config.m_TcLightInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcMeowInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcMiniDebug, "Overlay your position and aim angle."},
+	{&g_Config.m_TcMiniVoteHud, "Shrink the vote interface into a mini panel."},
+	{&g_Config.m_TcModernChat, "Show message-colored chat cards; hover over chat with a menu open to scroll its history."},
+	{&g_Config.m_TcModernFreezeTimer, "Show the modern freeze countdown in the HUD."},
+	{&g_Config.m_TcModernGuns, "Use the compact modern weapon and jump HUD layout."},
+	{&g_Config.m_TcModernVote, "Use the modern vote panel."},
+	{&g_Config.m_TcMovingTilesEntities, "Draw moving tiles inside the entities layer."},
+	{&g_Config.m_TcNameplateCountry, "Add the player's country flag to the nameplate."},
+	{&g_Config.m_TcNameplatePingCircle, "Add a latency-colored ring to each nameplate."},
+	{&g_Config.m_TcNameplateSkins, "Append the skin name text to the nameplate."},
+	{&g_Config.m_TcNextInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcNotifyWhenLast, "Alert when you are the last one alive."},
+	{&g_Config.m_TcNovapilotClamp, "Reject NovaPilot positions on freeze tiles or outside its plausible range."},
+	{&g_Config.m_TcNovapilotCurved, "Use curved interpolation for NovaPilot movement rendering when applicable."},
+	{&g_Config.m_TcNovapilotInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcNovapilotJitter, "Adjust NovaPilot prediction using variation in recent timing samples."},
+	{&g_Config.m_TcOutline, "Draw outline strokes around map tiles."},
+	{&g_Config.m_TcOutlineEntities, "Restrict outlines to the entities layer."},
+	{&g_Config.m_TcPetShow, "Show a small pet following your tee."},
+	{&g_Config.m_TcPingwheel, "Enable the Ping wheel to send signals and show signals received from others."},
+	{&g_Config.m_TcPlayerIndicator, "Radially mark other players around your tee."},
+	{&g_Config.m_TcPlayerIndicatorFreeze, "Only indicate frozen players."},
+	{&g_Config.m_TcRainbowHook, "Cycle your own hook through rainbow hues."},
+	{&g_Config.m_TcRainbowOthers, "Apply the rainbow cycling to other tees too."},
+	{&g_Config.m_TcRainbowTees, "Cycle your own tee body through rainbow hues."},
+	{&g_Config.m_TcRainbowWeapon, "Cycle your own weapon through rainbow hues."},
+	{&g_Config.m_TcRelayCf, "Also route Ping signals through the Cloudflare relay besides direct UDP."},
+	{&g_Config.m_TcRemoveAnti, "Reduce local player prediction and antiping smoothing while frozen."},
+	{&g_Config.m_TcRenderCursorSpec, "Keep your aim cursor visible in freeview."},
+	{&g_Config.m_TcRenderGhostAsCircle, "Draw ghosts as plain circles, not tees."},
+	{&g_Config.m_TcRenderWeaponsAsGun, "Draw pistol sprites for most weapons."},
+	{&g_Config.m_TcResetBindWheelMouse, "Start the Bind Wheel selector centered when it opens."},
+	{&g_Config.m_TcSaikoInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcSalatikInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcShowCenter, "Draw screen-center crosshair reference lines."},
+	{&g_Config.m_TcShowFrozenHud, "Show a frozen teammates overview panel."},
+	{&g_Config.m_TcShowFrozenHudSkins, "Draw real skins instead of ninja figures."},
+	{&g_Config.m_TcShowOthersGhosts, "Show ghosts of other players' unpredicted positions."},
+	{&g_Config.m_TcShowSettingsGear, "Mark players with open menus with a gear icon."},
+	{&g_Config.m_TcShowTuneZoneColors, "Color tune-zone tiles by zone number; without this option, entity tiles have no added tune-zone colors."},
+	{&g_Config.m_TcSnowInputHookAmountEnabled, "Use a separate prediction amount for Snow hook interactions."},
+	{&g_Config.m_TcSnowInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcSpectatorFriendsFirst, "Put friends in a separate group at the top of the spectator selector, before everyone else."},
+	{&g_Config.m_TcStatusBar, "Show the bottom status bar."},
+	{&g_Config.m_TcStatusBar12HourClock, "Use 12-hour format for the clock."},
+	{&g_Config.m_TcStatusBarLabels, "Label each status bar item with text."},
+	{&g_Config.m_TcStatusBarLocalTimeSeconds, "Append seconds to the status bar clock."},
+	{&g_Config.m_TcSwapGhosts, "Render the predicted position as the ghost instead."},
+	{&g_Config.m_TcTeeTrail, "Draw a motion trail behind moving tees."},
+	{&g_Config.m_TcTeeTrailFade, "Let the trail fade out along its length."},
+	{&g_Config.m_TcTeeTrailOthers, "Draw motion trails for other players too."},
+	{&g_Config.m_TcTeeTrailTaper, "Let the trail narrow along its length."},
+	{&g_Config.m_TcTranslateAuto, "Translate incoming chat automatically."},
+	{&g_Config.m_TcTranslateOutgoing, "Translate outgoing chat before sending."},
+	{&g_Config.m_TcUnpredOthersInFreeze, "Stop predicting other players while your tee is frozen."},
+	{&g_Config.m_TcWarList, "Enable all warlist color highlighting."},
+	{&g_Config.m_TcWarListAllowDuplicates, "Allow adding the same entry twice."},
+	{&g_Config.m_TcWarListChat, "Color names in chat by warlist."},
+	{&g_Config.m_TcWarListIndicator, "Let warlist groups drive the indicators."},
+	{&g_Config.m_TcWarListIndicatorAll, "Indicate players from every warlist group."},
+	{&g_Config.m_TcWarListIndicatorColors, "Prefer warlist colors over freeze-state colors."},
+	{&g_Config.m_TcWarListIndicatorEnemy, "Indicate players from the first group."},
+	{&g_Config.m_TcWarListIndicatorTeam, "Indicate players from the second group."},
+	{&g_Config.m_TcWarListScoreboard, "Color names on the scoreboard by warlist."},
+	{&g_Config.m_TcWarListShowClan, "Show war players' clan on their nameplate."},
+	{&g_Config.m_TcWarListSpectate, "Color spectator menu entries by warlist."},
+	{&g_Config.m_TcWaterHammerHighlight, "Mark same-team frozen Tees when they fire the hammer; your Tee and dummy are included only if the self option is enabled."},
+	{&g_Config.m_TcWaterHammerHighlightSelf, "Include your own frozen Tee and dummy in hook or hammer highlights; at least one of those highlights must be enabled."},
+	{&g_Config.m_TcWaterHammerSeparateColors, "Use separate body and feet colors for hook and hammer highlights instead of sharing one pair."},
+	{&g_Config.m_TcWaterHookHighlight, "Mark same-team frozen Tees when they use their hook; your Tee and dummy are included only if the self option is enabled."},
+	{&g_Config.m_TcWhiteFeet, "Force every tee's feet to pure white."},
+	{nullptr, nullptr},
+};
+
+int NumCheckBoxHelpEntries()
+{
+	int Count = 0;
+	while(g_aCheckBoxHelp[Count].m_pVariable)
+		Count++;
+	return Count;
+}
+
+const char *FindCheckBoxHelpText(const int *pVariable)
+{
+	if(!pVariable)
+		return nullptr;
+	for(const SCheckBoxHelpEntry &Entry : g_aCheckBoxHelp)
+	{
+		if(Entry.m_pVariable == pVariable)
+			return Entry.m_pHelp;
+	}
+	return nullptr;
+}

@@ -448,7 +448,7 @@ void CMenus::RenderSettingsTClient(CUIRect MainView)
 	// 最后一个页签（或级联全藏）时会把选中项推出数组末端，正文永久空白
 	//（2026-11-20 审查 P3-6）。
 	if(!IgnoreTabMask && (s_CurCustomTab < 0 || s_CurCustomTab >= NUMBER_OF_TCLIENT_TABS ||
-		IsFlagSet(g_Config.m_TcTClientSettingsTabs, s_CurCustomTab)))
+				     IsFlagSet(g_Config.m_TcTClientSettingsTabs, s_CurCustomTab)))
 	{
 		for(int Off = 1; Off <= NUMBER_OF_TCLIENT_TABS; ++Off)
 		{
@@ -559,20 +559,20 @@ void CMenus::RenderSettingsTClientModern(CUIRect MainView)
 	Ui()->DoLabel(&Label, TCLocalize("Map Layers"), HeadlineFontSize, TEXTALIGN_ML);
 	Column.HSplitTop(MarginSmall, nullptr, &Column);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcShowTuneZoneColors, TCLocalize("Show tune zone colors"), &g_Config.m_TcShowTuneZoneColors, &Column, LineSize);
-		Column.HSplitTop(LineSize, &Label, &Column);
-		Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
-		Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-		Column.HSplitTop(HeadlineHeight, &Label, &Column);
-		Ui()->DoLabel(&Label, TCLocalize("Freeze tile highlight"), HeadlineFontSize, TEXTALIGN_ML);
-		Column.HSplitTop(MarginSmall, nullptr, &Column);
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFreezeEntryHighlight, TCLocalize("Highlight the freeze tile you touch"), &g_Config.m_TcFreezeEntryHighlight, &Column, LineSize);
-		if(g_Config.m_TcFreezeEntryHighlight)
-		{
-			static CButtonContainer s_FreezeEntryHighlightColor;
-			DoLine_ColorPicker(&s_FreezeEntryHighlightColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Freeze tile highlight color"), &g_Config.m_TcFreezeEntryHighlightColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcFreezeEntryHighlightColor)), false);
-		}
-		Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
-		// ***** 左列 · 钩子显示 ***** //
+	Column.HSplitTop(LineSize, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("When disabled, tune zones use your entity tiles without added colors."), EditBoxFontSize, TEXTALIGN_TL);
+	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
+	Column.HSplitTop(HeadlineHeight, &Label, &Column);
+	Ui()->DoLabel(&Label, TCLocalize("Freeze tile highlight"), HeadlineFontSize, TEXTALIGN_ML);
+	Column.HSplitTop(MarginSmall, nullptr, &Column);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFreezeEntryHighlight, TCLocalize("Highlight the freeze tile you touch"), &g_Config.m_TcFreezeEntryHighlight, &Column, LineSize);
+	if(g_Config.m_TcFreezeEntryHighlight)
+	{
+		static CButtonContainer s_FreezeEntryHighlightColor;
+		DoLine_ColorPicker(&s_FreezeEntryHighlightColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &Column, TCLocalize("Freeze tile highlight color"), &g_Config.m_TcFreezeEntryHighlightColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcFreezeEntryHighlightColor)), false);
+	}
+	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
+	// ***** 左列 · 钩子显示 ***** //
 	Column.HSplitTop(MarginBetweenSections, nullptr, &Column);
 	Column.HSplitTop(HeadlineHeight, &Label, &Column);
 	Ui()->DoLabel(&Label, TCLocalize("Hook display"), HeadlineFontSize, TEXTALIGN_ML);
@@ -1085,7 +1085,6 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFastInput, TCLocalize("Fast Input (reduced visual delay)"), &g_Config.m_TcFastInput, &Column, LineSize);
 
-
 	// 快速输入模式选择（照 alpha 客户端顺序：Tater/Ancient/Next/Meow/Snow/Salatik/F，对应 mode 0/6/3/1/2/5/7；
 	// 8~11 = BestClient 四模式 Best/Saiko/Delta/Cloud，接在 F 后；12~14 = Light/Azure/BCL-Ancient；
 	// 15/16 = 2026-11-19 对齐 Nova 的 Fast (JuKKi)/NovaPilot；mode 4 历史空位不出现）
@@ -1311,17 +1310,28 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcAutoMargin, TCLocalize("Auto margin"), &g_Config.m_TcAutoMargin, &Column, LineSize);
 	{
 		// [DUP-UPSTREAM] 开关：勾上=自适应上限3，取消=0关闭
+		// 显式拆行以便给包装开关挂悬停说明（不走通用配置表：pValue 是局部变量）
 		int DupEnabled = g_Config.m_ClDupUpstream > 0;
 		static int s_DupUpstreamToggle;
-		if(DoButton_CheckBoxAutoVMarginAndSet(&s_DupUpstreamToggle, TCLocalize("Adaptive upstream duplication (anti packet loss)"), &DupEnabled, &Column, LineSize))
+		Column.HSplitTop(LineSize, &Button, &Column);
+		if(DoButton_CheckBox(&s_DupUpstreamToggle, TCLocalize("Adaptive upstream duplication (anti packet loss)"), DupEnabled, &Button))
+		{
+			DupEnabled = !DupEnabled;
 			g_Config.m_ClDupUpstream = DupEnabled ? 3 : 0;
+		}
+		GameClient()->m_Tooltips.DoToolTip(&s_DupUpstreamToggle, &Button, TCLocalize("Resends packets until the server confirms them, so hits still register on bad connections."));
 		// [DUP-UPSTREAM 双模式] 发包方式：0=背靠背（原版），1=错峰铺开（抗突发丢包）；仅双发开启时显示
 		if(DupEnabled)
 		{
 			int DupSpread = g_Config.m_ClDupSendMode == 1;
 			static int s_DupSpreadToggle;
-			if(DoButton_CheckBoxAutoVMarginAndSet(&s_DupSpreadToggle, TCLocalize("Spread duplicate packets (anti burst loss)"), &DupSpread, &Column, LineSize))
+			Column.HSplitTop(LineSize, &Button, &Column);
+			if(DoButton_CheckBox(&s_DupSpreadToggle, TCLocalize("Spread duplicate packets (anti burst loss)"), DupSpread, &Button))
+			{
+				DupSpread = !DupSpread;
 				g_Config.m_ClDupSendMode = DupSpread ? 1 : 0;
+			}
+			GameClient()->m_Tooltips.DoToolTip(&s_DupSpreadToggle, &Button, TCLocalize("Sends the copies a few milliseconds apart instead of back to back."));
 			Column.HSplitTop(LineSize, &Button, &Column);
 			DoSliderWithScaledValue(&g_Config.m_ClDupSpreadMs, &g_Config.m_ClDupSpreadMs, &Button, TCLocalize("Spread interval"), 1, 15, 1, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_NOCLAMPVALUE, "ms");
 		}
@@ -1712,12 +1722,12 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 	if(g_Config.m_TcIslandEnable)
 	{
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandNotch, TCLocalize("Notch style (attach to top edge)"), &g_Config.m_TcIslandNotch, &Column, LineSize);
-			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowLyrics, TCLocalize("Show synced lyrics"), &g_Config.m_TcIslandShowLyrics, &Column, LineSize);
-			if(g_Config.m_TcIslandShowLyrics)
-			{
-				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandDoubleLyrics, TCLocalize("Two-line lyrics (current + next)"), &g_Config.m_TcIslandDoubleLyrics, &Column, LineSize);
-				DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandLyricTraditional, TCLocalize("Traditional Chinese lyrics (default simplified)"), &g_Config.m_TcIslandLyricTraditional, &Column, LineSize);
-			}
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowLyrics, TCLocalize("Show synced lyrics"), &g_Config.m_TcIslandShowLyrics, &Column, LineSize);
+		if(g_Config.m_TcIslandShowLyrics)
+		{
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandDoubleLyrics, TCLocalize("Two-line lyrics (current + next)"), &g_Config.m_TcIslandDoubleLyrics, &Column, LineSize);
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandLyricTraditional, TCLocalize("Traditional Chinese lyrics (default simplified)"), &g_Config.m_TcIslandLyricTraditional, &Column, LineSize);
+		}
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowProgress, TCLocalize("Show game clock"), &g_Config.m_TcIslandShowProgress, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandShowSongProgress, TCLocalize("Show song progress bar"), &g_Config.m_TcIslandShowSongProgress, &Column, LineSize);
 		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcIslandLocalClock, TCLocalize("Show local computer time (HH:MM)"), &g_Config.m_TcIslandLocalClock, &Column, LineSize);
@@ -1878,12 +1888,14 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		Column.HSplitTop(LineSize, &CheckBoxRect2, &Column);
 		if(DoButton_CheckBox(&g_Config.m_TcShowFrozenText, TCLocalize("Tees left alive text"), g_Config.m_TcShowFrozenText >= 1, &CheckBoxRect))
 			g_Config.m_TcShowFrozenText = g_Config.m_TcShowFrozenText >= 1 ? 0 : 1;
+		DoToolTipCheckBoxHelp(&g_Config.m_TcShowFrozenText, &CheckBoxRect, &g_Config.m_TcShowFrozenText);
 
 		if(g_Config.m_TcShowFrozenText)
 		{
 			static int s_CountFrozenText = 0;
 			if(DoButton_CheckBox(&s_CountFrozenText, TCLocalize("Count frozen tees"), g_Config.m_TcShowFrozenText == 2, &CheckBoxRect2))
 				g_Config.m_TcShowFrozenText = g_Config.m_TcShowFrozenText != 2 ? 2 : 1;
+			GameClient()->m_Tooltips.DoToolTip(&s_CountFrozenText, &CheckBoxRect2, TCLocalize("Shows how many teammates are frozen instead of how many are alive."));
 		}
 	}
 	{
@@ -3001,7 +3013,6 @@ void CMenus::RenderSettingsTClientWarList(CUIRect MainView)
 	}
 	s_PlayerListBox.DoEnd();
 }
-
 
 void CMenus::RenderSettingsTClientPing(CUIRect MainView)
 {
@@ -4436,7 +4447,7 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("Drown board"), HeadlineFontSize, TEXTALIGN_ML);
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
-	g_Config.m_TcDrownBoardColumns = 133;   // 1 Freezes + 4 Saves + 128 Player hooks
+	g_Config.m_TcDrownBoardColumns = 133; // 1 Freezes + 4 Saves + 128 Player hooks
 	g_Config.m_TcDrownBoardResetOnWipe = 1; // 全队冻结后等全员死亡才重置，默认开启
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoard, TCLocalize("Show the team drown board on Gores maps"), &g_Config.m_TcDrownBoard, &LeftView, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcDrownBoardIncludeTeam0, TCLocalize("Include Team 0"), &g_Config.m_TcDrownBoardIncludeTeam0, &LeftView, LineSize);

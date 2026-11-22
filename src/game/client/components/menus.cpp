@@ -33,6 +33,7 @@
 #include <game/client/components/console.h>
 #include <game/client/components/key_binder.h>
 #include <game/client/components/menu_background.h>
+#include <game/client/components/menus_checkbox_help.h>
 #include <game/client/components/sounds.h>
 #include <game/client/components/tclient/modern_ui.h>
 #include <game/client/gameclient.h>
@@ -424,7 +425,19 @@ int CMenus::DoButton_CheckBoxAutoVMarginAndSet(const void *pId, const char *pTex
 	if(Logic)
 		*pValue ^= 1;
 
+	DoToolTipCheckBoxHelp(pId, &CheckBoxRect, pValue);
+
 	return Logic;
+}
+
+void CMenus::DoToolTipCheckBoxHelp(const void *pId, const CUIRect *pRect, const int *pValue)
+{
+	// 只在 TClient 和 ME 设置页显示悬停说明，其余页面复选框保持原样
+	if(g_Config.m_UiSettingsPage != SETTINGS_TCLIENT && g_Config.m_UiSettingsPage != SETTINGS_ME)
+		return;
+	const char *pHelp = FindCheckBoxHelpText(pValue);
+	if(pHelp)
+		GameClient()->m_Tooltips.DoToolTip(pId, pRect, TCLocalize(pHelp));
 }
 
 int CMenus::DoButton_CheckBox(const void *pId, const char *pText, int Checked, const CUIRect *pRect)

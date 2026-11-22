@@ -53,6 +53,8 @@ public:
 	int DoButton_CheckBox(const void *pId, const char *pText, int Checked, const CUIRect *pRect);
 	int DoButton_CheckBoxAutoVMarginAndSet(const void *pId, const char *pText, int *pValue, CUIRect *pRect, float VMargin);
 	int DoButton_CheckBox_Number(const void *pId, const char *pText, int Checked, const CUIRect *pRect);
+	// 通用复选框的悬停说明：仅 TClient / ME 设置页生效，按配置变量地址查通俗文案表
+	void DoToolTipCheckBoxHelp(const void *pId, const CUIRect *pRect, const int *pValue);
 
 	bool DoSliderWithScaledValue(const void *pId, int *pOption, const CUIRect *pRect, const char *pStr, int Min, int Max, int Scale, const IScrollbarScale *pScale, unsigned Flags = 0u, const char *pSuffix = "");
 	// 以 0.1 为单位的滑块：*pOption 存十分位整数（如 100 表示 10.0），标签显示一位小数

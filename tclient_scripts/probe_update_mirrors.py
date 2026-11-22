@@ -237,16 +237,35 @@ def load_metadata(curl):
     return tag, assets
 
 
+def edge_info(response):
+    """从响应头判定镜像的边缘类型。
+
+    Cloudflare 前置的镜像在全球都有接入点，海外玩家走它也能拿到文件；
+    区域自建镜像本机快，海外未必可达。测速只反映国内视角，因此把
+    全球可达性作为选择时的配额维度，而不是排序维度。
+    """
+    headers = response["headers"]
+    server = headers.get("server", "").lower()
+    if server == "cloudflare":
+        ray = headers.get("cf-ray", "")
+        code = ray.rsplit("-", 1)[-1] if "-" in ray else ""
+        return {"edge": "cloudflare", "edge_code": code}
+    return {"edge": server or "unknown", "edge_code": ""}
+
+
 def probe_pair(curl, prefix, tag, assets, key, latest=True):
     started = time.monotonic()
     row = {"prefix": prefix, "manifest_ok": False}
     try:
         base = prefix + GITHUB + ("latest/download/" if latest else "download/" + tag + "/")
-        pair = (curl.read(base + MANIFEST, LIMITS[MANIFEST]), curl.read(base + MANIFEST + ".sig", 64))
-        validate_pair(pair, key, tag, assets)
+        with curl.fetch(base + MANIFEST, LIMITS[MANIFEST]) as manifest_response:
+            body = manifest_response["path"].read_bytes()
+            row.update(**edge_info(manifest_response))
+        signature = curl.read(base + MANIFEST + ".sig", 64)
+        validate_pair((body, signature), key, tag, assets)
         row["manifest_ok"] = True
         row["manifest_seconds"] = time.monotonic() - started
-        return row, pair
+        return row, (body, signature)
     except (ProbeError, OSError) as error:
         row["error"] = str(error)
         return row, None
@@ -266,7 +285,7 @@ def probe_package(curl, row, reference):
         size, offset = reference["size"], 1024 * 1024
         with curl.fetch(base + PACKAGE, size, 30) as full:
             verify_file(full, reference)
-            result.update(full_seconds=full["seconds"], full_bytes_per_second=size / full["seconds"])
+            result.update(full_seconds=full["seconds"], full_bytes_per_second=size / full["seconds"], **edge_info(full))
         with curl.fetch(base + HELPER, reference["helper"]["size"], 30) as helper:
             verify_file(helper, reference["helper"])
             result["helper_seconds"] = helper["seconds"]
@@ -283,6 +302,40 @@ def probe_package(curl, row, reference):
     except (ProbeError, OSError) as error:
         result["error"] = str(error)
     return result
+
+
+MIN_GLOBAL_SELECTED = 2
+
+
+def select_mirrors(rows, max_selected, min_global=MIN_GLOBAL_SELECTED):
+    """按本机速度排名选择镜像，但为全球型（Cloudflare）镜像保留名额。
+
+    测速点在国内，速度排名只代表国内玩家的最优顺序；海外玩家优先走官方
+    直链，但镜像列表也不能全是区域线路——入选集合里至少保留 min_global
+    个 Cloudflare 镜像（全球任一地区都能接入），不足时有多少算多少。
+    输出仍按速度排序，国内玩家看到的优先级不变。
+    """
+    ranked = sorted(rows, key=lambda row: (-row["combined_bytes_per_second"], row["prefix"]))
+    global_ranked = [row for row in ranked if row.get("edge") == "cloudflare"]
+    if not global_ranked:
+        return ranked[:max_selected]
+    selected, seen = [], set()
+
+    def take(row):
+        if len(selected) < max_selected and row["prefix"] not in seen:
+            selected.append(row)
+            seen.add(row["prefix"])
+
+    take(ranked[0])
+    for row in global_ranked:
+        if sum(1 for chosen in selected if chosen.get("edge") == "cloudflare") >= min_global:
+            break
+        take(row)
+    for row in ranked:
+        if len(selected) >= max_selected:
+            break
+        take(row)
+    return sorted(selected, key=lambda row: (-row["combined_bytes_per_second"], row["prefix"]))
 
 
 def make_header(selected):
@@ -351,7 +404,7 @@ def run(args):
             row = future.result()
             results[domains.index(urlsplit(row["prefix"]).netloc)] = row
             print(f"{row['prefix']}: {'verified' if row['package_ok'] else row['error']}", flush=True)
-    selected = sorted((row for row in results if row.get("package_ok")), key=lambda row: (-row["combined_bytes_per_second"], row["prefix"]))[:args.max_selected]
+    selected = select_mirrors([row for row in results if row.get("package_ok")], args.max_selected)
     if not selected:
         raise ProbeError("no mirror passed full package/helper/SHA256/real resume verification; refusing old header")
     report = {"schema": 1, "catalog_url": CATALOG_URL, "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -359,9 +412,11 @@ def run(args):
               "selected": selected, "user_agent": user_agent, "catalog_count": len(domains), "catalog_rejected": rejected,
               "canonical_results": canonical_results, "candidates": [row["prefix"] for row in candidates], "results": results,
               "test_scope": {"manifest_concurrency": 6, "package_concurrency": 3, "max_candidates": args.max_candidates,
-                             "max_selected": args.max_selected, "request_timeout_seconds": 30, "range_offset": 1048576,
-                             "checks": ["ed25519", "official_metadata", "canonical_pair", "full_sha256_size", "helper_sha256_size", "range_206_exact", "resumed_sha256_size"],
-                             "ranking": "(full_bytes + resumed_tail_bytes) / (full_seconds + resume_seconds)", "transient_failures": "this run only"}}
+                            "max_selected": args.max_selected, "request_timeout_seconds": 30, "range_offset": 1048576,
+                            "checks": ["ed25519", "official_metadata", "canonical_pair", "full_sha256_size", "helper_sha256_size", "range_206_exact", "resumed_sha256_size"],
+                            "ranking": "(full_bytes + resumed_tail_bytes) / (full_seconds + resume_seconds)",
+                            "selection_policy": {"order": "speed, ties by prefix", "global_edge_quota": f"cloudflare >= {min(MIN_GLOBAL_SELECTED, args.max_selected)} when available"},
+                            "transient_failures": "this run only"}}
     publish(args.output, args.header, report)
     return report
 

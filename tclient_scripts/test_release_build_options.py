@@ -4,10 +4,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from release_orchestrator import release_cmake_configure_command, release_mirror_probe_command
+from release_orchestrator import GH_EXE, release_cmake_configure_command, release_mirror_probe_command
+from sync_master_manifest import GH as MASTER_SYNC_GH
 
 
 def main():
+    assert GH_EXE.is_file(), "release orchestration GitHub CLI path must resolve"
+    assert MASTER_SYNC_GH.is_file(), "master manifest sync GitHub CLI path must resolve"
+
     args = release_cmake_configure_command("cmake.exe", "source", "build")
     assert args == ["cmake.exe", "-S", "source", "-B", "build", "-DTCLIENT_RELEASE_MIRRORS=ON", "-DVULKAN=ON"]
 

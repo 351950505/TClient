@@ -26,10 +26,11 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
-GH = Path("D:/kehuduan/release-17856/extract/bin/gh.exe")
+GH = Path(shutil.which("gh.exe") or shutil.which("gh") or (Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "GitHub CLI" / "gh.exe"))
 REMOTE = "repos/351950505/TClient"
 ALLOWED = (".gitattributes", "update/TClient-update-win64.json", "update/TClient-update-win64.json.sig")
 

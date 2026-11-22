@@ -22,6 +22,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -29,6 +30,7 @@
 using namespace std::chrono_literals;
 #define dbg_assert(condition, ...) do { if(!(condition)) throw std::runtime_error(#__VA_ARGS__); } while(0)
 #define log_debug(...) ((void)0)
+#define log_info(...) ((void)0)
 #define log_error(...) ((void)0)
 #define log_warn(...) ((void)0)
 void mem_copy(void *pDst, const void *pSrc, size_t Size) { std::memcpy(pDst, pSrc, Size); }

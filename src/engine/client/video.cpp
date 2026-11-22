@@ -2,6 +2,8 @@
 
 #include "video.h"
 
+#include "video_frame.h"
+
 #include <base/dbg.h>
 #include <base/io.h>
 #include <base/log.h>
@@ -107,6 +109,7 @@ CVideo::CVideo(IGraphics *pGraphics, ISound *pSound, IStorage *pStorage, int Wid
 	m_ProcessingAudioFrame = 0;
 
 	m_HasAudio = m_pSound->IsSoundEnabled() && g_Config.m_ClVideoSndEnable;
+	m_pFrameNormalizer = std::make_unique<CVideoFrameNormalizer>();
 
 	dbg_assert(ms_pCurrentVideo == nullptr, "ms_pCurrentVideo is NOT set to nullptr while creating a new Video.");
 	ms_pCurrentVideo = this;
@@ -163,7 +166,7 @@ bool CVideo::Start()
 	m_CurVideoThreadIndex = 0;
 	m_CurAudioThreadIndex = 0;
 
-	const size_t VideoBufferSize = (size_t)4 * m_Width * m_Height * sizeof(uint8_t);
+	const size_t VideoBufferSize = (size_t)4 * m_Width * m_Height + CVideoFrameNormalizer::PADDING_BYTES;
 	m_vVideoBuffers.resize(m_VideoThreads);
 	for(size_t i = 0; i < m_VideoThreads; ++i)
 	{
@@ -624,20 +627,19 @@ void CVideo::RunVideoThread(size_t ParentThreadIndex, size_t ThreadIndex)
 
 void CVideo::FillVideoFrame(size_t ThreadIndex)
 {
-	const int InLineSize = 4 * m_VideoStream.m_pCodecContext->width;
-	auto *pRGBAData = m_vVideoBuffers[ThreadIndex].m_vBuffer.data();
-	sws_scale(m_VideoStream.m_vpSwsContexts[ThreadIndex], (const uint8_t *const *)&pRGBAData, &InLineSize, 0,
+	const int aInLineSize[4] = {4 * m_VideoStream.m_pCodecContext->width};
+	const uint8_t *apRgbaData[4] = {m_vVideoBuffers[ThreadIndex].m_vBuffer.data()};
+	sws_scale(m_VideoStream.m_vpSwsContexts[ThreadIndex], apRgbaData, aInLineSize, 0,
 		m_VideoStream.m_pCodecContext->height, m_VideoStream.m_vpFrames[ThreadIndex]->data, m_VideoStream.m_vpFrames[ThreadIndex]->linesize);
 }
 
 void CVideo::UpdateVideoBufferFromGraphics(size_t ThreadIndex)
 {
-	uint32_t Width;
-	uint32_t Height;
-	CImageInfo::EImageFormat Format;
-	m_pGraphics->GetReadPresentedImageDataFuncUnsafe()(Width, Height, Format, m_vVideoBuffers[ThreadIndex].m_vBuffer);
-	dbg_assert((int)Width == m_Width && (int)Height == m_Height, "Size mismatch between video (%d x %d) and graphics (%d x %d)", m_Width, m_Height, Width, Height);
-	dbg_assert(Format == CImageInfo::FORMAT_RGBA, "Unexpected image format %d", (int)Format);
+	const bool ReadbackSucceeded = m_pFrameNormalizer->ReadAndNormalize(
+		m_pGraphics->GetReadPresentedImageDataFuncUnsafe(), m_Width, m_Height, m_vVideoBuffers[ThreadIndex].m_vBuffer);
+	if(!ReadbackSucceeded && !m_ReadbackFailureLogged)
+		log_error("videorecorder", "Presented-image readback failed or returned an invalid frame; recording black frames until it recovers.");
+	m_ReadbackFailureLogged = !ReadbackSucceeded;
 }
 
 AVFrame *CVideo::AllocPicture(enum AVPixelFormat PixFmt, int Width, int Height)

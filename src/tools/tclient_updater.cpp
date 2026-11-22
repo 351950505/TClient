@@ -81,6 +81,7 @@ namespace
 	// TCLIENT_UPDATER_WAIT_TIMEOUT_MS may only shorten this limit (it is clamped to the value below),
 	// which is used by the automated tests so they do not have to wait five minutes.
 	constexpr DWORD WAIT_FOR_PID_TIMEOUT_MS = 300 * 1000;
+	constexpr DWORD TARGET_PROCESS_GRACEFUL_CLOSE_TIMEOUT_MS = 10 * 1000;
 
 	DWORD GetBoundedTimeout(const wchar_t *pEnvironmentVariable, DWORD DefaultTimeout)
 	{
@@ -1761,7 +1762,8 @@ namespace
 		if(CloseContext.m_Posted != 0)
 			g_Logger.Info("posted WM_CLOSE to %u window(s) for pid=%lu", CloseContext.m_Posted, (unsigned long)Process.m_Pid);
 
-		if(WaitForSingleObject(hProcess, 750) == WAIT_OBJECT_0)
+		const DWORD GracefulCloseTimeout = CloseContext.m_Posted != 0 ? TARGET_PROCESS_GRACEFUL_CLOSE_TIMEOUT_MS : 0;
+		if(WaitForSingleObject(hProcess, GracefulCloseTimeout) == WAIT_OBJECT_0)
 		{
 			g_Logger.Info("target process pid=%lu exited cleanly", (unsigned long)Process.m_Pid);
 			CloseHandle(hProcess);

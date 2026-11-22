@@ -1,4 +1,5 @@
 // Offline regression fixture: production text/gradient/envelope functions, no real GPU.
+#define log_info(...) ((void)0)
 #include "rt789_support.h"
 #include <engine/map.h>
 #include "rt789_envelope_types.h"

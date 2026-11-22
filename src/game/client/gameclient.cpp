@@ -4724,7 +4724,7 @@ vec2 CGameClient::GetFastInputPos(int ClientId)
 	if(!FastInputActive(ClientId, !Local) && !((Mode == 2 || Mode == 12) && IsSnowHookAffected(ClientId)))
 		return Pos;
 	if(Mode == 14)
-		return TcBclAncientSamplePos(ClientId, GetAncientInputAmount(ClientId), true);
+		return TcBclAncientSamplePos(ClientId, GetAncientInputAmount(ClientId), true, Tick, Intra);
 	if(Mode == 16)
 	{
 		// 偏移后严格槽采样；曲线和位置钳制分别受开关控制。
@@ -4792,7 +4792,7 @@ vec2 CGameClient::GetFreezePos(int ClientId)
 		m_SmoothTick = Tick;
 		m_SmoothIntraTick = Intra;
 		if(Mode == 14 && Local)
-			return TcBclAncientSamplePos(ClientId, GetAncientInputAmount(ClientId), true);
+			return TcBclAncientSamplePos(ClientId, GetAncientInputAmount(ClientId), true, Tick, Intra);
 		ApplyFastInputOffset(ClientId, Tick, Intra);
 		if(Mode == 16 && FastInputActive(ClientId, !Local))
 		{
@@ -5403,10 +5403,10 @@ float CGameClient::GetAncientInputAmount(int ClientId)
 // 基准插值 → 按 Ancient 量前移（SplitAmount 拆 tick/intra）→ 严格门控读取预测
 // 数组 → SafeGuard：冻结/钩状态变化回退 RegularPos，前移超安全帽截断。
 // mode 14 的本地/他人位置统一走这里，替换之前散装的多路偏移。
-vec2 CGameClient::TcBclAncientSamplePos(int ClientId, float AmountMs, bool SafeGuard) const
+vec2 CGameClient::TcBclAncientSamplePos(int ClientId, float AmountMs, bool SafeGuard, int BaseTick, float BaseIntraTick) const
 {
-	float PredIntraTick = Client()->PredIntraGameTick(g_Config.m_ClDummy);
-	int PredTick = Client()->PredGameTick(g_Config.m_ClDummy);
+	float PredIntraTick = BaseIntraTick;
+	int PredTick = BaseTick;
 	const auto &Data = m_aClients[ClientId];
 	vec2 Pos = mix(Data.m_PrevPredicted.m_Pos, Data.m_Predicted.m_Pos, PredIntraTick);
 	const vec2 RegularPos = Data.m_RegularPredicted.m_Pos;

@@ -13,6 +13,19 @@ TEST(ClientFrozenEntryHighlight, FirstSnapshotSetsBaselineWithoutLookingUpTiles)
 	EXPECT_EQ(Lookups, 0);
 }
 
+TEST(ClientFrozenEntryHighlight, EnablingDuringFiniteFreezeTracksCurrentTile)
+{
+	tclient_frozen_entry::CHighlight Highlight;
+	Highlight.Update(true, false, 0, 0, 0.0f, true, [] { return -1; });
+	int Lookups = 0;
+	EXPECT_FLOAT_EQ(Highlight.Update(true, true, 60, 10, 0.1f, false, [&] { ++Lookups; return 37; }), 0.0f);
+	EXPECT_EQ(Lookups, 0);
+	EXPECT_FLOAT_EQ(Highlight.Update(true, true, 60, 11, 0.2f, true, [&] { ++Lookups; return 37; }), 0.0f);
+	EXPECT_EQ(Lookups, 1);
+	EXPECT_FLOAT_EQ(Highlight.Update(true, false, 0, 60, 1.0f, true, [] { return -1; }), 1.0f);
+	EXPECT_EQ(Highlight.TileIndex(), 37);
+}
+
 TEST(ClientFrozenEntryHighlight, TileFlashesOnlyWhenFreezeTimerCompletes)
 {
 	tclient_frozen_entry::CHighlight Highlight;

@@ -1444,6 +1444,24 @@ CUi::EPopupMenuFunctionResult CScoreboard::CScoreboardPopupContext::Render(void 
 			// 对方没进队(0):发不出去,菜单留着让用户知道没生效
 		}
 		pScoreboard->GameClient()->m_Tooltips.DoToolTip(&pPopupContext->m_JoinTeamAction, &Action, TCLocalize("Join team"));
+
+		Container.VSplitLeft(ActionSpacing, nullptr, &Container);
+		Container.VSplitLeft(ActionSize, &Action, &Container);
+		const int InviterId = pScoreboard->GameClient()->m_aLocalIds[g_Config.m_ClDummy];
+		const int InviterTeam = pScoreboard->GameClient()->m_Teams.Team(InviterId);
+		const bool CanInvite = pScoreboard->Client()->State() == IClient::STATE_ONLINE &&
+				       InviterTeam > TEAM_FLOCK && InviterTeam < pScoreboard->GameClient()->m_Teams.TeamSuper();
+		if(pUi->DoButton_FontIcon(&pPopupContext->m_InviteToTeamAction, FontIcon::USER, 0, &Action, BUTTONFLAG_LEFT, ActionCorners, CanInvite) && CanInvite)
+		{
+			char aInviteCommand[2 * MAX_NAME_LENGTH + 32];
+			str_copy(aInviteCommand, "say /invite \"", sizeof(aInviteCommand));
+			char *pDst = aInviteCommand + str_length(aInviteCommand);
+			str_escape(&pDst, Client.m_aName, aInviteCommand + sizeof(aInviteCommand));
+			str_append(aInviteCommand, "\"");
+			pScoreboard->Console()->ExecuteLine(aInviteCommand, IConsole::CLIENT_ID_UNSPECIFIED);
+			return CUi::POPUP_CLOSE_CURRENT;
+		}
+		pScoreboard->GameClient()->m_Tooltips.DoToolTip(&pPopupContext->m_InviteToTeamAction, &Action, TCLocalize("Invite to your team"));
 	}
 
 	const float ButtonSize = 17.5f;

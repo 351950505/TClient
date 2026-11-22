@@ -930,6 +930,34 @@ TEST(ClientDrownBoard, DisconnectedMemberDoesNotStallWipeResetAndWait)
 	EXPECT_EQ(Tracker.Stats(2).m_Aleds, 1);
 }
 
+TEST(ClientDrownBoard, TeamChangeDuringTeamWipeDoesNotBlockReset)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	for(int ClientId = 1; ClientId <= 3; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 10.0f * ClientId, 0.0f));
+	RunStats(Tracker, aTicks, 1, true, true);
+	for(int ClientId = 1; ClientId <= 3; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 10.0f * ClientId, 0.0f));
+	RunStats(Tracker, aTicks, 1, true, true);
+	ASSERT_EQ(Tracker.Stats(1).m_Aleds, 1);
+
+	FeedTick(Tracker, aTicks, 3, 2, MakeStatTick(true, false, HOOK_IDLE, -1, 30.0f, 0.0f));
+	Tracker.FeedDeath(1);
+	Tracker.FeedDeath(2);
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick());
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick());
+	RunStats(Tracker, aTicks, 1, true, true);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 0);
+	EXPECT_EQ(Tracker.Stats(2).m_Aleds, 0);
+
+	for(int ClientId = 1; ClientId <= 2; ++ClientId)
+		FeedTick(Tracker, aTicks, ClientId, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 10.0f * ClientId, 0.0f));
+	RunStats(Tracker, aTicks, 1, true, true);
+	EXPECT_EQ(Tracker.Stats(1).m_Aleds, 1);
+	EXPECT_EQ(Tracker.Stats(2).m_Aleds, 1);
+}
+
 TEST(ClientDrownBoard, ResetOnWipeClearsAllCountersLikeNewRound)
 {
 	CTClientDrownBoard Tracker;

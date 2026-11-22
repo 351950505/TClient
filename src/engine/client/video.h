@@ -12,10 +12,12 @@ extern "C" {
 
 #include <atomic>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
 
+class CVideoFrameNormalizer;
 class IGraphics;
 class ISound;
 class IStorage;
@@ -154,6 +156,8 @@ private:
 		std::vector<uint8_t> m_vBuffer;
 	};
 	std::vector<CVideoBuffer> m_vVideoBuffers;
+	std::unique_ptr<CVideoFrameNormalizer> m_pFrameNormalizer;
+	bool m_ReadbackFailureLogged = false;
 	class CAudioBuffer
 	{
 	public:

@@ -40,6 +40,7 @@ FIXTURE_SOURCE = r'''
 #include <windows.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -206,6 +207,9 @@ static LRESULT CALLBACK FixtureWindowProc(HWND hWindow, UINT Message, WPARAM WPa
 {
 	if(Message == WM_CLOSE)
 	{
+		const std::wstring Delay = Environment(L"TCLIENT_FIXTURE_CLOSE_DELAY_MS");
+		if(!Delay.empty())
+			Sleep((DWORD)wcstoul(Delay.c_str(), nullptr, 10));
 		const bool Started = Spawn({gs_ChildPath, gs_ChildEvent});
 		DestroyWindow(hWindow);
 		PostQuitMessage(Started ? 0 : 44);
@@ -596,11 +600,11 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         self.remember(process.pid, executable)
         return process
 
-    def start_runner(self, executable: Path, event: Path, child: Path | None = None, child_event: Path | None = None) -> int:
+    def start_runner(self, executable: Path, event: Path, child: Path | None = None, child_event: Path | None = None, environment: dict[str, str] | None = None) -> int:
         arguments = [str(event)]
         if child:
             arguments += [str(child), str(child_event)]
-        process = self.start(executable, arguments)
+        process = self.start(executable, arguments, environment)
         self.assertEqual(self.event_pid(event), process.pid)
         return process.pid
 
@@ -1178,6 +1182,28 @@ class TClientUpdaterInstallTest(unittest.TestCase):
         self.assertTrue(self.archive.exists())
         self.assertTrue(self.alive(self.event_pid(self.old_event)))
         self.passed(root_link=root_link, outside_sentinel_preserved=True, backup_write_rejected=True)
+
+    def test_success_waits_for_slow_graceful_target_shutdown(self) -> None:
+        executable = self.target / "DDNet.exe"
+        shutil.copy2(self.runner, executable)
+        process_event = self.event("slow-close.pid", executable)
+        child_event = self.event("slow-close-child.pid", self.runner)
+        process_id = self.start_runner(
+            executable,
+            process_event,
+            self.runner,
+            child_event,
+            {"TCLIENT_FIXTURE_CLOSE_DELAY_MS": "2000"},
+        )
+        write_zip(self.archive, [("DDNet.exe", self.healthy.read_bytes())])
+
+        log = self.assert_code(self.run_updater(), 0)
+        child_id = self.event_pid(child_event)
+        self.assertFalse(self.alive(process_id))
+        self.assertTrue(self.alive(child_id))
+        self.assertIn(f"target process pid={process_id} exited cleanly", log)
+        self.assertTrue(self.alive(self.event_pid(self.new_event)))
+        self.passed(process_id=process_id, child_id=child_id, graceful_close_delay_ms=2000)
 
     def test_success_closes_exact_target_processes_only_and_media_race(self) -> None:
         names = ("DDNet.exe", "DDNet-Server.exe", "island_media_monitor.exe", "netease-watcher.exe", "TClientUpdater.exe.old_fixture")

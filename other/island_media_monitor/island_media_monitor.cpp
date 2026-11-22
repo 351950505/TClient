@@ -1854,10 +1854,12 @@ struct SWatcherPauseTracker
 	}
 };
 
-static bool ResolveFallbackPlaying(bool Playing, bool LsPaused, bool LsStalled, bool WatcherValid, bool WatcherFrozen)
+static bool ResolveFallbackPlaying(bool Playing, bool LsPaused, bool LsStalled, bool LsAdvancing, bool WatcherValid, bool WatcherFrozen)
 {
 	if(LsPaused || LsStalled)
 		return false;
+	if(LsAdvancing)
+		return true;
 	return WatcherValid ? !WatcherFrozen : Playing;
 }
 
@@ -1890,7 +1892,7 @@ struct SPlaybackDecision
 			return AudioActive;
 		if(m_Ended)
 			return false;
-		return ResolveFallbackPlaying(LsAdvancing ? true : PreviousPlaying, LsPaused, LsStalled, Valid, Frozen);
+		return ResolveFallbackPlaying(PreviousPlaying, LsPaused, LsStalled, LsAdvancing, Valid, Frozen);
 	}
 };
 

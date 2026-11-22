@@ -245,6 +245,8 @@ public:
 		if(!Active || !IsTrackedTeam(Team, IncludeTeamZero))
 		{
 			InvalidateRescuerReferences(ClientId);
+			m_aEpisodeMembers[ClientId] = false;
+			m_aEpisodeDeaths[ClientId] = false;
 			Player = {};
 			return;
 		}
@@ -253,6 +255,8 @@ public:
 		{
 			if(Player.m_Team >= TEAM_FLOCK && Player.m_Team < NUM_DDRACE_TEAMS)
 				InvalidateRescuerReferences(ClientId);
+			m_aEpisodeMembers[ClientId] = false;
+			m_aEpisodeDeaths[ClientId] = false;
 			Player = {};
 			Player.m_Name = Name;
 			Player.m_Clan = Clan;
@@ -368,7 +372,7 @@ public:
 			for(int ClientId = 0; ClientId < MAX_CLIENTS; ++ClientId)
 			{
 				// 永久离线的成员等不到死亡消息：不阻塞本轮重置，计数继续。
-				if(m_aEpisodeMembers[ClientId] && !m_aEpisodeDeaths[ClientId] && pTicks[ClientId].m_Active)
+				if(m_aEpisodeMembers[ClientId] && !m_aEpisodeDeaths[ClientId] && pTicks[ClientId].m_Active && m_aPlayers[ClientId].m_Team == LocalTeam)
 					AllDead = false;
 			}
 			if(AllDead)

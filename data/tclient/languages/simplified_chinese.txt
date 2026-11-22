@@ -1591,6 +1591,9 @@ Steal skin
 Join team
 == 加入队伍
 
+Invite to your team
+== 邀请加入我的队伍
+
 Player: %s
 == 玩家:%s
 

@@ -2788,6 +2788,7 @@ if(CLIENT)
     updater.h
     video.cpp
     video.h
+    video_frame.h
     warning.cpp
     # tidy-alphabetical-end
   )

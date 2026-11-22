@@ -10,6 +10,7 @@ const root = path.resolve(__dirname, '..');
 const hud = fs.readFileSync(path.join(root, 'src/game/client/components/hud.cpp'), 'utf8').replace(/\r\n/g, '\n');
 const island = fs.readFileSync(path.join(root, 'src/game/client/components/tclient/island_music.cpp'), 'utf8').replace(/\r\n/g, '\n');
 const config = fs.readFileSync(path.join(root, 'src/engine/shared/config_variables_tclient.h'), 'utf8').replace(/\r\n/g, '\n');
+const client = fs.readFileSync(path.join(root, 'src/engine/client/client.cpp'), 'utf8').replace(/\r\n/g, '\n');
 const menus = fs.readFileSync(path.join(root, 'src/game/client/components/tclient/menus_tclient.cpp'), 'utf8').replace(/\r\n/g, '\n');
 const readLang = name => fs.readFileSync(path.join(root, 'data/tclient/languages', name + '.txt'), 'utf8').replace(/\r\n/g, '\n');
 function between(source, start, end) {
@@ -29,7 +30,8 @@ try {
   assert(!hud.includes('IslandSuppressed'), 'Island must not suppress frozen controls');
   assert(hud.includes('const bool ShowFrozenText = g_Config.m_TcShowFrozenText > 0;'));
   assert(hud.includes('const bool ShowFrozenHud = g_Config.m_TcShowFrozenHud > 0;'));
-  assert(config.includes('MACRO_CONFIG_INT(TcFrozenTeesShowAll, tc_frozen_tees_showall, 0, 0, 1,'), 'native /showall requests are opt-in by default');
+  assert(!/MACRO_CONFIG_INT\(TcFrozenTeesShowAll\s*,\s*tc_frozen_tees_showall/.test(config), 'native /showall has no user toggle');
+  assert(client.includes('const bool Requested = true;'), 'native /showall is requested automatically for full-distance snapshots');
   assert(hud.includes('ShowFrozenHud && !GameClient()->m_Scoreboard.IsActive() && !(LocalTeamID == 0 && g_Config.m_TcFrozenHudTeamOnly)'));
   const info = between(hud, 'void CHud::RenderTextInfo()', 'float CHud::FrozenHudRowY(');
   assert(info.includes('g_Config.m_TcNotifyWhenLastX / 100.0f') && info.includes('g_Config.m_TcNotifyWhenLastY / 100.0f'));
@@ -51,7 +53,7 @@ try {
   assert(draw.includes('TextRender()->TextColor(OldTextColor);') && draw.includes('TextRender()->TextOutlineColor(OldTextOutlineColor);'));
   assert(draw.includes('m_FrozenHudFrame.m_Counts') && draw.includes('m_FrozenHudFrame.m_aIncluded[i]') && draw.includes('m_FrozenHudFrame.m_aStates[i]'), 'Count/tees must use the captured pending frame');
   assert(!draw.includes('m_FreezeEnd') && !draw.includes('m_DeepFrozen') && !draw.includes('m_Teams.Team(') && !draw.includes('m_apPlayerInfos'), 'Delayed render must not reclassify state or membership');
-  assert(draw.includes('g_Config.m_TcShowFrozenText == 1 ? Counts.m_KnownUnfrozen : Counts.m_Frozen') && draw.includes('"%d / %d  ? %d"'), 'Text-only mode keeps the plain centered count');
+  assert(draw.includes('str_format(aCountBuf, sizeof(aCountBuf), "%d / %d", NumShown, NumInTeam);') && draw.includes('TextRender()->Text(CountX, TextY, CountFontSize, aCountBuf);'), 'Frozen HUD count text follows the configured frozen/unfrozen mode');
   assert(draw.includes('if(Frozen && !g_Config.m_TcShowFrozenHudSkins)') && draw.includes('TeeInfo = FreezeInfo;'));
   assert(draw.includes('if(Unknown)') && draw.includes('TeeRenderPos, 0.45f)'), 'Unknown keeps the dimmed own skin');
   assert(!draw.includes('FontSize, "?"') && !draw.includes('*= 0.4f'), 'Per-tee "?" overlay and x0.4 darkening are retired');
@@ -102,7 +104,7 @@ try {
   assert(render.includes('CUIRect OccupiedRect = {};') && render.indexOf('m_pImpl->Render(OccupiedRect);') < render.indexOf('m_Hud.RenderFrozenHud(OccupiedRect);'));
   assert(render.indexOf('#endif') < render.indexOf('m_Hud.RenderFrozenHud(OccupiedRect);'), 'Unsupported platforms must finish pending HUD too');
 
-  const helper = between(hud, 'float CHud::FrozenHudRowY(', 'void CHud::RenderFrozenHud(');
+  const helper = between(hud, 'float CHud::FrozenHudRowY(', 'namespace\n{');
   const countSizing = between(draw, 'const float CountFontSize = TeeSize * 0.7f', 'const float CountMainW =');
   const scaleBlock = between(draw, 'const float Scale = std::clamp(g_Config.m_TcFrozenTeesScale / 100.0f', 'const ColorRGBA AccentColor');
   const sizeBlock = between(draw, 'float TeeSize = g_Config.m_TcFrozenHudTeeSize * Scale;', '// The display limit');

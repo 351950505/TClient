@@ -48,6 +48,12 @@ def main():
         "int CGameClient::SnapshotInputMaxTick(",
         "bool CGameClient::SnapshotTryGetPredPos(",
     ) if signature in game]
+    signatures[0:0] = [signature for signature in (
+        "int CGameClient::TcLightHookAmountMs()", "int CGameClient::TcLightHookTickOffset()",
+        "bool CGameClient::TcLightUseHookLogic()", "bool CGameClient::TcLightIsHookClient(",
+        "bool CGameClient::TcLightIsHookLinkedClient(", "float CGameClient::TcNovaPilotTickOffset()",
+        "void CGameClient::TcNovaPilotSamplePos(", "vec2 CGameClient::TcBclAncientSamplePos(",
+    ) if signature in game]
     methods = [extract(game, signature) for signature in signatures]
     control_methods = [extract(controls, s) for s in (
         "bool CControls::CheckNewInput()", "void CControls::OnReset()", "void CControls::ResetInput(", "void CControls::ResetFastInput(")]
@@ -56,6 +62,7 @@ def main():
         decl = method[:method.index("{")].strip().replace("CGameClient::", "")
         decl = decl.replace("bool Salatik) const", "bool Salatik = false) const")
         decl = decl.replace("int InterpolationMode) const", "int InterpolationMode = 0) const")
+        decl = decl.replace("int BaseTick, float BaseIntraTick) const", "int BaseTick = -1, float BaseIntraTick = -1.0f) const")
         declarations.append(decl + ";")
     clock_method = extract((root / "src/engine/client/client.cpp").read_text(encoding="utf-8"), "void CClient::GetSmoothFreezeTick(").replace("CClient::", "CClock::")
     fields = sorted(set(re.findall(r"g_Config\.(m_\w+)", "\n".join(methods + control_methods + [clock_method]))) | {
@@ -74,22 +81,9 @@ def main():
 #include <cstdio>
 #include <iterator>
 #include <limits>
+#include <base/math.h>
 #include <game/client/fastinput.h>
 constexpr int MAX_CLIENTS = 128, NUM_DUMMIES = 2, INPUT_STATE_MASK = 63;
-struct vec2 {
-    float x=0,y=0;
-    vec2() = default;
-    vec2(float X, float Y):x(X),y(Y){}
-    float &operator[](int Axis) { return Axis ? y : x; }
-    float operator[](int Axis) const { return Axis ? y : x; }
-    vec2 operator+(vec2 Other) const { return {x+Other.x,y+Other.y}; }
-    vec2 operator-(vec2 Other) const { return {x-Other.x,y-Other.y}; }
-    vec2 operator*(float Factor) const { return {x*Factor,y*Factor}; }
-    vec2 &operator*=(float Factor) { x*=Factor; y*=Factor; return *this; }
-};
-float length(vec2 Pos) { return std::sqrt(Pos.x*Pos.x+Pos.y*Pos.y); }
-float distance(vec2 A,vec2 B) { return length(A-B); }
-template<class T> T mix(T A,T B,float Factor) { return A+(B-A)*Factor; }
 long long time_get(){return 100;}
 long long time_freq(){return 1000;}
 bool in_range(long long V,long long L,long long H){return V>=L && V<=H;}
@@ -101,6 +95,10 @@ struct CCore {
     int m_FreezeEnd=0,m_HookState=0,m_HookedPlayer=-1;
     int HookedPlayer() const {return m_HookedPlayer;}
 };
+using CCharacterCore = CCore;
+using CNetObj_Character = CCore;
+constexpr int HOOK_RETRACTED = -1, HOOK_IDLE = 0, HOOK_FLYING = 4, HOOK_GRABBED = 5;
+struct CCollision { int GetPureMapIndex(vec2) const { return 0; } int GetTileIndex(int) const { return 0; } int GetFrontTileIndex(int) const { return 0; } };
 struct CCharacter {int m_FreezeAccumulation=0,m_AliveAccumulation=0,m_FreezeTime=0;};
 struct CWorld {
     CCharacter m_Character;
@@ -142,6 +140,8 @@ struct CGameClient {
         vec2 m_aPredPos[200]; int m_aPredTick[200]{};
         long long m_aSmoothLen[2]{},m_aSmoothStart[2]{};
     } m_aClients[MAX_CLIENTS];
+    int m_aTcNovaPilotLatencySamples[16]{}; int m_TcNovaPilotLatencySampleCount=0;
+    CCollision m_Collision; const CCollision *Collision() const { return &m_Collision; }
     CControls m_Controls;
     FastInput::CAncientState m_aAncientInputState[2],m_aLightAncientInputState[2];
     bool m_aReceivedPreInput[NUM_DUMMIES]{};
@@ -218,7 +218,7 @@ int main(){
     with tempfile.TemporaryDirectory(prefix="light-input-regression-") as directory:
         work = Path(directory)
         (work / "test.cpp").write_text(source, encoding="utf-8")
-        for cmd in [[str(msvc / "bin/Hostx64/x64/cl.exe"), "/nologo", "/std:c++17", "/EHsc", "/utf-8", "/I" + str(root / "src"), "test.cpp", "/Fe:test.exe", "/link", "/STACK:8388608"], [str(work / "test.exe")]]:
+        for cmd in [[str(msvc / "bin/Hostx64/x64/cl.exe"), "/nologo", "/std:c++20", "/EHsc", "/utf-8", "/I" + str(root / "src"), "test.cpp", "/Fe:test.exe", "/link", "/STACK:8388608"], [str(work / "test.exe")]]:
             result = subprocess.run(cmd, cwd=work, env=env, capture_output=True, timeout=120)
             print((result.stdout + result.stderr).decode("utf-8", "replace"))
             if result.returncode:

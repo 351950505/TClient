@@ -65,6 +65,7 @@ class CScoreboard : public CComponent
 		CButtonContainer m_EmoticonAction;
 		CButtonContainer m_StealSkinAction; // TClient: 偷取皮肤
 		CButtonContainer m_JoinTeamAction; // TClient: 加入队伍
+		CButtonContainer m_InviteToTeamAction; // TClient: 邀请加入自己的队伍
 
 		CButtonContainer m_SpectateButton;
 

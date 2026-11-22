@@ -1072,7 +1072,7 @@ public:
 	bool TcLightUseHookLogic() const;
 	bool TcLightIsHookClient(int ClientId) const;
 	bool TcLightIsHookLinkedClient(int ClientId) const;
-vec2 TcBclAncientSamplePos(int ClientId, float AmountMs, bool SafeGuard) const;
+	vec2 TcBclAncientSamplePos(int ClientId, float AmountMs, bool SafeGuard, int BaseTick, float BaseIntraTick) const;
 	int GetSnowHookTicks() const;
 	// TClient: mode 15 Fast (JuKKi) / mode 16 NovaPilot / 自动余量（2026-11-19 对齐 Nova
 	// bc_inputs 13/16 + bc_auto_margin；依据见 modes-15对拍-20261119.md §9）。

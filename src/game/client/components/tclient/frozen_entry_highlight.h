@@ -9,6 +9,7 @@ namespace tclient_frozen_entry
 	{
 		bool m_StateKnown = false;
 		bool m_WasFrozen = false;
+		bool m_WasEnabled = false;
 		float m_CooldownUntil = 0.0f;
 		float m_FlashStart = -1.0f;
 		int m_TileIndex = -1;
@@ -41,6 +42,7 @@ namespace tclient_frozen_entry
 			{
 				m_StateKnown = false;
 				m_WasFrozen = false;
+				m_WasEnabled = false;
 				m_FlashStart = -1.0f;
 				m_TileIndex = -1;
 				m_PendingTileIndex = -1;
@@ -48,25 +50,7 @@ namespace tclient_frozen_entry
 				return 0.0f;
 			}
 
-			if(!m_StateKnown)
-			{
-				m_StateKnown = true;
-				m_WasFrozen = Frozen;
-				return 0.0f;
-			}
-
-			if(!Enabled)
-			{
-				m_WasFrozen = Frozen;
-				m_FlashStart = -1.0f;
-				m_TileIndex = -1;
-				m_PendingTileIndex = -1;
-				m_PendingFreezeEnd = -1;
-				return 0.0f;
-			}
-
-			if(!m_WasFrozen && Frozen)
-			{
+			auto CapturePendingTile = [&] {
 				m_PendingTileIndex = -1;
 				m_PendingFreezeEnd = -1;
 				if(FreezeEnd > 0)
@@ -75,6 +59,30 @@ namespace tclient_frozen_entry
 					if(m_PendingTileIndex >= 0)
 						m_PendingFreezeEnd = FreezeEnd;
 				}
+			};
+
+			if(!m_StateKnown)
+			{
+				m_StateKnown = true;
+				m_WasFrozen = Frozen;
+				m_WasEnabled = Enabled;
+				return 0.0f;
+			}
+
+			if(!Enabled)
+			{
+				m_WasFrozen = Frozen;
+				m_WasEnabled = false;
+				m_FlashStart = -1.0f;
+				m_TileIndex = -1;
+				m_PendingTileIndex = -1;
+				m_PendingFreezeEnd = -1;
+				return 0.0f;
+			}
+
+			if((!m_WasFrozen || !m_WasEnabled) && Frozen)
+			{
+				CapturePendingTile();
 			}
 			else if(m_WasFrozen && Frozen && m_PendingTileIndex >= 0)
 			{
@@ -102,6 +110,7 @@ namespace tclient_frozen_entry
 			}
 
 			m_WasFrozen = Frozen;
+			m_WasEnabled = true;
 			if(m_FlashStart >= 0.0f && Now - m_FlashStart >= FLASH_SECONDS)
 			{
 				m_FlashStart = -1.0f;

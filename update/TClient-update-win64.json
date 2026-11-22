@@ -1,12 +1,12 @@
 {
   "product": "TClient",
   "channel": "stable",
-  "version": "1.7.9.2",
+  "version": "1.7.9.3",
   "platform": "win64",
   "asset": "TClient-update-win64.zip",
-  "size": 17392655,
-  "sha256": "1dd7a1a08c44947147ffd1b06b2e9f6a82ecbf51d316d1a2e80615c1d5f83b71",
-  "notes": "TClient v1.7.9.2\n\n新功能\n- 设置开关悬停说明：TClient 页和 ME 页的开关选项鼠标悬停约半秒后显示一行通俗说明，说明该项打开后会发生什么；共覆盖 139 个开关（含简体与繁体翻译）。普通按钮和其他设置页不受影响，滑块与临时选项不显示说明。\n\n其他\n- 帮助表附带隔离回归：新增 testrunner 测试与接线检查脚本，锁定悬停说明只在 TClient/ME 页生效、未知选项不误显示，并校验每条说明在简体和繁体词典都有译文。",
+  "size": 17473322,
+  "sha256": "26fcad92a05407d9d1547c69b0efcb55f5b2636843182d27b1a86965d2ee345e",
+  "notes": "TClient v1.7.9.3\n\n修复\n- Vulkan：恢复 Vulkan 渲染后端。v1.7.9.2 发布构建未显式启用 Vulkan，导致该后端没有编入客户端；本版发布流程强制启用并检查构建缓存。\n- 钩子显示：预判可钩中的冻结玩家只在尚未被实际钩住时高亮，目标被钩中后取消高亮。\n- 灵动岛歌词：网易云返回“暂无歌词”占位时按无歌词处理，继续尝试 QQ、酷狗和 lrclib 兜底。\n\n发布验证\n- 更新镜像以本机完整下载、helper 校验、SHA-256 和真实断点续传测试排序；本次按要求仅使用本机测速，不使用广州远端节点，也不把广州单点样本计入镜像排名。\n- 冻结 HUD 测试已加入 testrunner；发布构建门禁检查 Vulkan 后端确实开启。",
   "helper": {
     "name": "TClientUpdater.exe",
     "size": 451584,

@@ -36,6 +36,10 @@ struct SLyricLine
 // 日文汉字不做中文简繁转换。
 bool ParseSyncedLyrics(const char *pSyncedLyrics, std::vector<SLyricLine> &vOut, bool Traditional = false);
 
+// 网易云"未收录"占位 LRC（实测 "[00:00.00]暂无歌词"）：语法合法但不是真词。
+// 调用方必须先过滤，否则占位被当歌词 READY，QQ/酷狗/lrclib 兜底全部短路。
+bool IsNeteasePlaceholder(const char *pLyricText);
+
 // 网易 yrc：[start,duration](segStart,dur,0)文本(...) 逐字格式。
 // Traditional 语义同上；逐字时轴按字节偏移索引文本，仅接受等长转换结果。
 bool ParseYrcLyrics(const char *pYrc, std::vector<SLyricLine> &vOut, bool Traditional = false);

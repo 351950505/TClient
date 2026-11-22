@@ -833,6 +833,32 @@ int main()
 				Check(Lines[0].m_StartMs == Test.m_ExpectedMs, "timestamp milliseconds are incorrect");
 			});
 	});
+	Tests.Group("netease uncollected placeholder is rejected", [&] {
+		for(const char *pInput : {
+			    "[00:00.00]暂无歌词",
+			    "[00:00.00] 暂无歌词 ",
+			    "暂无歌词",
+			    "[00:00.00]暫無歌詞",
+			    "[1000,2000]暂无歌词"})
+			Tests.Case(pInput, [&] {
+				Check(TcLyric::IsNeteasePlaceholder(pInput), "netease placeholder was not detected");
+				std::vector<SLyricLine> Lines;
+				Check(TcLyric::IsNeteasePlaceholder(pInput) ? !ParseSyncedLyrics(pInput, Lines) || Lines.size() == 1 : true, "sanity");
+				// The consumer gate: placeholder text must never become lyric content.
+				if(TcLyric::IsNeteasePlaceholder(pInput))
+					Lines.clear();
+				Check(Lines.empty(), "placeholder leaked as lyric lines");
+			});
+		Tests.Case("real lyrics are never placeholders", [&] {
+			Check(!TcLyric::IsNeteasePlaceholder("[00:01.00]紫荊花飄揚\n[00:03.00]飛向 避風的海港"), "real lyrics flagged as placeholder");
+			Check(!TcLyric::IsNeteasePlaceholder("[00:01.00]听妈妈的话"), "simplified lyrics flagged as placeholder");
+			Check(!TcLyric::IsNeteasePlaceholder(""), "empty input flagged as placeholder");
+			Check(!TcLyric::IsNeteasePlaceholder(nullptr), "null input flagged as placeholder");
+			Check(!TcLyric::IsNeteasePlaceholder("[00:01.00]暂无 [00:03.00]歌词"), "multi-line song flagged as placeholder");
+			std::vector<SLyricLine> Lines;
+			Check(ParseSyncedLyrics("[00:01.00]紫荆花盛开", Lines) && Lines[0].m_Text == "紫荆花盛开", "real lyric parsing broken");
+		});
+	});
 	Tests.Group("fetched lyrics are normalized to simplified Chinese", [&] {
 		Tests.Case("traditional lines are converted and flagged simplified", [&] {
 			std::vector<SLyricLine> Lines;

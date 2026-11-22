@@ -2829,25 +2829,29 @@ public:
 					const json_value *pLyric = pLrc ? json_object_get(pLrc, "lyric") : nullptr;
 					const char *pLyricText = (pLyric != nullptr && pLyric->type == json_string) ? pLyric->u.string.ptr : "";
 
-					const bool LrcOk = ParseSyncedLyrics(pLyricText, Meta.m_vFallbackLines, Meta.m_Traditional);
+					// 网易云对未收录/无版权歌曲回 "[00:00.00]暂无歌词" 占位：语法合法
+					// 但不是真词。不过滤会把状态置 READY 并让 m_vLines 非空短路
+					// QQ/酷狗/lrclib 兜底；按无歌词处理让兜底链继续找。
+					const bool LrcOk = !TcLyric::IsNeteasePlaceholder(pLyricText) &&
+							   ParseSyncedLyrics(pLyricText, Meta.m_vFallbackLines, Meta.m_Traditional);
 
-						bool Ok = false;
-						if(pYrcText[0] != '\0')
+					bool Ok = false;
+					if(pYrcText[0] != '\0' && !TcLyric::IsNeteasePlaceholder(pYrcText))
+					{
+						std::vector<SLyricLine> vYrc;
+						if(ParseYrcLyrics(pYrcText, vYrc, Meta.m_Traditional))
 						{
-							std::vector<SLyricLine> vYrc;
-							if(ParseYrcLyrics(pYrcText, vYrc, Meta.m_Traditional))
-							{
-								Meta.m_vLines = std::move(vYrc);
-								++Meta.m_LinesRevision;
-								Ok = true;
-							}
-						}
-						if(!Ok && LrcOk)
-						{
-							Meta.m_vLines = Meta.m_vFallbackLines;
+							Meta.m_vLines = std::move(vYrc);
 							++Meta.m_LinesRevision;
 							Ok = true;
 						}
+					}
+					if(!Ok && LrcOk)
+					{
+						Meta.m_vLines = Meta.m_vFallbackLines;
+						++Meta.m_LinesRevision;
+						Ok = true;
+					}
 
 					if(Ok)
 					{

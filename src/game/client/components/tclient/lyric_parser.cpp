@@ -185,6 +185,36 @@ static int Utf8CharLen(unsigned char c);
 		return true;
 	}
 
+	// 网易云对未收录/无版权歌曲返回占位 LRC（实测 "[00:00.00]暂无歌词"）。它是
+	// 语法合法的一行 LRC，直接解析会得到一行"真歌词"，把歌词状态置 READY 并让
+	// QQ/酷狗/lrclib 兜底被 m_vLines 非空短路——表现就是岛上有词位但永远没词。
+	// 识别：去掉全部 [..] 时间戳/标签与首尾空白后，剩余正文恰为占位文本；
+	// 多于一个括号段说明是多时间戳/多行真词，直接不算占位。
+	bool IsNeteasePlaceholder(const char *pLyricText)
+	{
+		if(pLyricText == nullptr)
+			return false;
+		int Brackets = 0;
+		std::string Body;
+		for(const char *p = pLyricText; *p; ++p)
+		{
+			if(*p == '[')
+			{
+				const char *pEnd = strchr(p, ']');
+				if(pEnd == nullptr)
+					return false; // 未闭合括号：不是网易云的占位形态，交给正常解析
+				if(++Brackets > 1)
+					return false;
+				p = pEnd;
+				continue;
+			}
+			if(*p == '\r' || *p == '\n' || *p == ' ' || *p == '\t')
+				continue;
+			Body.push_back(*p);
+		}
+		return Body == "暂无歌词" || Body == "暫無歌詞";
+	}
+
 	bool ParseSyncedLyrics(const char *pSyncedLyrics, std::vector<SLyricLine> &vOut, bool Traditional)
 	{
 		vOut.clear();

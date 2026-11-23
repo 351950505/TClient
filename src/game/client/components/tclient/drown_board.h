@@ -24,6 +24,8 @@ class CTClientDrownBoard
 	static constexpr float HOOK_HIT_RADIUS = 28.0f;
 	static constexpr float HAMMER_HIT_RADIUS = 32.0f;
 	static constexpr float HAMMER_RESCUE_RANGE = 52.0f; // FireWeapon hit-marker reach tops out near 49 units.
+	// Low-bandwidth servers can deliver the hammer-hit event in the next global snapshot.
+	static constexpr int HAMMER_SNAPSHOT_DELAY_TICKS = 1;
 	static constexpr int HOOK_RELEASE_GRACE_TICKS = SERVER_TICK_SPEED / 2; // 0.5 seconds
 
 	class SFrozenHook
@@ -185,7 +187,9 @@ public:
 				if(RescuerId == VictimId || m_aPlayers[RescuerId].m_DeathAwaitingCharacter || m_aPlayers[RescuerId].m_Team != Victim.m_Team || !IsTrackedTeam(m_aPlayers[RescuerId].m_Team, IncludeTeamZero))
 					continue;
 				const SDrownStatTick &RescuerTick = pTicks[RescuerId];
-				if(!RescuerTick.m_Active || !RescuerTick.m_HasCharacter || RescuerTick.m_AttackTick != GameTick || RescuerTick.m_Weapon != WEAPON_HAMMER)
+				if(!RescuerTick.m_Active || !RescuerTick.m_HasCharacter || RescuerTick.m_AttackTick < 0 ||
+					GameTick < RescuerTick.m_AttackTick || GameTick - RescuerTick.m_AttackTick > HAMMER_SNAPSHOT_DELAY_TICKS ||
+					RescuerTick.m_Weapon != WEAPON_HAMMER)
 					continue;
 				const float RescuerDX = RescuerTick.m_X - Hit.m_X;
 				const float RescuerDY = RescuerTick.m_Y - Hit.m_Y;

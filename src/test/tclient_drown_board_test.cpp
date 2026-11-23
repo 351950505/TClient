@@ -599,6 +599,37 @@ TEST(ClientDrownBoard, HammerSourceNeedsUniqueSameTeamAttack)
 	EXPECT_EQ(HammerRescue.m_RescuerId, -1);
 }
 
+TEST(ClientDrownBoard, HammerRescueAcceptsOneTickSnapshotDelay)
+{
+	CTClientDrownBoard Tracker;
+	CTickArray aTicks{};
+	FeedTick(Tracker, aTicks, 1, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 50.0f, 100.0f));
+	FeedTick(Tracker, aTicks, 2, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 500.0f, 100.0f));
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(true, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, -1));
+	RunStats(Tracker, aTicks, 1, true, false, 100);
+
+	FeedTick(Tracker, aTicks, 3, 1, MakeStatTick(false, false, HOOK_IDLE, -1, 100.0f, 100.0f, 0.0f, 0.0f, true, 0));
+	aTicks[1].m_AttackTick = 101;
+	aTicks[1].m_Weapon = WEAPON_HAMMER;
+	const CTClientDrownBoard::SHammerHit Hit{86.0f, 100.0f};
+	const auto HammerRescue = Tracker.FindHammerRescuer(3, aTicks.data(), &Hit, 1, true, 102);
+	EXPECT_TRUE(HammerRescue.m_Hit);
+	EXPECT_EQ(HammerRescue.m_RescuerId, 1);
+
+	aTicks[1].m_AttackTick = 100;
+	const auto TooOld = Tracker.FindHammerRescuer(3, aTicks.data(), &Hit, 1, true, 102);
+	EXPECT_EQ(TooOld.m_RescuerId, -1);
+	aTicks[1].m_AttackTick = 103;
+	const auto Future = Tracker.FindHammerRescuer(3, aTicks.data(), &Hit, 1, true, 102);
+	EXPECT_EQ(Future.m_RescuerId, -1);
+	aTicks[1].m_AttackTick = 101;
+
+	aTicks[3].m_HammerHit = HammerRescue.m_Hit;
+	aTicks[3].m_HammerRescuerId = HammerRescue.m_RescuerId;
+	RunStats(Tracker, aTicks, 1, true, false, 102);
+	EXPECT_EQ(Tracker.Stats(1).m_Saves, 1);
+}
+
 TEST(ClientDrownBoard, TeamZeroHammerRescueUsesSameIncludeFilter)
 {
 	CTClientDrownBoard Tracker;

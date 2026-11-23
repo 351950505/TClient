@@ -1,6 +1,6 @@
-#include <game/client/components/tclient/hook_tile_highlight.h>
-
 #include <engine/shared/config.h>
+
+#include <game/client/components/tclient/hook_tile_highlight.h>
 
 #include <gtest/gtest.h>
 
@@ -56,6 +56,18 @@ TEST(ClientHookTile, HookedFrozenPredictionTargetIsNotHighlighted)
 	using tclient_hook_tile::FreezeHighlightMarked;
 	EXPECT_TRUE(FreezeHighlightMarked(true, true, false, true));
 	EXPECT_FALSE(FreezeHighlightMarked(true, true, true, true));
+}
+
+TEST(ClientHookTile, HookedAndAliveTargetsLoseHighlightImmediately)
+{
+	using tclient_hook_tile::FreezeHighlightAlpha;
+	using tclient_hook_tile::FreezeHighlightMarked;
+	const bool FrozenTarget = FreezeHighlightMarked(true, true, false, true);
+	const bool HookedTarget = FreezeHighlightMarked(true, true, true, true);
+	const bool AliveTarget = FreezeHighlightMarked(true, true, false, false);
+	EXPECT_FLOAT_EQ(FreezeHighlightAlpha(FrozenTarget), 1.0f);
+	EXPECT_FLOAT_EQ(FreezeHighlightAlpha(HookedTarget), 0.0f);
+	EXPECT_FLOAT_EQ(FreezeHighlightAlpha(AliveTarget), 0.0f);
 }
 
 TEST(ClientHookTile, InteriorSelectsOnlyOne)

@@ -39,6 +39,7 @@
 #include "components/sounds.h"
 #include "components/spectator.h"
 #include "components/statboard.h"
+#include "components/tclient/hook_tile_highlight.h"
 #include "components/voting.h"
 #include "lineinput.h"
 #include "prediction/entities/character.h"
@@ -3980,42 +3981,59 @@ int CGameClient::IntersectCharacter(vec2 HookPos, vec2 NewPos, vec2 &NewPos2, in
 	float Distance = 0.0f;
 	int ClosestId = -1;
 
-	const CClientData &OwnClientData = m_aClients[OwnId];
-
-	for(int i = 0; i < MAX_CLIENTS; i++)
+	const float HookRadius = CCharacterCore::PhysicalSize() + 2.0f;
+	const uint64_t Frame = Client()->RenderFrameId();
+	const bool CacheKeyChanged = tclient_hook_tile::PredictionCacheKeyChanged(
+		m_IntersectCharacterCacheFrame, m_IntersectCharacterCacheOwnId, Frame, OwnId);
+	if(!m_IntersectCharacterCacheValid || CacheKeyChanged)
 	{
-		if(i == OwnId)
-			continue;
+		m_IntersectCharacterCacheValid = true;
+		m_IntersectCharacterCacheFrame = Frame;
+		m_IntersectCharacterCacheOwnId = OwnId;
+		m_NumIntersectCharacterCandidates = 0;
 
-		const CClientData &Data = m_aClients[i];
+		const CClientData &OwnClientData = m_aClients[OwnId];
+		const float Intra = Client()->IntraGameTick(g_Config.m_ClDummy);
+		for(int i = 0; i < MAX_CLIENTS; i++)
+		{
+			if(i == OwnId)
+				continue;
 
-		if(!Data.m_Active || !m_Snap.m_aCharacters[i].m_Active)
-			continue;
+			const CClientData &Data = m_aClients[i];
+			if(!Data.m_Active || !m_Snap.m_aCharacters[i].m_Active)
+				continue;
 
-		CNetObj_Character Prev = m_Snap.m_aCharacters[i].m_Prev;
-		CNetObj_Character Player = m_Snap.m_aCharacters[i].m_Cur;
+			const bool IsOneSuper = Data.m_Super || OwnClientData.m_Super;
+			const bool IsOneSolo = Data.m_Solo || OwnClientData.m_Solo;
+			if(!IsOneSuper && (!m_Teams.SameTeam(i, OwnId) || IsOneSolo || OwnClientData.m_HookHitDisabled))
+				continue;
 
-		vec2 Position = mix(vec2(Prev.m_X, Prev.m_Y), vec2(Player.m_X, Player.m_Y), Client()->IntraGameTick(g_Config.m_ClDummy));
+			const CNetObj_Character &Prev = m_Snap.m_aCharacters[i].m_Prev;
+			const CNetObj_Character &Player = m_Snap.m_aCharacters[i].m_Cur;
+			m_aIntersectCharacterCandidateIds[m_NumIntersectCharacterCandidates] = i;
+			m_aIntersectCharacterCandidatePositions[m_NumIntersectCharacterCandidates] = mix(vec2(Prev.m_X, Prev.m_Y), vec2(Player.m_X, Player.m_Y), Intra);
+			++m_NumIntersectCharacterCandidates;
+		}
+	}
 
-		bool IsOneSuper = Data.m_Super || OwnClientData.m_Super;
-		bool IsOneSolo = Data.m_Solo || OwnClientData.m_Solo;
-
-		if(!IsOneSuper && (!m_Teams.SameTeam(i, OwnId) || IsOneSolo || OwnClientData.m_HookHitDisabled))
+	for(int CandidateIndex = 0; CandidateIndex < m_NumIntersectCharacterCandidates; ++CandidateIndex)
+	{
+		const int i = m_aIntersectCharacterCandidateIds[CandidateIndex];
+		const vec2 Position = m_aIntersectCharacterCandidatePositions[CandidateIndex];
+		if(!tclient_hook_tile::SegmentBoundsMayIntersect(HookPos, NewPos, Position, HookRadius))
 			continue;
 
 		vec2 ClosestPoint;
-		if(closest_point_on_line(HookPos, NewPos, Position, ClosestPoint))
+		if(closest_point_on_line(HookPos, NewPos, Position, ClosestPoint) && distance(Position, ClosestPoint) < HookRadius)
 		{
-			if(distance(Position, ClosestPoint) < CCharacterCore::PhysicalSize() + 2.0f)
+			const float CandidateDistance = distance(HookPos, Position);
+			if(ClosestId == -1 || CandidateDistance < Distance)
 			{
-				if(ClosestId == -1 || distance(HookPos, Position) < Distance)
-				{
-					NewPos2 = ClosestPoint;
-					ClosestId = i;
-					Distance = distance(HookPos, Position);
-					if(pPlayerPosition)
-						*pPlayerPosition = Position;
-				}
+				NewPos2 = ClosestPoint;
+				ClosestId = i;
+				Distance = CandidateDistance;
+				if(pPlayerPosition)
+					*pPlayerPosition = Position;
 			}
 		}
 	}

@@ -2961,6 +2961,7 @@ if(CLIENT)
     components/tclient/skinprofiles.cpp
     components/tclient/skinprofiles.h
     components/tclient/spectator_friends.h
+    components/tclient/stack_tee_hint.h
     components/tclient/statusbar.cpp
     components/tclient/statusbar.h
     components/tclient/stb_image.h
@@ -3789,6 +3790,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     tclient_jitter_buffer_test.cpp
     tclient_relay_test.cpp
     tclient_skinprofiles_test.cpp
+    tclient_stack_tee_hint_test.cpp
     teehistorian_test.cpp
     test.cpp
     test.h

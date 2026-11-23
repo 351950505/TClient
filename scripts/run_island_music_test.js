@@ -42,6 +42,7 @@ try {
   const source = readSource('src/game/client/components/tclient/island_music.cpp');
   const track = between(source, '\tstruct STrack\n', '\t// ---------------- SMTC worker').trimEnd();
   const lyrics = between(source, '\t// ---------------- lyrics', '\tint FindLineIndex(');
+  const findLineIndex = between(source, '\tint FindLineIndex(', '\tint FindNextLineIndex(').trimEnd();
   const goneProtocol = between(source, '	// ---------------- Gone v2 protocol ----------------', '	// ---------------- Gone v2 protocol end ----------------');
   const widthCache = between(source, '\tclass CTextWidthCacheEntry', '\t// vinyl record spin angle');
   const measureCached = between(source, '\tfloat MeasureCached(', '\t// TClient: game round timer');
@@ -63,6 +64,7 @@ ${track}
 ${goneProtocol}
 ${widthCache}
 ${measureCached}
+${findLineIndex}
   IHttp *m_pHttp = nullptr;
   IEngine *m_pEngine = nullptr;
   ${coverLimit}

@@ -287,6 +287,7 @@ public:
 	char m_TcCustomFont[255] = "Default";
 	char m_TcIslandLrclibBase[128] = "https://lrclib.net";
 	int m_TcIslandLyricTraditional = 0;
+	int m_TcIslandLyricOffset = 0;
 };
 static CTestFontConfig g_Config;
 static int str_length(const char *pText) { return (int)strlen(pText); }
@@ -801,6 +802,25 @@ int main()
 			Check(!CMusic::ReadGoneV2(&Gone, 55, Gone.MainHeartbeat, 10001), "uninitialized instance accepted");
 			Gone.Instance = 9002; Gone.Gone = 0;
 			Check(!CMusic::ReadGoneV2(&Gone, 55, Gone.MainHeartbeat, 10001), "present player reported Gone");
+		});
+	});
+	Tests.Group("trusted media position anchors lyrics immediately", [&] {
+		Tests.Case("late watcher connection starts at current song line", [&] {
+			CMusic Music;
+			Music.m_vLines = {{1000, "opening"}, {40000, "current"}, {45000, "next"}};
+			Music.SyncMediaClock(42000, 0, true, true);
+			const int64_t Position = Music.CurrentPositionMs();
+			Check(Position >= 42000 && Position < 42100, "trusted watcher position was discarded without duration");
+			Check(Music.FindLineIndex(Position) == 1, "late watcher connection selected an old lyric line");
+			Music.SyncMediaClock(48000, 0, true, true);
+			Check(Music.FindLineIndex(Music.CurrentPositionMs()) == 2, "lyrics did not follow the trusted watcher position");
+		});
+		Tests.Case("untrusted zero-duration SMTC position still starts at zero", [&] {
+			CMusic Music;
+			Music.SyncMediaClock(42000, 0, true, false);
+			Music.m_vLines = {{1000, "opening"}, {40000, "current"}};
+			Check(Music.CurrentPositionMs() == 0, "untrusted monitor-relative position was mistaken for song progress");
+			Check(Music.FindLineIndex(Music.CurrentPositionMs()) == 0, "initial lyric selection changed");
 		});
 	});
 	Tests.Group("LRC timestamp ranges", [&] {

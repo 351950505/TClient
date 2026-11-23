@@ -1020,7 +1020,6 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 	const int Width = pCollision->GetWidth();
 	const int Height = pCollision->GetHeight();
 	const bool ActiveLocalView = InGame && !GameClient()->m_Snap.m_SpecInfo.m_Active && Width > 0 && Height > 0;
-	const float Now = Client()->LocalTime();
 	const bool Enabled = g_Config.m_TcFreezeEntryHighlight != 0;
 
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
@@ -1035,7 +1034,7 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 			GameClient()->m_aClients[ClientId].m_Active && GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
 		if(!Active)
 		{
-			m_aLocalFreezeEntryHighlight[Dummy].Update(false, false, 0, 0, Now, Enabled, [] { return -1; });
+			m_aLocalFreezeEntryHighlight[Dummy].Update(false, false, Enabled, [] { return -1; });
 			continue;
 		}
 
@@ -1043,14 +1042,14 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 			GameClient()->m_aClients[ClientId].m_RegularPredicted : GameClient()->m_aClients[ClientId].m_Predicted;
 		const bool Frozen = Core.m_FreezeEnd != 0 || Core.m_DeepFrozen || Core.m_LiveFrozen;
 		m_aLocalFreezeEntryHighlight[Dummy].Update(
-			Active, Frozen, Core.m_FreezeEnd, Client()->PredGameTick(Dummy), Now, Enabled, [&] {
-			const vec2 Pos = Core.m_Pos;
-			if(!Frozen || Pos.x < 0.0f || Pos.y < 0.0f || Pos.x >= Width * 32.0f || Pos.y >= Height * 32.0f)
-				return -1;
-			const int MapIndex = pCollision->GetMapIndex(Pos);
-			const auto IsFreezeTile = [](int Tile) { return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE; };
-			return MapIndex >= 0 && (IsFreezeTile(pCollision->GetTileIndex(MapIndex)) || IsFreezeTile(pCollision->GetFrontTileIndex(MapIndex))) ? MapIndex : -1;
-		});
+			Active, Frozen, Enabled, [&] {
+				const vec2 Pos = Core.m_Pos;
+				if(!Frozen || Pos.x < 0.0f || Pos.y < 0.0f || Pos.x >= Width * 32.0f || Pos.y >= Height * 32.0f)
+					return -1;
+				const int MapIndex = pCollision->GetMapIndex(Pos);
+				const auto IsFreezeTile = [](int Tile) { return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE; };
+				return MapIndex >= 0 && (IsFreezeTile(pCollision->GetTileIndex(MapIndex)) || IsFreezeTile(pCollision->GetFrontTileIndex(MapIndex))) ? MapIndex : -1;
+			});
 	}
 }
 
@@ -1064,20 +1063,19 @@ void CPlayers::RenderFreezeEntryTileHighlight()
 		return;
 	int aTileIndices[NUM_DUMMIES] = {-1, -1};
 	float aTileAlphas[NUM_DUMMIES] = {};
-	const float Now = Client()->LocalTime();
-	bool HasFlash = false;
+	bool HasHighlight = false;
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
 	{
 		aTileIndices[Dummy] = m_aLocalFreezeEntryHighlight[Dummy].TileIndex();
-		aTileAlphas[Dummy] = m_aLocalFreezeEntryHighlight[Dummy].Alpha(Now);
+		aTileAlphas[Dummy] = m_aLocalFreezeEntryHighlight[Dummy].Alpha();
 		if(Dummy > 0 && aTileIndices[Dummy] >= 0 && aTileIndices[Dummy] == aTileIndices[0])
 		{
 			aTileAlphas[0] = std::max(aTileAlphas[0], aTileAlphas[Dummy]);
 			aTileIndices[Dummy] = -1;
 		}
-		HasFlash |= aTileIndices[Dummy] >= 0 && aTileAlphas[Dummy] > 0.0f;
+		HasHighlight |= aTileIndices[Dummy] >= 0 && aTileAlphas[Dummy] > 0.0f;
 	}
-	if(!HasFlash)
+	if(!HasHighlight)
 		return;
 
 	const ColorRGBA Color = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcFreezeEntryHighlightColor));
@@ -1809,14 +1807,13 @@ void CPlayers::OnRender()
 		else
 			Alpha = 0.0f;
 
-		// 预判冻结 tee 染色：只提示尚未被实际钩中的预测目标。
-		// 卡锤染色优先——真实出锤/出钩反馈压过预判；目标被钩中、解冻或不再
-		// 符合预判条件后，染色渐出用时 0.5s。
+		// 预判冻结 tee 染色：冻结且未被实际钩中的预测目标立即亮，钩中或解冻立即灭。
+		// 卡锤染色仍优先于预判，避免两个高亮颜色叠在一起。
 		const bool HookPredictFrozenMarked = tclient_hook_tile::FreezeHighlightMarked(
 			g_Config.m_TcHookTileHighlightFreeze != 0, i == HookPredictTargetId, i == HookHeldId,
 			GameClient()->m_aClients[i].m_FreezeEnd != 0 || GameClient()->m_aClients[i].m_LiveFrozen);
 		float &HookPredictAlpha = m_aHookPredictHighlightAlpha[i];
-		HookPredictAlpha = TcAdvanceHighlightTimed(HookPredictAlpha, HookPredictFrozenMarked, Client()->RenderFrameTime(), 0.04f, 0.5f);
+		HookPredictAlpha = tclient_hook_tile::FreezeHighlightAlpha(HookPredictFrozenMarked);
 		if(Alpha <= 0.001f && HookPredictAlpha > 0.001f)
 		{
 			const ColorRGBA HookPredictBodyColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcHookTileHighlightFreezeBodyColor));

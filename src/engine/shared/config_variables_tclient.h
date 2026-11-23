@@ -490,6 +490,8 @@ MACRO_CONFIG_INT(MeMuteFinishFeed, me_mute_finish_feed, 0, 0, 1, CFGFLAG_CLIENT 
 // 自适应快照插值缓冲：网络抖动时自动延长插值窗口（最多 max 毫秒）换平滑，平稳时自动收回
 MACRO_CONFIG_INT(TcJitterBuffer, tc_jitter_buffer, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Adaptive snapshot interpolation buffer: adds up to tc_jitter_buffer_max ms of extra delay when network jitter rises, to keep rendering smooth")
 MACRO_CONFIG_INT(TcJitterBufferMax, tc_jitter_buffer_max, 30, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Maximum extra delay in ms for the adaptive snapshot interpolation buffer")
+// ME page: custom key toggles the stack hint for a clear drop onto a frozen Tee (off by default).
+MACRO_CONFIG_INT(MeStackTeeHint, me_stack_tee_hint, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: show a down arrow when you can drop onto a frozen Tee below")
 // ME page: TClient 企鹅徽标（ddnet-custom-clients 皮肤颜色法）
 // 广播是客户端身份的一部分，始终发送；本开关只控制自己是否显示徽标。
 MACRO_CONFIG_INT(MeClientBadge, me_client_badge, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "ME: show the TClient penguin next to TClient players on the scoreboard (TClient identity is always broadcast)")

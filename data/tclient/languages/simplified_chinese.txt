@@ -2737,3 +2737,9 @@ Use 12-hour format for the clock.
 
 Append seconds to the status bar clock.
 == 状态栏时钟显示到秒。
+
+Stack Tee
+== 叠 Tee
+
+Stack Tee hint toggle key
+== 叠 Tee 提示按键

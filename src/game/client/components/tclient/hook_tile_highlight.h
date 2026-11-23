@@ -32,6 +32,12 @@ namespace tclient_hook_tile
 		return Enabled && PredictedTarget && !HookedTarget && Frozen;
 	}
 
+	inline bool SegmentBoundsMayIntersect(vec2 Start, vec2 End, vec2 Point, float Radius)
+	{
+		return Point.x >= std::min(Start.x, End.x) - Radius && Point.x <= std::max(Start.x, End.x) + Radius &&
+		       Point.y >= std::min(Start.y, End.y) - Radius && Point.y <= std::max(Start.y, End.y) + Radius;
+	}
+
 	inline float FreezeHighlightAlpha(bool Marked)
 	{
 		return Marked ? 1.0f : 0.0f;

@@ -812,6 +812,12 @@ public:
 	// DDRace
 
 	int m_aLocalIds[NUM_DUMMIES];
+	bool m_IntersectCharacterCacheValid = false;
+	uint64_t m_IntersectCharacterCacheFrame = 0;
+	int m_IntersectCharacterCacheOwnId = -1;
+	int m_NumIntersectCharacterCandidates = 0;
+	int m_aIntersectCharacterCandidateIds[MAX_CLIENTS];
+	vec2 m_aIntersectCharacterCandidatePositions[MAX_CLIENTS];
 	CNetObj_PlayerInput m_DummyInput;
 	CNetObj_PlayerInput m_HammerInput;
 	unsigned int m_DummyFire;

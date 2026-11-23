@@ -53,7 +53,8 @@ void CPlayerStatus::RenderGears()
 	const CScreenRect WorldRect = Graphics()->MapScreenToWorld(Center.x, Center.y, 100.0f, 100.0f, 100.0f, 0, 0, Graphics()->ScreenAspect(), GameClient()->m_Camera.m_Zoom);
 	const CScreenRect PrevRect = Graphics()->GetScreen();
 
-	std::vector<vec2> vGearPixels;
+	vec2 aGearPixels[MAX_CLIENTS];
+	int NumGears = 0;
 	bool Any = false;
 	for(int i = 0; i < MAX_CLIENTS; i++)
 	{
@@ -81,9 +82,9 @@ void CPlayerStatus::RenderGears()
 		// 齿轮投影到屏幕像素：字形按最终像素尺寸栅格化才是 1:1 渲染，
 		// 世界空间直接画会被变换拉伸出锯齿（2026-11-06 玩家反馈）。
 		const float Scale = Graphics()->ScreenHeight() / WorldRect.Height();
-		vGearPixels.push_back(vec2(
+		aGearPixels[NumGears++] = vec2(
 			(Pos.x - WorldRect.m_TopLeft.x) * Graphics()->ScreenWidth() / WorldRect.Width(),
-			(Pos.y - WorldRect.m_TopLeft.y) * Scale));
+			(Pos.y - WorldRect.m_TopLeft.y) * Scale);
 	}
 	if(Any)
 	{
@@ -92,10 +93,11 @@ void CPlayerStatus::RenderGears()
 		const float GearSize = std::clamp(20.0f * Graphics()->ScreenHeight() / WorldRect.Height(), 10.0f, 96.0f);
 		TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
 		TextRender()->TextColor(color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcSettingsGearColor)));
-		for(const vec2 &Gear : vGearPixels)
+		const float GearWidth = TextRender()->TextWidth(GearSize, FontIcon::GEAR, -1, -1.0f);
+		for(int GearIndex = 0; GearIndex < NumGears; ++GearIndex)
 		{
-			const float Width = TextRender()->TextWidth(GearSize, FontIcon::GEAR, -1, -1.0f);
-			TextRender()->Text(Gear.x - Width / 2.0f, Gear.y - GearSize / 2.0f, GearSize, FontIcon::GEAR, -1.0f);
+			const vec2 &Gear = aGearPixels[GearIndex];
+			TextRender()->Text(Gear.x - GearWidth / 2.0f, Gear.y - GearSize / 2.0f, GearSize, FontIcon::GEAR, -1.0f);
 		}
 		TextRender()->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 		TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
@@ -119,6 +121,8 @@ void CPlayerStatus::RenderStackTeeHint()
 	const auto &Local = GameClient()->m_aClients[LocalId];
 	const CCharacterCore &LocalCore = g_Config.m_TcFastInput != 0 ? Local.m_RegularPredicted : Local.m_Predicted;
 	const bool LocalFrozen = LocalCore.m_FreezeEnd != 0 || LocalCore.m_DeepFrozen || LocalCore.m_LiveFrozen;
+	if(LocalFrozen)
+		return;
 	const vec2 LocalPos = Local.m_RenderPos;
 	const int LocalTeam = GameClient()->m_Teams.Team(LocalId);
 	const int LocalX = round_to_int(LocalPos.x);
@@ -142,11 +146,11 @@ void CPlayerStatus::RenderStackTeeHint()
 			!GameClient()->m_Snap.m_aCharacters[ClientId].m_Active || !GameClient()->m_Snap.m_apPlayerInfos[ClientId])
 			continue;
 		const auto &Candidate = GameClient()->m_aClients[ClientId];
-		const CCharacterCore &CandidateCore = g_Config.m_TcFastInput != 0 ? Candidate.m_RegularPredicted : Candidate.m_Predicted;
-		if(!CanCollideWithClient(ClientId, CandidateCore))
-			continue;
 		const vec2 Pos = Candidate.m_RenderPos;
 		if(round_to_int(Pos.x) != LocalX || Pos.y <= LocalPos.y || (TargetId >= 0 && Pos.y >= TargetY))
+			continue;
+		const CCharacterCore &CandidateCore = g_Config.m_TcFastInput != 0 ? Candidate.m_RegularPredicted : Candidate.m_Predicted;
+		if(!CanCollideWithClient(ClientId, CandidateCore))
 			continue;
 		TargetId = ClientId;
 		TargetY = Pos.y;

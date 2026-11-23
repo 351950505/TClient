@@ -891,9 +891,9 @@ void CPlayers::RenderHookTileHighlight(int ClientId)
 		// 梯度焦点：预判模式取所选区域中心（砖块量化，随砖块稳定，避免准星微动
 		// 每帧重建）；抓住模式为真实钩点。
 		const vec2 Contact = Predict ? vec2((MinX + MaxX + 1.0f) * 16.0f, (MinY + MaxY + 1.0f) * 16.0f) :
-					vec2(
-						std::clamp((float)Character.m_HookX, MinX * 32.0f, (MaxX + 1) * 32.0f),
-						std::clamp((float)Character.m_HookY, MinY * 32.0f, (MaxY + 1) * 32.0f));
+				vec2(
+					std::clamp((float)Character.m_HookX, MinX * 32.0f, (MaxX + 1) * 32.0f),
+					std::clamp((float)Character.m_HookY, MinY * 32.0f, (MaxY + 1) * 32.0f));
 		// 顶点 alpha 结构（颜色仍由渲染时整体调制）。默认径向柔光：以钩点为圆心
 		// 分段线性衰减——中心全强度、55% 处 55%、边缘 12%（对齐对比稿
 		// softgradradial 的三段 stop，半径=区域最长边×0.95）；纵向柔光
@@ -1019,6 +1019,7 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 	const CCollision *pCollision = Collision();
 	const int Width = pCollision->GetWidth();
 	const int Height = pCollision->GetHeight();
+	const int PrimaryLocalClientId = GameClient()->m_Snap.m_LocalClientId;
 	const bool ActiveLocalView = InGame && !GameClient()->m_Snap.m_SpecInfo.m_Active && Width > 0 && Height > 0;
 	const bool Enabled = g_Config.m_TcFreezeEntryHighlight != 0;
 
@@ -1030,8 +1031,10 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 			m_aLocalFreezeEntryHighlight[Dummy].Reset();
 			m_aFreezeEntryClientId[Dummy] = ClientId;
 		}
-		const bool Active = ActiveLocalView && in_range(ClientId, MAX_CLIENTS - 1) &&
-			GameClient()->m_aClients[ClientId].m_Active && GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
+		const bool Active = ActiveLocalView &&
+				    tclient_frozen_entry::IsPrimaryLocalClient(ClientId, PrimaryLocalClientId) &&
+				    in_range(ClientId, MAX_CLIENTS - 1) && GameClient()->m_aClients[ClientId].m_Active &&
+				    GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
 		if(!Active)
 		{
 			m_aLocalFreezeEntryHighlight[Dummy].Update(false, false, Enabled, [] { return -1; });
@@ -1039,7 +1042,8 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 		}
 
 		const CCharacterCore &Core = g_Config.m_TcFastInput ?
-			GameClient()->m_aClients[ClientId].m_RegularPredicted : GameClient()->m_aClients[ClientId].m_Predicted;
+						     GameClient()->m_aClients[ClientId].m_RegularPredicted :
+						     GameClient()->m_aClients[ClientId].m_Predicted;
 		const bool Frozen = Core.m_FreezeEnd != 0 || Core.m_DeepFrozen || Core.m_LiveFrozen;
 		m_aLocalFreezeEntryHighlight[Dummy].Update(
 			Active, Frozen, Enabled, [&] {
@@ -1049,7 +1053,8 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 				const int MapIndex = pCollision->GetMapIndex(Pos);
 				const auto IsFreezeTile = [](int Tile) { return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE; };
 				return MapIndex >= 0 && (IsFreezeTile(pCollision->GetTileIndex(MapIndex)) || IsFreezeTile(pCollision->GetFrontTileIndex(MapIndex))) ? MapIndex : -1;
-			});
+			},
+			Client()->LocalTime());
 	}
 }
 

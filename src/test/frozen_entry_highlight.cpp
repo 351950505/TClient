@@ -21,17 +21,27 @@ TEST(ClientFrozenEntryHighlight, TileTurnsOnWithFreezeAndOffWithThaw)
 	EXPECT_EQ(Highlight.TileIndex(), -1);
 }
 
-TEST(ClientFrozenEntryHighlight, FreezeHighlightsTheEntryTileUntilAlive)
+TEST(ClientFrozenEntryHighlight, FlashFadesOutAfterHalfASecondWhileStillFrozen)
 {
 	tclient_frozen_entry::CHighlight Highlight;
-	Highlight.Update(true, false, true, [] { return -1; });
+	Highlight.Update(true, false, true, [] { return -1; }, 10.0f);
 	int Lookups = 0;
-	EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [&] { ++Lookups; return 37; }), 1.0f);
-	for(int Frame = 1; Frame <= 60; ++Frame)
-		EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [&] { ++Lookups; return 38; }), 1.0f);
-	EXPECT_EQ(Lookups, 1);
+	EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [&] { ++Lookups; return 37; }, 10.0f), 1.0f);
 	EXPECT_EQ(Highlight.TileIndex(), 37);
-	EXPECT_FLOAT_EQ(Highlight.Update(true, false, true, [] { return -1; }), 0.0f);
+	EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [&] { ++Lookups; return 38; }, 10.25f), 0.5f);
+	EXPECT_EQ(Highlight.TileIndex(), 37);
+	EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [&] { ++Lookups; return 38; }, 10.5f), 0.0f);
+	EXPECT_EQ(Highlight.TileIndex(), -1);
+	EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [&] { ++Lookups; return 38; }, 10.6f), 0.0f);
+	EXPECT_EQ(Lookups, 1);
+}
+
+TEST(ClientFrozenEntryHighlight, LongFrameCannotExtendFlashBeyondHalfASecond)
+{
+	tclient_frozen_entry::CHighlight Highlight;
+	Highlight.Update(true, false, true, [] { return -1; }, 3.0f);
+	EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [] { return 12; }, 3.0f), 1.0f);
+	EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [] { return 13; }, 3.6f), 0.0f);
 	EXPECT_EQ(Highlight.TileIndex(), -1);
 }
 
@@ -84,15 +94,11 @@ TEST(ClientFrozenEntryHighlight, InactiveViewClearsHighlightImmediately)
 	EXPECT_EQ(Highlight.TileIndex(), -1);
 }
 
-TEST(ClientFrozenEntryHighlight, MainAndDummyTrackTilesIndependently)
+TEST(ClientFrozenEntryHighlight, OnlyPrimaryLocalTeeIsSelected)
 {
-	tclient_frozen_entry::CHighlight Main;
-	tclient_frozen_entry::CHighlight Dummy;
-	EXPECT_FLOAT_EQ(Main.Update(true, true, true, [] { return 10; }), 1.0f);
-	EXPECT_FLOAT_EQ(Dummy.Update(true, true, true, [] { return 20; }), 1.0f);
-	EXPECT_EQ(Main.TileIndex(), 10);
-	EXPECT_EQ(Dummy.TileIndex(), 20);
-	EXPECT_FLOAT_EQ(Main.Update(true, false, true, [] { return -1; }), 0.0f);
-	EXPECT_EQ(Main.TileIndex(), -1);
-	EXPECT_EQ(Dummy.TileIndex(), 20);
+	EXPECT_TRUE(tclient_frozen_entry::IsPrimaryLocalClient(7, 7));
+	EXPECT_FALSE(tclient_frozen_entry::IsPrimaryLocalClient(8, 7)); // Dummy
+	EXPECT_FALSE(tclient_frozen_entry::IsPrimaryLocalClient(9, 7)); // Remote tee
+	EXPECT_FALSE(tclient_frozen_entry::IsPrimaryLocalClient(-1, 7));
+	EXPECT_FALSE(tclient_frozen_entry::IsPrimaryLocalClient(7, -1));
 }

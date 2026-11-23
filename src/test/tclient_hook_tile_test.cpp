@@ -51,6 +51,33 @@ TEST(ClientHookTile, FreezeHighlightRequiresEnabledPredictedUnhookedFrozenTarget
 	EXPECT_FALSE(FreezeHighlightMarked(true, false, true, true));
 }
 
+TEST(ClientHookTile, SegmentBoundsRejectDistantPlayersAndKeepConservativeCandidates)
+{
+	EXPECT_TRUE(tclient_hook_tile::SegmentBoundsMayIntersect(vec2(0.0f, 0.0f), vec2(50.0f, 0.0f), vec2(25.0f, 29.0f), 30.0f));
+	EXPECT_TRUE(tclient_hook_tile::SegmentBoundsMayIntersect(vec2(0.0f, 0.0f), vec2(50.0f, 0.0f), vec2(79.0f, 0.0f), 30.0f));
+	EXPECT_FALSE(tclient_hook_tile::SegmentBoundsMayIntersect(vec2(0.0f, 0.0f), vec2(50.0f, 0.0f), vec2(80.01f, 0.0f), 30.0f));
+	EXPECT_TRUE(tclient_hook_tile::SegmentBoundsMayIntersect(vec2(50.0f, 0.0f), vec2(0.0f, 0.0f), vec2(25.0f, -30.0f), 30.0f));
+}
+
+TEST(ClientHookTile, SegmentBoundsNeverRejectAnExactSegmentHit)
+{
+	constexpr float Radius = 30.0f;
+	const auto CheckSegment = [](vec2 Start, vec2 End) {
+		for(float X = -40.0f; X <= 120.0f; X += 4.0f)
+			for(float Y = -40.0f; Y <= 120.0f; Y += 4.0f)
+			{
+				const vec2 Point(X, Y);
+				vec2 Closest;
+				if(closest_point_on_line(Start, End, Point, Closest) && distance(Point, Closest) < Radius)
+					EXPECT_TRUE(tclient_hook_tile::SegmentBoundsMayIntersect(Start, End, Point, Radius));
+			}
+	};
+	CheckSegment(vec2(0.0f, 0.0f), vec2(64.0f, 0.0f));
+	CheckSegment(vec2(64.0f, 0.0f), vec2(0.0f, 0.0f));
+	CheckSegment(vec2(0.0f, 0.0f), vec2(64.0f, 64.0f));
+	CheckSegment(vec2(64.0f, -16.0f), vec2(-8.0f, 72.0f));
+}
+
 TEST(ClientHookTile, HookedFrozenPredictionTargetIsNotHighlighted)
 {
 	using tclient_hook_tile::FreezeHighlightMarked;

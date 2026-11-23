@@ -211,7 +211,8 @@ void CPlayerStatus::RenderStackTeeHint()
 				tclient_stack_tee::TileStopsDrop(pCollision->GetFrontTileIndex(MapIndex)))
 				return false;
 
-			if(pCollision->IsSpeedup(MapIndex) || pCollision->IsTeleport(MapIndex) || pCollision->IsEvilTeleport(MapIndex) ||
+			if(tclient_stack_tee::HasSpeedupAtIndex(MapIndex, [&](int Index) { return pCollision->IsSpeedup(Index); }) ||
+				pCollision->IsTeleport(MapIndex) || pCollision->IsEvilTeleport(MapIndex) ||
 				pCollision->IsCheckTeleport(MapIndex) || pCollision->IsCheckEvilTeleport(MapIndex))
 				return false;
 

@@ -96,6 +96,23 @@ TEST(ClientStackTeeHint, ThirdTeeInsidePlayerCollisionRadiusBlocksDropPath)
 	EXPECT_TRUE(tclient_stack_tee::DropPathClearOfTee(Start, End, vec2(100.0f, 236.0f), 35.0f));
 }
 
+TEST(ClientStackTeeHint, EmptyMapIndexDoesNotQuerySpeedup)
+{
+	int SpeedupChecks = 0;
+	EXPECT_FALSE(tclient_stack_tee::HasSpeedupAtIndex(-1, [&](int) {
+		++SpeedupChecks;
+		return true;
+	}));
+	EXPECT_EQ(SpeedupChecks, 0);
+
+	EXPECT_TRUE(tclient_stack_tee::HasSpeedupAtIndex(42, [&](int Index) {
+		++SpeedupChecks;
+		EXPECT_EQ(Index, 42);
+		return true;
+	}));
+	EXPECT_EQ(SpeedupChecks, 1);
+}
+
 TEST(ClientStackTeeHint, PlayerCollisionMatchesCharacterCoreGates)
 {
 	const tclient_stack_tee::CStackTeeCollisionState Normal{false, false, false};

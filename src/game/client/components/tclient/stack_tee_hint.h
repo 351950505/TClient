@@ -64,6 +64,12 @@ namespace tclient_stack_tee
 		return Tile == TILE_DEATH;
 	}
 
+	template<typename FIsSpeedup>
+	bool HasSpeedupAtIndex(int MapIndex, FIsSpeedup IsSpeedup)
+	{
+		return MapIndex >= 0 && IsSpeedup(MapIndex);
+	}
+
 	inline bool DropPathClearOfTee(vec2 Start, vec2 End, vec2 Other, float CollisionRadius)
 	{
 		if(!std::isfinite(Start.x) || !std::isfinite(Start.y) || !std::isfinite(End.x) || !std::isfinite(End.y) ||

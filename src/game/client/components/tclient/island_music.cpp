@@ -161,6 +161,7 @@ public:
 		std::string m_Album;
 		int64_t m_DurationMs = 0;
 		int64_t m_PositionMs = 0;
+		bool m_PositionTrusted = false;
 		bool m_Playing = false;
 		// 暂停是"有曲目但没在播"的第三种状态。单独记下来才能把"暂停"和
 		// "会话已停止/播放器已退出"分开：SMTC 在播放器退出后仍会挂着上一条
@@ -1497,6 +1498,7 @@ public:
 			if(Snap.DurationMs > 0.0 && Pos > (int64_t)Snap.DurationMs + 1500)
 				Pos = (int64_t)Snap.DurationMs;
 			Out.m_PositionMs = std::max<int64_t>(0, Pos);
+			Out.m_PositionTrusted = true;
 		}
 		else if(HaveLsAnchor)
 		{
@@ -1688,7 +1690,7 @@ public:
 		m_SnapshotFrozen = false;
 	}
 
-	void SyncMediaClock(int64_t SnapshotPositionMs, int64_t DurationMs, bool Playing)
+	void SyncMediaClock(int64_t SnapshotPositionMs, int64_t DurationMs, bool Playing, bool PositionTrusted)
 	{
 		const int64_t Snapshot = std::max<int64_t>(0, SnapshotPositionMs);
 		const int64_t Now = time_get();
@@ -1700,21 +1702,17 @@ public:
 		// absolute value entirely unrelated to the playhead. Verified empirically by
 		// dumping the shared-memory struct: frac==0, dur==0, elapsed only ever grows.
 		//
-		// Therefore: only trust an absolute position snapshot when the provider
-		// actually gave us a real duration (DurationMs>0). In that case it is a
-		// genuine SMTC/real progress and we anchor to it. When DurationMs==0 the
-		// absolute position is unusable -- we ignore it entirely and let the wall
-		// clock drive the position from wherever the clock was last reset to
-		// (0 on track change, via ResetMediaClock()). This is the "self-timer"
-		// approach: the game becomes its own playback clock, re-anchored on every
-		// track switch, and never polluted by the monitor's fake cumulative elapsed.
+		// SMTC absolute positions require a real duration; its zero-duration position
+		// may be a bogus process-relative counter. The NetEase watcher explicitly marks
+		// its song-relative playhead trusted, so late lyric discovery still anchors at
+		// the current song position instead of restarting the lyric clock at zero.
 		const int64_t kMaxReasonablePosMs = 6LL * 3600LL * 1000LL; // 6h
 		const bool SnapshotBogus =
 			Snapshot > kMaxReasonablePosMs ||
 			(DurationMs > 0 && Snapshot > DurationMs + 10000);
 
 		// Position-absolute snapshots are only trustworthy with a real duration.
-		const bool TrustPosition = (DurationMs > 0) && !SnapshotBogus;
+		const bool TrustPosition = (PositionTrusted || DurationMs > 0) && !SnapshotBogus;
 
 		// Detect a frozen position provider: some SMTC sources report a constant
 		// value and never advance. When the snapshot is genuinely frozen we let the
@@ -2052,7 +2050,7 @@ public:
 			// seen before: m_vLines was just emptied.
 			m_LinesKey.clear();
 			ResetMediaClock();
-			SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing);
+			SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing, Track.m_PositionTrusted);
 
 			const auto It = m_Cache.find(Key);
 			if(It != m_Cache.end())
@@ -2065,7 +2063,7 @@ public:
 			return;
 		}
 
-		SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing);
+		SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing, Track.m_PositionTrusted);
 		ProcessRequest();
 #endif
 	}
@@ -2345,9 +2343,9 @@ public:
 			*(volatile double *)((uint8_t *)m_pIslandView + offsetof(SIslandShm, ClientDurationMs)) = (double)Meta.m_DurationMs;
 		// 2026-10-29 起位置来源升级：monitor 的 WASAPI 进程环回提供真实"已渲染毫秒"（AudioMs），
 		// 暂停自动冻结、seek 由 monitor 侧 LS 重锚修正 —— 它是真进度，不再走"纯墙钟自计时"。
-		// DurationMs>0（LS 给了曲长）时 SyncMediaClock 采信绝对位置并逐轮重锚；
-		// DurationMs==0 时自动退回旧的自计时分支（含暂停冻结），行为不变。
-		SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing);
+		// watcher 的歌曲内绝对位置即使暂时没有曲长也可信，供歌词时钟锚定；
+		// 无曲长且未标可信的 SMTC/ElapsedMs 仍使用墙钟，防止跨歌累计偏移。
+		SyncMediaClock(Track.m_PositionMs, Track.m_DurationMs, Track.m_Playing, Track.m_PositionTrusted);
 
 		// Finish all transports before deciding the next stage. Cover work never
 		// owns the lyric state and continues while QQ/lrclib are in flight.

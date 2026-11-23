@@ -24,6 +24,7 @@
 #include <game/client/components/sounds.h>
 #include <game/client/components/tclient/bindchat.h>
 #include <game/client/components/tclient/bindwheel.h>
+#include <game/client/components/tclient/stack_tee_hint.h>
 #include <game/client/components/tclient/trails.h>
 #include <game/client/gameclient.h>
 #include <game/client/render.h>
@@ -4343,6 +4344,7 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 {
 	static int s_Page = 0;
 	static CButtonContainer s_aTabs[3];
+	static CButtonContainer s_StackTeeHintReaderButton, s_StackTeeHintClearButton;
 	const char *apNames[] = {TCLocalize("Settings"), TCLocalize("Visuals"), TCLocalize("Get assets")};
 	CUIRect TabBar, TabButton;
 	MainView.HSplitTop(LineSize, &TabBar, &MainView);
@@ -4477,6 +4479,13 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcSpectatorFriendsFirst, TCLocalize("Show friends as a separate group in the spectator selector"), &g_Config.m_TcSpectatorFriendsFirst, &LeftView, LineSize);
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("Friends are listed first with their own group title, then everyone else."), EditBoxFontSize, TEXTALIGN_TL);
+
+	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Stack Tee"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	DoLine_KeyReader(LeftView, s_StackTeeHintReaderButton, s_StackTeeHintClearButton,
+		TCLocalize("Stack Tee hint toggle key"), tclient_stack_tee::BIND_COMMAND);
 
 	// TClient 企鹅徽标：记分板识别同服 TClient 玩家（ddnet-custom-clients 皮肤颜色法）
 	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);

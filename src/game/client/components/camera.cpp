@@ -2,6 +2,7 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 
 #include "camera.h"
+#include "quick_zoom.h"
 
 #include "controls.h"
 
@@ -506,18 +507,16 @@ void CCamera::ConQuickZoom(IConsole::IResult *pResult, void *pUserData)
 	if(!pSelf->ZoomAllowed())
 		return;
 
-	float Target;
-	if(!pSelf->m_QuickZoomActive)
-	{
-		pSelf->m_QuickZoomSaved = pSelf->m_Zooming ? pSelf->m_ZoomSmoothingTarget : pSelf->m_Zoom;
-		Target = CCamera::ZoomStepsToValue(g_Config.m_TcQuickZoom - 10.0f);
-	}
-	else
-		Target = pSelf->m_QuickZoomSaved;
+	const float DefaultZoom = CCamera::ZoomStepsToValue(CCamera::DefaultZoomSteps());
+	const float QuickZoom = CCamera::ZoomStepsToValue(g_Config.m_TcQuickZoom - 10.0f);
+	const float Target = tclient_quick_zoom::SelectTarget(pSelf->m_QuickZoomActive, DefaultZoom, QuickZoom);
+	const float TargetLevel = pSelf->m_QuickZoomActive ? g_Config.m_ClDefaultZoom : g_Config.m_TcQuickZoom;
 	pSelf->m_QuickZoomActive = !pSelf->m_QuickZoomActive;
 
 	pSelf->ChangeZoom(Target, g_Config.m_ClSmoothZoomTime, true);
 	pSelf->m_AutoSpecCamera = false;
+	if(pSelf->GameClient()->m_MultiViewActivated && pSelf->GameClient()->m_Snap.m_SpecInfo.m_Active)
+		pSelf->GameClient()->m_MultiViewPersonalZoom = TargetLevel - 10.0f;
 }
 void CCamera::ConSetViewRelative(IConsole::IResult *pResult, void *pUserData)
 {

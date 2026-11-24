@@ -1,0 +1,668 @@
+/*
+ * Based on QmClient's src/game/client/components/qmclient/map_progress.h.
+ * Adapted for TClient: the namespace and include guard are renamed; algorithm semantics are unchanged.
+ * Source license: QmClient root license.txt (permissive license).
+ *
+ * Teeworlds Copyright (C) 2007-2014 Magnus Auvinen
+ * DDRace    Copyright (C) 2010-2011 Shereef Marzouk
+ * DDNet     Copyright (C)           Dennis Felsing
+ *
+ * This software is provided 'as-is', without any express or implied
+ * warranty.  In no event will the authors be held liable for any damages
+ * arising from the use of this software.
+ *
+ * Permission is granted to anyone to use this software for any purpose,
+ * including commercial applications, and to alter it and redistribute it
+ * freely, subject to the following restrictions:
+ *
+ * 1. The origin of this software must not be misrepresented; you must not
+ *    claim that you wrote the original software. If you use this software
+ *    in a product, an acknowledgment in the product documentation would be
+ *    appreciated but is not required.
+ * 2. Altered source versions must be plainly marked as such, and must not be
+ *    misrepresented as being the original software.
+ * 3. This notice may not be removed or altered from any source distribution.
+ */
+#ifndef GAME_CLIENT_COMPONENTS_TCLIENT_MAP_PROGRESS_H
+#define GAME_CLIENT_COMPONENTS_TCLIENT_MAP_PROGRESS_H
+
+#include <engine/shared/protocol.h>
+
+#include <game/collision.h>
+#include <game/mapitems.h>
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <optional>
+#include <queue>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+namespace TClientMapProgress
+{
+	constexpr int NUM_TIME_CHECKPOINTS = TILE_TIME_CHECKPOINT_LAST - TILE_TIME_CHECKPOINT_FIRST + 1;
+	constexpr int INF = std::numeric_limits<int>::max();
+	// The largest tracked fixture is 243100 tiles. Keep per-field queues at 2 nodes/tile;
+	// six simultaneous fields plus a worst-case index-vector allowance stay below 160 MiB.
+	constexpr int MAP_PROGRESS_MAX_TILES = 512 * 512;
+	constexpr std::size_t MAP_PROGRESS_MAX_ADDITIONAL_BYTES = 160 * 1024 * 1024;
+	constexpr std::size_t MAP_PROGRESS_MAX_FIELDS = 6; // 3 tracked players x global + checkpoint field
+	constexpr std::size_t MAP_PROGRESS_QUEUE_NODES_PER_TILE = 2;
+	constexpr std::size_t MAP_PROGRESS_TELEPORT_VISITS_PER_TILE = 4;
+	constexpr int MAP_PROGRESS_MAX_MAP_DATA_ITEMS = 32768;
+	constexpr int MAP_PROGRESS_MAX_VISUAL_IMAGES = 4096;
+	constexpr int MAP_PROGRESS_MAX_VISUAL_GROUPS = 4096;
+	constexpr int MAP_PROGRESS_MAX_VISUAL_LAYERS = 16384;
+
+	struct SRouteCost
+	{
+		int m_Risk = INF;
+		int m_Water = INF;
+		int m_Length = INF;
+		int m_Unsupported = 0;
+
+		auto Key() const { return std::tie(m_Risk, m_Water, m_Length, m_Unsupported); }
+		bool operator<(const SRouteCost &Other) const { return Key() < Other.Key(); }
+		bool operator==(const SRouteCost &Other) const { return Key() == Other.Key(); }
+		bool operator!=(const SRouteCost &Other) const { return !(*this == Other); }
+
+		SRouteCost AddTile(bool Water, bool NearDeath, int Length = 1, bool Grounded = false) const
+		{
+			const int Risk = Water || NearDeath;
+			const int Unsupported = Grounded ? 0 : Length;
+			if(m_Risk >= INF - Risk || m_Water >= INF - Water || m_Length >= INF - Length || m_Unsupported >= INF - Unsupported)
+				return {};
+			return {m_Risk + Risk, m_Water + Water, m_Length + Length, m_Unsupported + Unsupported};
+		}
+	};
+
+	inline bool IsSolidGround(int Game, int Front)
+	{
+		return Game == TILE_SOLID || Game == TILE_NOHOOK || Front == TILE_SOLID || Front == TILE_NOHOOK;
+	}
+
+	inline bool IsWaterTile(int Type)
+	{
+		return Type == TILE_FREEZE || Type == TILE_DFREEZE || Type == TILE_LFREEZE;
+	}
+
+	inline bool IsSupportedGround(bool Water, bool SolidBelow, int Restrictions)
+	{
+		return !Water && (SolidBelow || (Restrictions & CANTMOVE_DOWN) != 0);
+	}
+
+	template<typename F>
+	bool NearDeathTile(int Index, int Width, int Size, F IsDeath)
+	{
+		if(Width <= 0 || Index < 0 || Index >= Size)
+			return false;
+		const int X = Index % Width;
+		const int Y = Index / Width;
+		for(int Ny = std::max(Y - 1, 0); Ny <= std::min(Y + 1, Size / Width - 1); ++Ny)
+		{
+			for(int Nx = std::max(X - 1, 0); Nx <= std::min(X + 1, Width - 1); ++Nx)
+			{
+				const int Neighbor = Ny * Width + Nx;
+				if(Neighbor != Index && IsDeath(Neighbor))
+					return true;
+			}
+		}
+		return false;
+	}
+
+	struct STile
+	{
+		int m_Restrictions = 0;
+		int m_TimeCheckpoint = -1;
+		int m_TeleType = 0;
+		int m_TeleNumber = 0;
+		bool m_Solid = false;
+		bool m_Death = false;
+		bool m_Water = false;
+		bool m_NearDeath = false;
+		bool m_Grounded = false;
+		bool m_Start = false;
+		bool m_Finish = false;
+		bool m_Spawn = false;
+
+		bool Blocked() const { return m_Solid || m_Death; }
+	};
+
+	inline bool IsMapSizeWithinProgressBudget(int Width, int Height)
+	{
+		const int64_t Size = (int64_t)Width * Height;
+		if(Width <= 0 || Height <= 0 || Size <= 0 || Size > MAP_PROGRESS_MAX_TILES)
+			return false;
+		// Upper-bound metadata vectors at twice their element count and queue/label storage
+		// across every possible player field. Queue pair and label padding are covered by
+		// the extra int in each estimate.
+		constexpr std::size_t IndexBytesPerTile = 16 * sizeof(int);
+		constexpr std::size_t LabelBytesPerTile = sizeof(SRouteCost) + 2 * sizeof(int);
+		constexpr std::size_t QueueNodeBytes = sizeof(std::pair<SRouteCost, int>);
+		constexpr std::size_t BytesPerTile = sizeof(STile) + IndexBytesPerTile +
+						     MAP_PROGRESS_MAX_FIELDS * (LabelBytesPerTile + MAP_PROGRESS_QUEUE_NODES_PER_TILE * QueueNodeBytes);
+		return (std::size_t)Size <= MAP_PROGRESS_MAX_ADDITIONAL_BYTES / BytesPerTile;
+	}
+
+	inline bool HasMapProgressQueueRoom(std::size_t QueueSize, std::size_t QueueLimit)
+	{
+		return QueueSize < QueueLimit;
+	}
+
+	inline bool IsMapProgressVisualMetadataWithinBudget(int NumData, int NumImages, int NumGroups, int NumLayers)
+	{
+		return NumData >= 0 && NumData <= MAP_PROGRESS_MAX_MAP_DATA_ITEMS &&
+		       NumImages >= 0 && NumImages <= MAP_PROGRESS_MAX_VISUAL_IMAGES &&
+		       NumGroups >= 0 && NumGroups <= MAP_PROGRESS_MAX_VISUAL_GROUPS &&
+		       NumLayers >= 0 && NumLayers <= MAP_PROGRESS_MAX_VISUAL_LAYERS;
+	}
+
+	inline STile MakeTile(int Game, int Front = TILE_AIR, int TeleType = 0, int TeleNumber = 0, int Restrictions = 0)
+	{
+		STile Tile;
+		Tile.m_Restrictions = Restrictions;
+		Tile.m_TeleType = TeleType;
+		Tile.m_TeleNumber = TeleNumber;
+		Tile.m_Start = Game == TILE_START || Front == TILE_START;
+		Tile.m_Finish = Game == TILE_FINISH || Front == TILE_FINISH;
+		Tile.m_Spawn = Game == ENTITY_OFFSET + ENTITY_SPAWN;
+		Tile.m_Solid = IsSolidGround(Game, Front);
+		Tile.m_Death = Game == TILE_DEATH || Front == TILE_DEATH;
+		for(const int Type : {Game, Front})
+		{
+			if(IsWaterTile(Type))
+				Tile.m_Water = true;
+			if(Type >= TILE_TIME_CHECKPOINT_FIRST && Type <= TILE_TIME_CHECKPOINT_LAST)
+				Tile.m_TimeCheckpoint = Type - TILE_TIME_CHECKPOINT_FIRST;
+		}
+		return Tile;
+	}
+
+	class CMap
+	{
+		friend class CField;
+		std::vector<STile> m_vTiles;
+		std::vector<int> m_vStarts;
+		std::vector<int> m_vFinishes;
+		std::vector<int> m_vSpawns;
+		std::array<std::vector<int>, NUM_TIME_CHECKPOINTS> m_avTimeCheckpoints;
+		std::array<std::vector<int>, 256> m_avTeleInputs;
+		std::array<std::vector<int>, 256> m_avTeleOutputs;
+		std::array<std::vector<int>, 256> m_avCheckOutputs;
+		std::vector<int> m_vCheckInputs;
+		int m_Width = 0;
+		int m_ScanCursor = 0;
+		int m_CheckpointCount = 0;
+		bool m_Finalized = false;
+
+	public:
+		CMap() = default;
+		CMap(int Width, int Height)
+		{
+			const int64_t Size = (int64_t)Width * Height;
+			if(IsMapSizeWithinProgressBudget(Width, Height))
+			{
+				m_Width = Width;
+				m_vTiles.resize((size_t)Size);
+			}
+		}
+
+		int Size() const { return (int)m_vTiles.size(); }
+		const STile &Tile(int Index) const { return m_vTiles[(size_t)Index]; }
+		void SetTile(int Index, const STile &Tile) { m_vTiles[(size_t)Index] = Tile; }
+		bool Finalized() const { return m_Finalized; }
+		bool Ready() const { return m_Finalized && !m_vStarts.empty() && !m_vFinishes.empty(); }
+		int CheckpointCount() const { return m_CheckpointCount; }
+
+		void FinalizeStep(int Budget)
+		{
+			if(m_Finalized)
+				return;
+			while(Budget-- > 0 && m_ScanCursor < Size())
+			{
+				const int Index = m_ScanCursor++;
+				STile &Cell = m_vTiles[(size_t)Index];
+				if(Cell.Blocked())
+					continue;
+				Cell.m_NearDeath = NearDeathTile(Index, m_Width, Size(), [&](int Neighbor) { return Tile(Neighbor).m_Death; });
+				const bool SolidBelow = Index < Size() - m_Width && Tile(Index + m_Width).m_Solid;
+				Cell.m_Grounded = IsSupportedGround(Cell.m_Water, SolidBelow, Cell.m_Restrictions);
+				if(Cell.m_Start)
+					m_vStarts.push_back(Index);
+				if(Cell.m_Finish)
+					m_vFinishes.push_back(Index);
+				if(Cell.m_Spawn)
+					m_vSpawns.push_back(Index);
+				if(Cell.m_TimeCheckpoint >= 0)
+					m_avTimeCheckpoints[(size_t)Cell.m_TimeCheckpoint].push_back(Index);
+				const int Number = Cell.m_TeleNumber;
+				if(Cell.m_TeleType == TILE_TELECHECKIN || Cell.m_TeleType == TILE_TELECHECKINEVIL)
+					m_vCheckInputs.push_back(Index);
+				if(Number <= 0 || Number >= 256)
+					continue;
+				if(Cell.m_TeleType == TILE_TELEIN || Cell.m_TeleType == TILE_TELEINEVIL)
+					m_avTeleInputs[(size_t)Number].push_back(Index);
+				else if(Cell.m_TeleType == TILE_TELEOUT)
+					m_avTeleOutputs[(size_t)Number].push_back(Index);
+				else if(Cell.m_TeleType == TILE_TELECHECKOUT)
+					m_avCheckOutputs[(size_t)Number].push_back(Index);
+			}
+			if(m_ScanCursor != Size())
+				return;
+			m_Finalized = true;
+			bool Gap = false;
+			for(const auto &vCheckpoint : m_avTimeCheckpoints)
+			{
+				if(vCheckpoint.empty())
+					Gap = true;
+				else if(Gap)
+				{
+					m_CheckpointCount = 0;
+					break;
+				}
+				else
+					++m_CheckpointCount;
+			}
+		}
+
+		void Finalize()
+		{
+			while(!Finalized())
+				FinalizeStep(4096);
+		}
+
+		const std::vector<int> &Sources(int Stage) const
+		{
+			return Stage <= 0 ? m_vStarts : m_avTimeCheckpoints[(size_t)Stage - 1];
+		}
+
+		const std::vector<int> &Targets(int Stage) const
+		{
+			return Stage < 0 || Stage == m_CheckpointCount ? m_vFinishes : m_avTimeCheckpoints[(size_t)Stage];
+		}
+	};
+
+	class CField
+	{
+		struct SLabel
+		{
+			SRouteCost m_Cost;
+			int m_Next = -1;
+			bool m_Settled = false;
+		};
+		using TNode = std::pair<SRouteCost, int>;
+		using TQueue = std::priority_queue<TNode, std::vector<TNode>, std::greater<TNode>>;
+		std::vector<SLabel> m_vLabels;
+		TQueue m_Queue;
+		std::size_t m_QueueLimit = 0;
+		bool m_Failed = false;
+		std::array<const std::vector<int> *, 2> m_apPending = {};
+		int m_PendingSlot = 0;
+		int m_PendingCursor = 0;
+		int m_PendingTarget = -1;
+		uint64_t m_TeleportInputVisits = 0;
+		uint64_t m_TeleportVisitLimit = 0;
+		int m_TeleCheckpoint = -1;
+		int m_CheckOutputNumber = 0;
+		int m_Stage = -2;
+		uint64_t m_Revision = 0;
+
+		bool Allowed(const CMap &Map, int Index) const
+		{
+			const STile &Cell = Map.Tile(Index);
+			if(Cell.Blocked())
+				return false;
+			if(m_Stage < 0)
+				return true;
+			if(Cell.m_Finish && m_Stage != Map.CheckpointCount())
+				return false;
+			return Cell.m_TimeCheckpoint < 0 || Cell.m_TimeCheckpoint == m_Stage || Cell.m_TimeCheckpoint == m_Stage - 1;
+		}
+
+		bool Push(const SRouteCost &Cost, int Index)
+		{
+			if(m_Failed)
+				return false;
+			if(!HasMapProgressQueueRoom(m_Queue.size(), m_QueueLimit))
+			{
+				m_Failed = true;
+				return false;
+			}
+			m_Queue.emplace(Cost, Index);
+			return true;
+		}
+
+		void Relax(int Index, int Target, const SRouteCost &NewCost)
+		{
+			auto &Label = m_vLabels[(size_t)Index];
+			if(!(NewCost < Label.m_Cost) || m_Failed)
+				return;
+			if(!Push(NewCost, Index))
+				return;
+			Label.m_Cost = NewCost;
+			Label.m_Next = Target;
+			++m_Revision;
+		}
+
+		bool ForcesTeleport(const CMap &Map, const STile &Cell) const
+		{
+			if(Cell.m_TeleType == TILE_TELECHECKIN || Cell.m_TeleType == TILE_TELECHECKINEVIL)
+				return true;
+			return (Cell.m_TeleType == TILE_TELEIN || Cell.m_TeleType == TILE_TELEINEVIL) &&
+			       Cell.m_TeleNumber > 0 && Cell.m_TeleNumber < 256 &&
+			       !Map.m_avTeleOutputs[(size_t)Cell.m_TeleNumber].empty();
+		}
+
+	public:
+		uint64_t Revision() const { return m_Revision; }
+		bool Matches(int TeleCheckpoint, int Stage) const { return m_TeleCheckpoint == TeleCheckpoint && m_Stage == Stage; }
+		bool Failed() const { return m_Failed; }
+		bool Complete() const { return !m_Failed && m_Queue.empty() && m_apPending[0] == nullptr && m_apPending[1] == nullptr; }
+		bool Settled(int Index) const { return Index >= 0 && Index < (int)m_vLabels.size() && m_vLabels[(size_t)Index].m_Settled; }
+		int Length(int Index) const { return Settled(Index) ? m_vLabels[(size_t)Index].m_Cost.m_Length : -1; }
+		SRouteCost Cost(int Index) const { return Settled(Index) ? m_vLabels[(size_t)Index].m_Cost : SRouteCost{}; }
+		int Next(int Index) const { return Settled(Index) ? m_vLabels[(size_t)Index].m_Next : -1; }
+
+		void Start(const CMap &Map, int TeleCheckpoint, int Stage = -1)
+		{
+			++m_Revision;
+			m_vLabels.clear();
+			m_Queue = TQueue();
+			m_QueueLimit = 0;
+			m_Failed = false;
+			m_apPending = {};
+			m_PendingSlot = 0;
+			m_PendingCursor = 0;
+			m_PendingTarget = -1;
+			m_TeleportInputVisits = 0;
+			m_TeleportVisitLimit = 0;
+			m_TeleCheckpoint = TeleCheckpoint;
+			m_Stage = Stage;
+			if(Map.m_Width <= 0 || Map.Size() <= 0 || Map.Size() % Map.m_Width != 0 ||
+				!IsMapSizeWithinProgressBudget(Map.m_Width, Map.Size() / Map.m_Width))
+			{
+				m_Failed = true;
+				return;
+			}
+			m_vLabels.assign((size_t)Map.Size(), {});
+			m_QueueLimit = (size_t)Map.Size() * MAP_PROGRESS_QUEUE_NODES_PER_TILE;
+			m_TeleportVisitLimit = (uint64_t)Map.Size() * MAP_PROGRESS_TELEPORT_VISITS_PER_TILE;
+
+			std::vector<TNode> vQueue;
+			vQueue.reserve(m_QueueLimit);
+			m_Queue = TQueue(std::greater<TNode>(), std::move(vQueue));
+			// 与角色回传一致：向下找最近的 CTO，没有 CTO 时使用出生点。
+			m_CheckOutputNumber = std::clamp(TeleCheckpoint, 0, 255);
+			while(m_CheckOutputNumber > 0 && Map.m_avCheckOutputs[(size_t)m_CheckOutputNumber].empty())
+				--m_CheckOutputNumber;
+			for(const int Index : Map.Targets(Stage))
+			{
+				if(!Allowed(Map, Index))
+					continue;
+				auto &Label = m_vLabels[(size_t)Index];
+				Label.m_Cost = {0, 0, 0};
+				if(!Push(Label.m_Cost, Index))
+					return;
+			}
+		}
+
+		void Step(const CMap &Map, int Budget)
+		{
+			if(m_Failed)
+				return;
+			while(Budget > 0 && !m_Failed)
+			{
+				if(m_PendingSlot < 2 && m_apPending[(size_t)m_PendingSlot])
+				{
+					const auto &vInputs = *m_apPending[(size_t)m_PendingSlot];
+					const auto &Exit = Map.Tile(m_PendingTarget);
+					const auto ExitCost = m_vLabels[(size_t)m_PendingTarget].m_Cost.AddTile(Exit.m_Water, Exit.m_NearDeath, 0);
+					while(Budget > 0 && m_PendingCursor < (int)vInputs.size())
+					{
+						if(m_TeleportInputVisits >= m_TeleportVisitLimit)
+						{
+							m_Failed = true;
+							return;
+						}
+						++m_TeleportInputVisits;
+						--Budget;
+						const int Input = vInputs[(size_t)m_PendingCursor++];
+						if(Allowed(Map, Input))
+							Relax(Input, m_PendingTarget, ExitCost);
+					}
+					if(m_PendingCursor < (int)vInputs.size())
+						return;
+					m_apPending[(size_t)m_PendingSlot++] = nullptr;
+					m_PendingCursor = 0;
+					continue;
+				}
+				if(m_PendingSlot == 0 && m_apPending[1])
+				{
+					m_PendingSlot = 1;
+					continue;
+				}
+				if(m_Queue.empty())
+					return;
+				--Budget;
+				const auto [Cost, Index] = m_Queue.top();
+				m_Queue.pop();
+				auto &Label = m_vLabels[(size_t)Index];
+				if(Label.m_Settled || Cost != Label.m_Cost)
+					continue;
+				Label.m_Settled = true;
+				++m_Revision;
+				const STile &Cell = Map.Tile(Index);
+				const SRouteCost EnterCost = Cost.AddTile(Cell.m_Water, Cell.m_NearDeath, 1, Cell.m_Grounded);
+				const int X = Index % Map.m_Width;
+				const int aPred[4] = {X > 0 ? Index - 1 : -1, X + 1 < Map.m_Width ? Index + 1 : -1, Index - Map.m_Width, Index + Map.m_Width};
+				const int aDirection[4] = {CANTMOVE_RIGHT, CANTMOVE_LEFT, CANTMOVE_DOWN, CANTMOVE_UP};
+				for(int Direction = 0; Direction < 4; ++Direction)
+				{
+					const int Pred = aPred[Direction];
+					if(Pred < 0 || Pred >= Map.Size() || !Allowed(Map, Pred))
+						continue;
+					const STile &From = Map.Tile(Pred);
+					if((From.m_Restrictions & aDirection[Direction]) == 0 && !ForcesTeleport(Map, From))
+						Relax(Pred, Index, EnterCost);
+				}
+				if(m_Failed)
+					return;
+
+				m_apPending = {};
+				m_PendingSlot = 0;
+				m_PendingCursor = 0;
+				m_PendingTarget = Index;
+				if(Cell.m_TeleType == TILE_TELEOUT && Cell.m_TeleNumber > 0 && Cell.m_TeleNumber < 256)
+					m_apPending[0] = &Map.m_avTeleInputs[(size_t)Cell.m_TeleNumber];
+				if((m_CheckOutputNumber > 0 && Cell.m_TeleType == TILE_TELECHECKOUT && Cell.m_TeleNumber == m_CheckOutputNumber) ||
+					(m_CheckOutputNumber == 0 && Cell.m_Spawn))
+					m_apPending[1] = &Map.m_vCheckInputs;
+			}
+		}
+
+		int Source(const std::vector<int> &vSources, int ObservedSource) const
+	{
+		if(ObservedSource >= 0)
+			return Settled(ObservedSource) ? ObservedSource : -1;
+		int Best = -1;
+		for(const int Index : vSources)
+		{
+			if(Settled(Index) && (Best < 0 || Cost(Index) < Cost(Best)))
+				Best = Index;
+		}
+		return Best;
+	}
+
+	bool BuildRoute(int Index, std::vector<int> &vRoute) const
+	{
+		vRoute.clear();
+		for(size_t Step = 0; Step < m_vLabels.size() && Settled(Index); ++Step)
+		{
+			vRoute.push_back(Index);
+			Index = Next(Index);
+			if(Index < 0)
+				return true;
+		}
+		return false;
+	}
+};
+
+struct SEstimate
+{
+	bool m_Valid = false;
+	float m_Progress = 0.0f;
+};
+
+inline int ResolveClientId(int LocalClientId, bool Spectating, int SpectatorId)
+{
+	return Spectating && SpectatorId >= 0 && SpectatorId < MAX_CLIENTS ? SpectatorId : LocalClientId;
+}
+
+inline std::optional<vec2> ResolvePosition(std::optional<vec2> Character, std::optional<vec2> SpecCharacter, std::optional<vec2> Spectator)
+{
+	if(Character)
+		return Character;
+	return SpecCharacter ? SpecCharacter : Spectator;
+}
+
+inline SEstimate EstimateDistance(int RemainingDistance, int StartDistance)
+{
+	if(RemainingDistance < 0 || RemainingDistance == INF || StartDistance <= 0 || StartDistance == INF)
+		return {};
+	return {true, std::clamp(1.0f - (float)RemainingDistance / StartDistance, 0.0f, 1.0f)};
+}
+
+class CPlayer
+{
+	CField m_Global;
+	CField m_Segment;
+	SEstimate m_Estimate;
+	int m_Stage = -1;
+	int m_StartIndex = -1;
+	int m_SourceIndex = -1;
+	int m_CurrentIndex = -1;
+	int m_PreviousTimeCheckpoint = -1;
+	int m_TeleCheckpoint = -1;
+	bool m_OnStart = false;
+	bool m_OnFinish = false;
+	bool m_PendingDirection = false;
+	bool m_SegmentsRejected = false;
+	bool m_UseSegmentForRoute = false;
+
+public:
+	void Reset() { *this = CPlayer(); }
+	const SEstimate &Estimate() const { return m_Estimate; }
+	bool Failed() const { return m_Global.Failed() || m_Segment.Failed(); }
+
+	void Observe(const STile &Tile, int Index)
+	{
+		if(Tile.m_Start)
+		{
+			if(!m_OnStart)
+				m_SegmentsRejected = false;
+			m_Stage = 0;
+			m_StartIndex = Index;
+			m_SourceIndex = Index;
+			m_PendingDirection = false;
+		}
+		else if(Tile.m_TimeCheckpoint >= 0 && Tile.m_TimeCheckpoint != m_PreviousTimeCheckpoint)
+		{
+			m_Stage = Tile.m_TimeCheckpoint + 1;
+			m_SourceIndex = Index;
+			m_PendingDirection = true;
+		}
+		m_PreviousTimeCheckpoint = Tile.m_TimeCheckpoint;
+		m_OnStart = Tile.m_Start;
+		m_OnFinish = Tile.m_Finish;
+	}
+
+	void Update(const CMap &Map, int Index, int TeleCheckpoint, int Budget, bool UseTimeCheckpoints = true)
+	{
+		m_CurrentIndex = Index;
+		if(!Map.Ready() || Index < 0 || Index >= Map.Size())
+		{
+			m_Estimate = {};
+			return;
+		}
+		TeleCheckpoint = std::clamp(TeleCheckpoint, 0, 255);
+		if(m_TeleCheckpoint != TeleCheckpoint)
+		{
+			m_TeleCheckpoint = TeleCheckpoint;
+			m_Estimate = {};
+		}
+		if(!m_Global.Matches(TeleCheckpoint, -1))
+			m_Global.Start(Map, TeleCheckpoint);
+		const bool UseSegments = UseTimeCheckpoints && !m_SegmentsRejected && Map.CheckpointCount() > 0 && m_Stage >= 0 && m_Stage <= Map.CheckpointCount();
+		const int GlobalBudget = UseSegments ? Budget / 2 : Budget;
+		m_Global.Step(Map, GlobalBudget);
+		if(m_Global.Failed())
+		{
+			m_Estimate = {};
+			return;
+		}
+		m_UseSegmentForRoute = false;
+		if(UseSegments)
+		{
+			if(!m_Segment.Matches(TeleCheckpoint, m_Stage))
+				m_Segment.Start(Map, TeleCheckpoint, m_Stage);
+			m_Segment.Step(Map, Budget - GlobalBudget);
+			if(m_Segment.Failed())
+			{
+				m_Estimate = {};
+				return;
+			}
+			const int Source = m_Segment.Source(Map.Sources(m_Stage), m_SourceIndex);
+			const int SourceLength = m_Segment.Length(Source);
+			const int CurrentLength = m_Segment.Length(Index);
+			if(m_Segment.Complete() && SourceLength <= 0)
+				m_SegmentsRejected = true;
+			else if(SourceLength > 0 && CurrentLength >= 0)
+			{
+				if(m_PendingDirection && Map.Tile(Index).m_TimeCheckpoint < 0)
+				{
+					m_PendingDirection = false;
+					if(m_Stage > 0 && m_Segment.Cost(Source) < m_Segment.Cost(Index))
+					{
+						// 刚穿回计时 CP 的前一侧：切回上一段，避免把历史最高 CP 当进度。
+						m_Estimate = {true, (float)m_Stage / (Map.CheckpointCount() + 1)};
+						--m_Stage;
+						m_SourceIndex = -1;
+						return;
+					}
+				}
+				const float Fraction = 1.0f - (float)CurrentLength / SourceLength;
+				m_Estimate = {true, std::clamp((m_Stage + Fraction) / (Map.CheckpointCount() + 1), 0.0f, 1.0f)};
+				m_UseSegmentForRoute = true;
+				return;
+			}
+		}
+		if(m_OnStart || m_OnFinish)
+		{
+			m_Estimate = {true, m_OnFinish ? 1.0f : 0.0f};
+			return;
+		}
+		const int Source = m_Global.Source(Map.Sources(-1), m_StartIndex);
+		const int SourceLength = m_Global.Length(Source);
+		const int CurrentLength = m_Global.Length(Index);
+		if(SourceLength > 0 && CurrentLength >= 0)
+			m_Estimate = {true, std::clamp(1.0f - (float)CurrentLength / SourceLength, 0.0f, 1.0f)};
+		else
+			m_Estimate = {};
+	}
+
+	int RouteIndex() const { return m_CurrentIndex; }
+	bool UsesSegmentRoute() const { return m_UseSegmentForRoute; }
+	uint64_t RouteRevision() const { return (m_UseSegmentForRoute ? m_Segment : m_Global).Revision(); }
+
+	bool BuildRoute(std::vector<int> &vRoute) const
+	{
+		return (m_UseSegmentForRoute ? m_Segment : m_Global).BuildRoute(m_CurrentIndex, vRoute);
+	}
+};
+}
+
+#endif // GAME_CLIENT_COMPONENTS_TCLIENT_MAP_PROGRESS_H

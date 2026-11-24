@@ -16,6 +16,7 @@
 #include <engine/shared/config.h>
 #include <engine/shared/datafile.h>
 #include <engine/shared/filecollection.h>
+#include <engine/shared/map_settings.h>
 #include <engine/sound.h>
 #include <engine/storage.h>
 
@@ -511,15 +512,12 @@ bool CEditorMap::Load(const char *pFilename, int StorageType, const FErrorHandle
 			if(!(pItem->m_Settings > -1))
 				break;
 
-			const unsigned Size = pMap->GetDataSize(pItem->m_Settings);
-			char *pSettings = (char *)pMap->GetData(pItem->m_Settings);
-			char *pNext = pSettings;
-			while(pNext < pSettings + Size)
-			{
-				int StrSize = str_length(pNext) + 1;
-				m_vSettings.emplace_back(pNext);
-				pNext += StrSize;
-			}
+			const int Size = pMap->GetDataSize(pItem->m_Settings);
+			const char *pSettings = (const char *)pMap->GetData(pItem->m_Settings);
+			if(!ForEachMapSetting(pSettings, Size, [&](const char *pCommand, size_t) {
+				m_vSettings.emplace_back(pCommand);
+			}))
+				ErrorHandler("Error: Failed to read settings from map info.");
 		}
 	}
 

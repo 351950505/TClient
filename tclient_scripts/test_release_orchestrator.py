@@ -5,6 +5,7 @@ plan selection, state resume, release-body encoding, master-sync invocation and
 the translation gate. Publish runs against mocked GitHub reads and writes;
 build/stage/package require the real toolchain.
 """
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -90,6 +91,115 @@ class SpecValidationTests(unittest.TestCase):
             release_orchestrator.previous_version("1.7.8.x")
 
 
+class AssetNameTests(unittest.TestCase):
+    def test_exact_six_names_for_zero_and_nonzero_suffixes(self):
+        for version in ("1.7.9.0", "1.7.9.5"):
+            with self.subTest(version=version):
+                names = release_orchestrator.release_asset_names(version)
+                self.assertEqual(len(names), 6)
+                self.assertEqual(set(names), {
+                    "DDNet.exe", "TClient-update-win64.zip",
+                    f"TClient-v{version}-full-win64.zip",
+                    "TClient-update-win64.json", "TClient-update-win64.json.sig",
+                    "TClientUpdater.exe",
+                })
+
+
+class DryRunTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.repo = self.root / "repo"
+        (self.repo / "src/game").mkdir(parents=True)
+        (self.repo / "data/tclient").mkdir(parents=True)
+        (self.repo / "src/game/version.h").write_text('#define TCLIENT_APP_VERSION "1.7.9.5"\n', encoding="utf-8")
+        (self.repo / "data/tclient/data_version.txt").write_text("TClient 1.7.9.5\n", encoding="utf-8")
+        self.spec = SpecValidationTests().make_spec(
+            self.root, version="1.7.9.5", repo=str(self.repo),
+            work_root=str(self.root / "missing" / "work"),
+            build_dir=str(self.root / "missing-build"), mirror_probe_nodes=[],
+        )
+        for key in ("notes_path", "monitor_path", "watcher_path", "hook_dll_path"):
+            Path(self.spec[key]).write_text("fixture", encoding="utf-8")
+        self.spec_path = self.root / "spec.json"
+        self.spec_path.write_text(json.dumps(self.spec), encoding="utf-8")
+        self.paths = {"root": Path(self.spec["work_root"]) / "release-1795"}
+        self.gate_commands = []
+        self.status = ""
+        for target, replacement in (("git", self.fake_git), ("check_helper_lock", lambda spec: None)):
+            patcher = mock.patch.object(release_orchestrator, target, replacement)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(release_orchestrator.subprocess, "run", side_effect=self.fake_run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def fake_git(self, repo, *args):
+        self.assertEqual(repo, self.repo)
+        if "status" in args:
+            return self.status
+        if args == ("diff", "--name-only", self.spec["parent_commit"], self.spec["target_commit"]):
+            return "src/game/version.h"
+        if args == ("rev-parse", "HEAD"):
+            return self.spec["target_commit"]
+        if args == ("rev-parse", self.spec["target_commit"] + "^{tree}"):
+            return "c" * 40
+        self.fail("Unexpected git read: " + repr(args))
+
+    def fake_run(self, command, **kwargs):
+        if command[0] == sys.executable:
+            self.assertIn(Path(command[-1] if "--repo" not in command else command[command.index("--repo") - 1]).name,
+                          ("check_translations.py", "test_release_build_options.py"))
+            self.gate_commands.append(command)
+        else:
+            self.assertEqual(command[:4], ["git", "-C", str(self.repo), "merge-base"])
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    def deny_writes(self):
+        stack = ExitStack()
+        for target in ("pathlib.Path.mkdir", "pathlib.Path.write_text", "pathlib.Path.write_bytes",
+                       "tempfile.NamedTemporaryFile", "tempfile.TemporaryDirectory",
+                       "release_orchestrator.github_token", "subprocess.Popen",
+                       "socket.socket", "socket.create_connection"):
+            stack.enter_context(mock.patch(target, side_effect=AssertionError("dry-run must not write or access secrets/network")))
+        return stack
+
+    def test_dry_run_new_work_root_is_not_created(self):
+        for publish in (False, True):
+            with self.subTest(publish=publish):
+                argv = ["orchestrator", "run", "--spec", str(self.spec_path), "--dry-run"]
+                if publish:
+                    argv.append("--publish")
+                before = sorted(self.root.rglob("*"))
+                with self.deny_writes(), mock.patch.object(sys, "argv", argv), mock.patch("builtins.print") as output:
+                    self.assertEqual(release_orchestrator.main(), 0)
+                result = json.loads(output.call_args[0][0])
+                self.assertEqual(result["phases_planned"], list(release_orchestrator.PHASES if publish else release_orchestrator.LOCAL_PHASES))
+                self.assertEqual(sorted(self.root.rglob("*")), before)
+                self.assertFalse(Path(self.spec["work_root"]).exists())
+
+    def test_failed_dry_run_does_not_create_state_or_temp(self):
+        self.status = " M src/game/version.h"
+        argv = ["orchestrator", "run", "--spec", str(self.spec_path), "--dry-run"]
+        before = sorted(self.root.rglob("*"))
+        with self.deny_writes(), mock.patch.object(sys, "argv", argv), self.assertRaisesRegex(RuntimeError, "worktree is not clean"):
+            release_orchestrator.main()
+        self.assertEqual(sorted(self.root.rglob("*")), before)
+        self.assertFalse(Path(self.spec["work_root"]).exists())
+
+    def test_preflight_accepts_missing_root_and_disables_gate_bytecode(self):
+        state = {}
+        with self.deny_writes():
+            self.assertEqual(release_orchestrator.phase_preflight(self.spec, self.paths, state), {"tree": "c" * 40})
+        self.assertEqual(state, {})
+        self.assertFalse(self.paths["root"].exists())
+        self.assertEqual(len(self.gate_commands), 2)
+        for command in self.gate_commands:
+            self.assertIn("-I", command)
+            self.assertIn("-B", command)
+
+
 class SignatureEvidenceTests(unittest.TestCase):
     def test_signatures_passes_expected_status_to_script(self):
         root = Path(release_orchestrator.__file__).resolve().parent.parent
@@ -106,12 +216,12 @@ class SignatureEvidenceTests(unittest.TestCase):
 class MirrorEvidenceTests(unittest.TestCase):
     def fixture(self, tmp):
         root = Path(tmp)
-        spec = {"version": "1.7.8.73", "target_commit": "a" * 40, "build_dir": str(root / "build")}
+        spec = {"version": "1.7.8.73", "target_commit": "a" * 40, "build_dir": str(root / "build"), "mirror_probe_nodes": []}
         paths = {"root": root}
         report_path, header = release_orchestrator.mirror_files(spec, paths)
         header.parent.mkdir(parents=True)
         header.write_text("// tested mirrors\n", encoding="utf-8")
-        report = {"schema": 1, "catalog_url": "https://github.akams.cn/", "fetched_at": datetime.now(timezone.utc).isoformat(), "release_version": spec["version"], "source_commit": spec["target_commit"], "header_sha256": release_orchestrator.sha256_of(header), "selected": [{"prefix": "https://mirror.example/"}], "reference": {"tag": "v1.7.8.72"}}
+        report = {"schema": 1, "catalog_url": "https://github.akams.cn/", "fetched_at": datetime.now(timezone.utc).isoformat(), "release_version": spec["version"], "source_commit": spec["target_commit"], "probe_regions": ["local"], "header_sha256": release_orchestrator.sha256_of(header), "selected": [{"prefix": "https://mirror.example/"}], "reference": {"tag": "v1.7.8.72"}}
         report_path.write_text(json.dumps(report), encoding="utf-8")
         return spec, paths, report, report_path, header
 
@@ -319,17 +429,18 @@ class PublishTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
-        self.spec = {"repo": str(self.root), "version": "1.7.8.99", "target_commit": "a" * 40, "notes_path": str(self.root / "notes.txt")}
+        self.spec = {"repo": str(self.root), "version": "1.7.8.99", "target_commit": "a" * 40, "notes_path": str(self.root / "notes.txt"), "mirror_probe_nodes": []}
         Path(self.spec["notes_path"]).write_text("release notes", encoding="utf-8")
         self.paths = {"root": self.root}
         self.state = {}
         self.base = "repos/" + release_orchestrator.GITHUB_REPO
         self.tag = "v" + self.spec["version"]
-        self.release = {"id": 7, "tag_name": self.tag, "draft": True, "target_commitish": self.spec["target_commit"]}
+        self.release = {"id": 7, "tag_name": self.tag, "draft": True, "prerelease": False, "target_commitish": self.spec["target_commit"]}
+        self.latest_release = self.release
         self.releases = [self.release]
         self.refs = [{"ref": "refs/tags/" + self.tag, "object": {"type": "commit", "sha": self.spec["target_commit"]}}]
         self.tag_objects = {}
-        self.content = {"DDNet.exe": b"client", "update.zip": b"update"}
+        self.content = {name: ("payload:" + name).encode() for name in release_orchestrator.release_asset_names(self.spec["version"])}
         self.records = []
         for name, data in self.content.items():
             path = self.root / name
@@ -340,6 +451,7 @@ class PublishTests(unittest.TestCase):
         self.assets = []
         self.reads = []
         self.writes = []
+        self.publish_command = None
         self.fail_endpoint = None
         self.corrupt_upload = False
         self.final_extra = False
@@ -374,6 +486,10 @@ class PublishTests(unittest.TestCase):
         self.reads.append(endpoint)
         if endpoint == self.fail_endpoint:
             raise RuntimeError("gh failed: HTTP 503")
+        if endpoint == self.base + "/releases/latest":
+            return json.dumps(self.latest_release)
+        if endpoint == self.base + "/releases/tags/" + self.tag:
+            return json.dumps(self.release)
         if "-X" in args:
             self.assertEqual(args[args.index("-X") + 1], "POST")
             self.assertEqual(endpoint, self.base + "/releases")
@@ -414,6 +530,7 @@ class PublishTests(unittest.TestCase):
                 asset["digest"] = "sha256:" + "0" * 64
             self.assets.append(asset)
         elif command[1:3] == ["release", "edit"]:
+            self.publish_command = command
             self.writes.append("publish")
             self.release["draft"] = False
         elif command[1] == "api" and command[-1] == "Accept: application/octet-stream":
@@ -433,7 +550,7 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(self.writes, [])
 
     def test_all_local_assets_checked_before_remote_access(self):
-        (self.root / "update.zip").write_bytes(b"broken")
+        (self.root / "TClient-update-win64.zip").write_bytes(b"broken")
         self.rejected_without_writes("packaged asset differs")
         self.assertEqual(self.reads, [])
 
@@ -451,6 +568,59 @@ class PublishTests(unittest.TestCase):
         self.release["target_commitish"] = "wrong-branch"
         self.resolved_target = "b" * 40
         self.rejected_without_writes("draft target differs")
+
+    def test_frozen_asset_set_must_match_all_six_contract_names(self):
+        for operation in ("missing", "extra"):
+            with self.subTest(operation=operation):
+                if operation == "missing":
+                    self.record["assets"].pop()
+                else:
+                    path = self.root / "unexpected.txt"
+                    path.write_bytes(b"unexpected")
+                    self.record["assets"].append({"name": path.name, "path": str(path), "size": path.stat().st_size, "sha256": release_orchestrator.sha256_of(path)})
+                self.save_record()
+                self.rejected_without_writes("six-asset release contract")
+                self.assertEqual(self.reads, [])
+                self.record["assets"] = self.records.copy()
+                self.save_record()
+                self.reads.clear()
+                self.writes.clear()
+
+    def test_non_draft_release_must_be_stable_and_latest_before_tag_or_assets(self):
+        cases = (
+            ("prerelease", "release is a prerelease"),
+            ("not_latest", "release is not /releases/latest"),
+            ("latest_id_mismatch", "release is not /releases/latest"),
+        )
+        for condition, message in cases:
+            with self.subTest(condition=condition):
+                self.release["draft"] = False
+                self.assets = [self.asset(record) for record in self.records]
+                if condition == "prerelease":
+                    self.release["prerelease"] = True
+                elif condition == "latest_id_mismatch":
+                    self.latest_release = {"id": 8, "tag_name": self.tag, "draft": False, "prerelease": False}
+                else:
+                    self.latest_release = {"id": 8, "tag_name": "v1.7.9.3", "draft": False, "prerelease": False}
+                self.rejected_without_writes(message)
+                if condition == "prerelease":
+                    self.assertNotIn(self.base + "/releases/latest", self.reads)
+                else:
+                    self.assertIn(self.base + "/releases/latest", self.reads)
+                self.assertFalse(any("matching-refs/tags" in endpoint or "/assets?" in endpoint for endpoint in self.reads))
+                self.release.update(draft=True, prerelease=False)
+                self.latest_release = self.release
+                self.assets = []
+                self.reads.clear()
+
+    def test_new_publish_verifies_latest_after_upload_and_edit(self):
+        self.releases = []
+        self.publish()
+        self.assertLess(self.reads.index(self.base + "/releases/tags/" + self.tag), self.reads.index(self.base + "/releases/latest"))
+        self.assertEqual(self.release["draft"], False)
+        self.assertIn("--draft=false", self.publish_command)
+        self.assertIn("--latest", self.publish_command)
+        self.assertEqual(self.writes[-1], "publish")
 
     def test_existing_tag_mismatch_overrides_target_commitish(self):
         self.refs[0]["object"]["sha"] = "b" * 40
@@ -477,7 +647,7 @@ class PublishTests(unittest.TestCase):
     def test_correct_partial_draft_only_uploads_missing(self):
         self.assets = [self.asset(self.records[0])]
         self.assertEqual(self.publish(), {"release_id": 7, "published": True})
-        self.assertEqual(self.writes, ["upload:update.zip", "publish"])
+        self.assertEqual(self.writes, ["upload:" + record["name"] for record in self.records[1:]] + ["publish"])
 
     def test_complete_draft_does_not_reupload(self):
         self.assets = [self.asset(record) for record in self.records]
@@ -547,7 +717,7 @@ class PublishTests(unittest.TestCase):
     def test_new_release_and_existing_tag(self):
         self.releases = []
         self.publish()
-        self.assertEqual(self.writes, ["create", "upload:DDNet.exe", "upload:update.zip", "publish"])
+        self.assertEqual(self.writes, ["create"] + ["upload:" + record["name"] for record in self.records] + ["publish"])
 
     def test_new_release_without_tag(self):
         self.refs = []
@@ -599,6 +769,7 @@ class PublishTests(unittest.TestCase):
             "schema": 1, "catalog_url": "https://github.akams.cn/",
             "fetched_at": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
             "release_version": self.spec["version"], "source_commit": self.spec["target_commit"],
+            "probe_regions": ["local"],
             "header_sha256": release_orchestrator.sha256_of(header),
             "selected": [{"prefix": "https://mirror.example/"}], "reference": {"tag": "v1.7.8.98"},
         }
@@ -688,7 +859,7 @@ class PublishTests(unittest.TestCase):
         self.assets = [self.asset(record, digest=False) for record in self.records]
         self.publish()
         self.assertEqual(self.writes, [])
-        self.content["update.zip"] = b"UPdate"
+        self.content["TClient-update-win64.zip"] = b"X" * len(self.content["TClient-update-win64.zip"])
         self.rejected_without_writes("digest differs")
 
 

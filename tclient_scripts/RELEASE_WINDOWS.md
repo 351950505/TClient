@@ -4,6 +4,8 @@
 
 本地正式包统一通过 `release_orchestrator.py run --spec <spec.json>` 生成。阶段顺序为 `preflight → mirror_probe → build → stage → package`；需要上传时再显式使用 `--publish`。下文 CI 与 `.55` 的例子保留作历史签名说明，不能替代本节镜像步骤。
 
+发布阶段只接受正式六资产：`DDNet.exe`、`TClient-update-win64.zip`、`TClient-v<版本>-full-win64.zip`、`TClient-update-win64.json`、`TClient-update-win64.json.sig` 和 `TClientUpdater.exe`。已公开的同 tag Release 必须为 `draft=false`、`prerelease=false`，且其 ID 与 `GET /releases/latest` 返回的 ID 相同；检查通过后才继续验证 tag 和远端资产。新建 draft 必须在上传后校验六项远端资产，再发布；发布后还要确认 Release 为 stable 且为 `/releases/latest`，否则不报告成功。`--dry-run` 只运行 preflight，不创建工作目录或状态文件，也不获取发布凭据。
+
 `mirror_probe` 每次从 `https://github.akams.cn/` 获取当次目录，使用客户端的 User-Agent、IPv4、TLS 校验与重定向限制测试当时最新已发布的更新资产。先核对签名清单，再对候选源下载完整更新 ZIP、helper，并验证真实断点续传、大小与 SHA-256；按完整传输表现选出最多 5 个源。没有合格源时停止构建。
 
 测速生成本次 `release-<版本数字>/update-mirrors.json` 和构建目录 `src/generated/tclient_update_mirrors.h`，编排器以 `-DTCLIENT_RELEASE_MIRRORS=ON` 编译进客户端。选中源排在原有备用源与官方直链之前；原有 Ed25519/SHA-256 校验继续生效。新包尚未公开时，以已发布包测速，不依赖待发布资产。
@@ -84,6 +86,8 @@ Windows artifact 必须只包含一个完整 packaged-build ZIP。ZIP 中只能�
 - `DDNet.exe`
 
 `windows-release-audit` 是单独的内部 artifact，保存 provenance inventory 和写入所选 checkout 的 `update/` 原始清单对，保留 30 天。它不作为公开 Release 资产。`signed-windows-release` 保存上述六个最终资产，保留 7 天，供同一次工作流的 Ubuntu 发布任务下载。checkout 中的原始清单不会自动提交或推送到分支。
+
+Actions 清单里的 `TClient-windows.zip` 是该工作流自身的 artifact 名；本地正式包使用上方契约规定的版本化完整包名，不能将该 workflow artifact 直接作为 `phase_publish` 的冻结资产输入。
 
 其他平台继续发布原有 Linux、macOS、Android 包。创建 Release 前先确认所有平台资产存在且非空；Windows 更新清单签名必须是 64 字节原始 Ed25519 签名。
 

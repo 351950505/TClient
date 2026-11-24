@@ -1020,7 +1020,8 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 	const int Width = pCollision->GetWidth();
 	const int Height = pCollision->GetHeight();
 	const int PrimaryLocalClientId = GameClient()->m_Snap.m_LocalClientId;
-	const bool ActiveLocalView = InGame && !GameClient()->m_Snap.m_SpecInfo.m_Active && Width > 0 && Height > 0;
+	const bool ActiveLocalView = InGame && Width > 0 && Height > 0;
+	const bool Spectating = GameClient()->m_Snap.m_SpecInfo.m_Active;
 	const bool Enabled = g_Config.m_TcFreezeEntryHighlight != 0;
 
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
@@ -1031,24 +1032,29 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 			m_aLocalFreezeEntryHighlight[Dummy].Reset();
 			m_aFreezeEntryClientId[Dummy] = ClientId;
 		}
-		const bool Active = ActiveLocalView &&
-				    tclient_frozen_entry::IsPrimaryLocalClient(ClientId, PrimaryLocalClientId) &&
-				    in_range(ClientId, MAX_CLIENTS - 1) && GameClient()->m_aClients[ClientId].m_Active &&
-				    GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
+		const bool ActiveLocalTee = ActiveLocalView &&
+					    tclient_frozen_entry::IsPrimaryLocalClient(ClientId, PrimaryLocalClientId) &&
+					    in_range(ClientId, MAX_CLIENTS - 1) && GameClient()->m_aClients[ClientId].m_Active &&
+					    GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
+		if(ActiveLocalTee && Spectating && Enabled)
+		{
+			m_aLocalFreezeEntryHighlight[Dummy].Suspend();
+			continue;
+		}
+		const bool Active = ActiveLocalTee && !Spectating;
 		if(!Active)
 		{
 			m_aLocalFreezeEntryHighlight[Dummy].Update(false, false, Enabled, [] { return -1; });
 			continue;
 		}
 
-		const CCharacterCore &Core = g_Config.m_TcFastInput ?
-						     GameClient()->m_aClients[ClientId].m_RegularPredicted :
-						     GameClient()->m_aClients[ClientId].m_Predicted;
-		const bool Frozen = Core.m_FreezeEnd != 0 || Core.m_DeepFrozen || Core.m_LiveFrozen;
+		const auto &Character = GameClient()->m_Snap.m_aCharacters[ClientId];
+		const bool ServerConfirmedFrozen = Character.m_HasExtendedData &&
+			(Character.m_ExtendedData.m_Flags & CHARACTERFLAG_IN_FREEZE) != 0;
+		const vec2 Pos(Character.m_Cur.m_X, Character.m_Cur.m_Y);
 		m_aLocalFreezeEntryHighlight[Dummy].Update(
-			Active, Frozen, Enabled, [&] {
-				const vec2 Pos = Core.m_Pos;
-				if(!Frozen || Pos.x < 0.0f || Pos.y < 0.0f || Pos.x >= Width * 32.0f || Pos.y >= Height * 32.0f)
+			Active, ServerConfirmedFrozen, Enabled, [&] {
+				if(!ServerConfirmedFrozen || Pos.x < 0.0f || Pos.y < 0.0f || Pos.x >= Width * 32.0f || Pos.y >= Height * 32.0f)
 					return -1;
 				const int MapIndex = pCollision->GetMapIndex(Pos);
 				const auto IsFreezeTile = [](int Tile) { return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE; };
@@ -1061,6 +1067,8 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 void CPlayers::RenderFreezeEntryTileHighlight()
 {
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+		return;
+	if(GameClient()->m_Snap.m_SpecInfo.m_Active)
 		return;
 
 	const int Width = Collision()->GetWidth();

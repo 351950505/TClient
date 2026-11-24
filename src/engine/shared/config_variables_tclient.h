@@ -517,6 +517,14 @@ MACRO_CONFIG_INT(TcDrownBoardShowTee, tc_drown_board_show_tee, 1, 0, 1, CFGFLAG_
 //（用户指定）；2047 = 全开。除落水外均为客户端估算（判据见落水榜多列语义 2026-11-19）。
 MACRO_CONFIG_INT(TcDrownBoardColumns, tc_drown_board_columns, 133, 0, 2047, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: column bitmask, locked to 133 (Freezes+Saves+Player hooks) by the settings UI")
 MACRO_CONFIG_INT(TcDrownBoardResetOnWipe, tc_drown_board_reset_on_wipe, 1, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Drown board: after the whole team freezes, reset all stats only once every member has died")
+// QmClient map-to-finish estimate, adapted to the TClient HUD; the master switch is off by default.
+MACRO_CONFIG_INT(TcMapProgress, tc_map_progress, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show the estimated finish percentage below the drown board")
+MACRO_CONFIG_INT(TcMapProgressStyle, tc_map_progress_style, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Also show the map progress percentage inside the Dynamic Island")
+MACRO_CONFIG_COL(TcMapProgressColor, tc_map_progress_color, 6602362, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Map progress percentage color")
+MACRO_CONFIG_INT(TcMapProgressWidth, tc_map_progress_width, 28, 10, 80, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Map progress fallback text width (% of screen)")
+MACRO_CONFIG_INT(TcMapProgressHeight, tc_map_progress_height, 10, 6, 30, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Map progress fallback text height")
+MACRO_CONFIG_INT(TcMapProgressX, tc_map_progress_x, 50, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Map progress fallback horizontal position (%)")
+MACRO_CONFIG_INT(TcMapProgressY, tc_map_progress_y, 97, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Map progress fallback vertical position (%)")
 MACRO_CONFIG_INT(TcIslandOffsetX, tc_island_offset_x, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island horizontal offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandOffsetY, tc_island_offset_y, 0, -2000, 2000, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island vertical offset in pixels (at 100% size)")
 MACRO_CONFIG_INT(TcIslandTransparent, tc_island_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Dynamic Island transparent mode (no black capsule, outlined text)")

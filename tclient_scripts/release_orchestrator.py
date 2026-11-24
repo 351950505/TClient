@@ -99,6 +99,22 @@ def previous_version(version):
     raise RuntimeError("cannot derive the previous version from " + version)
 
 
+def full_zip_name(version):
+    return f"TClient-v{version}-full-win64.zip"
+
+
+def release_asset_names(version):
+    """The exact public Windows asset contract, shared by packaging and publish."""
+    return (
+        "DDNet.exe",
+        "TClient-update-win64.zip",
+        full_zip_name(version),
+        "TClient-update-win64.json",
+        "TClient-update-win64.json.sig",
+        "TClientUpdater.exe",
+    )
+
+
 def check_helper_lock(spec):
     lock = json.loads(HELPER_LOCK.read_text(encoding="utf-8-sig"))
     for name, record in lock["files"].items():
@@ -140,14 +156,14 @@ def phase_preflight(spec, paths, state):
     translation_gate = Path(__file__).resolve().parent / "check_translations.py"
     require(translation_gate.is_file(), f"translation gate missing: {translation_gate}")
     gate = subprocess.run(
-        [sys.executable, "-I", str(translation_gate), "--repo", str(repo)],
+        [sys.executable, "-I", "-B", str(translation_gate), "--repo", str(repo)],
         capture_output=True, text=True, encoding="utf-8", timeout=300,
     )
     require(gate.returncode == 0, "translation gate failed:\n" + gate.stdout[-2000:] + gate.stderr[-2000:])
     build_options_test = Path(__file__).resolve().parent / "test_release_build_options.py"
     require(build_options_test.is_file(), f"release build options test missing: {build_options_test}")
     build_options = subprocess.run(
-        [sys.executable, "-I", str(build_options_test)],
+        [sys.executable, "-I", "-B", str(build_options_test)],
         capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
     require(build_options.returncode == 0, "release build options test failed:\n" + build_options.stdout[-2000:] + build_options.stderr[-2000:])
@@ -484,6 +500,16 @@ def verify_release_target(spec, root, release, token, tag_required=False):
         require(resolved.get("sha") == spec["target_commit"], "draft target differs from the frozen target")
 
 
+def verify_published_release(root, release, token):
+    require(release.get("draft") is False, "release is not published")
+    require(release.get("prerelease") is False, "release is a prerelease")
+    latest = json.loads(gh(root, "api", f"repos/{GITHUB_REPO}/releases/latest", token=token))
+    require(
+        latest.get("tag_name") == release.get("tag_name") and latest.get("id") == release.get("id"),
+        "release is not /releases/latest",
+    )
+
+
 def verify_remote_assets(root, release_id, frozen, token, complete):
     endpoint = f"repos/{GITHUB_REPO}/releases/{release_id}/assets"
     assets = gh_api_pages(root, endpoint, token)
@@ -513,6 +539,8 @@ def phase_publish(spec, paths, state):
     records = assets_record["assets"]
     frozen = {record["name"]: record for record in records}
     require(bool(frozen) and len(frozen) == len(records), "empty or duplicate frozen asset names")
+    expected_assets = set(release_asset_names(spec["version"]))
+    require(set(frozen) == expected_assets, "frozen asset names differ from the six-asset release contract")
     asset_paths = {name: Path(record["path"]) for name, record in frozen.items()}
     require("DDNet.exe" in asset_paths, "frozen package lacks DDNet.exe")
     for name, path in asset_paths.items():
@@ -525,7 +553,13 @@ def phase_publish(spec, paths, state):
     endpoint = f"repos/{GITHUB_REPO}/releases"
     existing = [release for release in gh_api_pages(root, endpoint, token) if release.get("tag_name") == tag]
     require(len(existing) <= 1, "multiple releases for tag " + tag)
-    release = existing[0] if existing else {"tag_name": tag, "target_commitish": spec["target_commit"], "draft": True}
+    release = existing[0] if existing else {"tag_name": tag, "target_commitish": spec["target_commit"], "draft": True, "prerelease": False}
+    if existing and release.get("draft") is False:
+        # Refuse stale, prerelease, or otherwise non-latest releases before any publish/sync step.
+        verify_published_release(root, release, token)
+    else:
+        require(release.get("draft") is True, "existing release has no explicit draft status")
+        require(release.get("prerelease") is False, "release is a prerelease")
     verify_release_target(spec, root, release, token, tag_required=not release.get("draft"))
     if release.get("draft"):
         verify_mirror_inputs(spec, paths, state, fresh=True)
@@ -535,8 +569,11 @@ def phase_publish(spec, paths, state):
             "target_commitish": spec["target_commit"],
             "name": f'TClient-v{spec["version"]}',
             "draft": True,
+            "prerelease": False,
             "body": release_body(root, spec["notes_path"]),
         })
+        require(release.get("draft") is True, "new release was not created as a draft")
+        require(release.get("prerelease") is False, "release is a prerelease")
         verify_release_target(spec, root, release, token)
     release_id = release["id"]
     present = verify_remote_assets(root, release_id, frozen, token, complete=not release["draft"])
@@ -551,6 +588,8 @@ def phase_publish(spec, paths, state):
         verify_remote_assets(root, release_id, frozen, token, complete=True)
         publish = subprocess.run([str(GH_EXE), "release", "edit", tag, "--repo", GITHUB_REPO, "--draft=false", "--latest"], env=dict(os.environ, GH_TOKEN=token, GH_HOST="github.com"), capture_output=True, text=True, encoding="utf-8", timeout=300)
         require(publish.returncode == 0, "publishing the release failed: " + publish.stderr)
+        published = json.loads(gh(root, "api", f"repos/{GITHUB_REPO}/releases/tags/{tag}", token=token))
+        verify_published_release(root, published, token)
     state["remote_digests"] = {name: record["sha256"] for name, record in frozen.items()}
     return {"release_id": release_id, "published": True}
 
@@ -613,21 +652,20 @@ def main():
         "root": root,
         "stage": Path(spec["work_root"]) / f"v{version_suffix}-stage",
         "assets": Path(spec["work_root"]) / f"v{version_suffix}-assets",
-        "full_zip": Path(spec["work_root"]) / f"TClient-v{spec['version']}-full-win64.zip",
+        "full_zip": Path(spec["work_root"]) / full_zip_name(spec["version"]),
         "stage_inventory": root / "stage-inventory.json",
     }
-    root.mkdir(parents=True, exist_ok=True)
-
-    state_path = root / "orchestrator-state.json"
-    state = json.loads(state_path.read_text(encoding="utf-8-sig")) if args.resume and state_path.exists() else {}
-
-    completed = set(state.get("completed", []))
     plan = list(LOCAL_PHASES) + (list(PUBLISH_PHASES) if publish else [])
 
     if args.dry_run:
-        phase_preflight(spec, paths, state)
+        phase_preflight(spec, paths, {})
         print(json.dumps({"dry_run": True, "phases_planned": plan}, indent=2))
         return 0
+
+    root.mkdir(parents=True, exist_ok=True)
+    state_path = root / "orchestrator-state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8-sig")) if args.resume and state_path.exists() else {}
+    completed = set(state.get("completed", []))
 
     if args.resume:
         validate_resume_state(state)

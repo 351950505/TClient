@@ -10,7 +10,7 @@ TEST(ClientCheckBoxHelp, HasEntries)
 {
 	// ME 页约 24 个、TC 页各子页签约百来个真实开关都应有通俗说明；
 	// 空表意味着悬停帮助功能没有真正接入。
-	EXPECT_GT(NumCheckBoxHelpEntries(), 40);
+	EXPECT_EQ(NumCheckBoxHelpEntries(), 141);
 }
 
 TEST(ClientCheckBoxHelp, AddressesAreUnique)

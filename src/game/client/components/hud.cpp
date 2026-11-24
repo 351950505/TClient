@@ -82,6 +82,12 @@ void CHud::OnWindowResize()
 void CHud::OnReset()
 {
 	m_FrozenHudPending = false;
+	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
+	{
+		m_aMapProgressState[Dummy].Reset();
+		m_aMapProgressValid[Dummy] = false;
+		m_aMapProgressDisplayed[Dummy] = 0.0f;
+	}
 	m_TimeCpDiff = 0.0f;
 	m_DDRaceTime = 0;
 	m_FinishTimeLastReceivedTick = 0;
@@ -2566,6 +2572,98 @@ void CHud::OnNewSnapshot()
 	}
 }
 
+void CHud::UpdateMapProgress()
+{
+	const bool Enabled = g_Config.m_TcMapProgress != 0 &&
+		(Client()->State() == IClient::STATE_ONLINE || Client()->State() == IClient::STATE_DEMOPLAYBACK);
+	const float DeltaSeconds = Client()->RenderFrameTime();
+	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
+	{
+		if(!Enabled)
+		{
+			m_aMapProgressState[Dummy].Reset();
+			m_aMapProgressValid[Dummy] = false;
+			m_aMapProgressDisplayed[Dummy] = 0.0f;
+			continue;
+		}
+
+		const auto Estimate = GameClient()->m_TClient.MapProgressEstimate(Dummy);
+		const int ClientId = GameClient()->m_TClient.MapProgressClientId(Dummy);
+		m_aMapProgressValid[Dummy] = Estimate.m_Valid && ClientId >= 0;
+		m_aMapProgressDisplayed[Dummy] = m_aMapProgressState[Dummy].Update(
+			m_aMapProgressValid[Dummy], Estimate.m_Progress, DeltaSeconds, ClientId);
+	}
+}
+
+void CHud::RenderMapProgressStandalone(int Dummy)
+{
+	if(!g_Config.m_TcMapProgress || Dummy < 0 || Dummy >= NUM_DUMMIES || m_Width <= 0.0f || m_Height <= 0.0f)
+		return;
+
+	const CScreenRect OldScreen = Graphics()->GetScreen();
+	Graphics()->MapScreenToSize(m_Width, m_Height);
+	const auto Layout = TClientHudMapProgress::FallbackTextLayout(
+		m_Width, m_Height,
+		(float)g_Config.m_TcMapProgressWidth,
+		(float)g_Config.m_TcMapProgressHeight,
+		(float)g_Config.m_TcMapProgressX,
+		(float)g_Config.m_TcMapProgressY);
+	char aValue[16];
+	if(m_aMapProgressValid[Dummy])
+		str_format(aValue, sizeof(aValue), "%.1f%%", m_aMapProgressDisplayed[Dummy] * 100.0f);
+	else
+		str_copy(aValue, "--");
+	const ColorRGBA PreviousColor = TextRender()->GetTextColor();
+	const ColorRGBA PreviousOutline = TextRender()->GetTextOutlineColor();
+	const unsigned PreviousFlags = TextRender()->GetRenderFlags();
+	TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT);
+	TextRender()->TextOutlineColor(0.0f, 0.0f, 0.0f, 0.55f);
+	TextRender()->TextColor(ColorRGBA(0.95f, 0.97f, 1.0f, 1.0f));
+	const float TextWidth = TextRender()->TextWidth(Layout.m_FontSize, aValue);
+	TextRender()->Text(std::round(Layout.m_Text.x + (Layout.m_Text.w - TextWidth) * 0.5f), Layout.m_Text.y, Layout.m_FontSize, aValue);
+	TextRender()->TextColor(PreviousColor);
+	TextRender()->TextOutlineColor(PreviousOutline);
+	TextRender()->SetRenderFlags(PreviousFlags);
+	Graphics()->MapScreen(OldScreen);
+}
+
+bool CHud::RenderMapProgressBelowBoard(const CUIRect &Board, float SafeBottom, int Dummy)
+{
+	if(!g_Config.m_TcMapProgress || Dummy < 0 || Dummy >= NUM_DUMMIES ||
+		!TClientHudMapProgress::HasRoomBelowBoard(Board, SafeBottom))
+		return false;
+
+	const CUIRect Value = TClientHudMapProgress::BoardValue(Board);
+	char aValue[16];
+	if(m_aMapProgressValid[Dummy])
+		str_format(aValue, sizeof(aValue), "%.1f%%", m_aMapProgressDisplayed[Dummy] * 100.0f);
+	else
+		str_copy(aValue, "--");
+	const ColorRGBA PreviousColor = TextRender()->GetTextColor();
+	const ColorRGBA PreviousOutline = TextRender()->GetTextOutlineColor();
+	const unsigned PreviousFlags = TextRender()->GetRenderFlags();
+	const ColorRGBA Configured = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcMapProgressColor));
+	TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT);
+	TextRender()->TextOutlineColor(0.0f, 0.0f, 0.0f, 0.55f);
+	TextRender()->TextColor(ColorRGBA(Configured.r, Configured.g, Configured.b, 1.0f));
+	const float TextWidth = TextRender()->TextWidth(Value.h, aValue);
+	TextRender()->Text(Value.x + (Value.w - TextWidth) * 0.5f, Value.y, Value.h, aValue);
+	TextRender()->TextColor(PreviousColor);
+	TextRender()->TextOutlineColor(PreviousOutline);
+	TextRender()->SetRenderFlags(PreviousFlags);
+	return true;
+}
+
+bool CHud::GetMapProgressIslandValue(int Dummy, float &Progress) const
+{
+	if(Dummy < 0 || Dummy >= NUM_DUMMIES || Dummy != g_Config.m_ClDummy ||
+		!TClientHudMapProgress::ShouldShowIslandValue(g_Config.m_TcMapProgress != 0, g_Config.m_TcMapProgressStyle,
+			g_Config.m_TcIslandEnable != 0, m_aMapProgressValid[Dummy]))
+		return false;
+	Progress = m_aMapProgressDisplayed[Dummy];
+	return true;
+}
+
 void CHud::OnRender()
 {
 	m_FrozenHudPending = false;
@@ -2579,6 +2677,7 @@ void CHud::OnRender()
 	m_Width = 300.0f * Graphics()->ScreenAspect();
 	m_Height = 300.0f;
 	Graphics()->MapScreenToSize(m_Width, m_Height);
+	UpdateMapProgress();
 
 #if defined(CONF_VIDEORECORDER)
 	if((IVideo::Current() && g_Config.m_ClVideoShowhud) || (!IVideo::Current() && g_Config.m_ClShowhud))
@@ -2639,9 +2738,13 @@ void CHud::OnRender()
 		GameClient()->m_Voting.Render();
 		if(g_Config.m_ClShowRecord)
 			RenderRecord();
-		RenderDrownBoard();
-	}
-	RenderCursor();
+		const auto DrownBoard = RenderDrownBoard();
+		const int Dummy = g_Config.m_ClDummy;
+		const bool HasBoardValue = DrownBoard && RenderMapProgressBelowBoard(DrownBoard->m_Bounds, DrownBoard->m_SafeBottom, Dummy);
+		if(!HasBoardValue)
+			RenderMapProgressStandalone(Dummy);
+		}
+		RenderCursor();
 }
 
 void CHud::OnMessage(int MsgType, void *pRawMsg)
@@ -2833,20 +2936,20 @@ void CHud::RenderRecord()
 	}
 }
 
-void CHud::RenderDrownBoard()
+std::optional<CHud::SDrownBoardPlacement> CHud::RenderDrownBoard()
 {
 	if(!g_Config.m_TcDrownBoard || !GameClient()->m_TClient.IsDrownBoardMode())
-		return;
+		return std::nullopt;
 	const float BoardAlpha = std::clamp(g_Config.m_TcDrownBoardOpacity / 100.0f, 0.0f, 1.0f);
 	if(BoardAlpha <= 0.0f)
-		return;
+		return std::nullopt;
 
 	const int LocalId = GameClient()->m_aLocalIds[g_Config.m_ClDummy] >= 0 ? GameClient()->m_aLocalIds[g_Config.m_ClDummy] : GameClient()->m_Snap.m_LocalClientId;
 	const bool HasLocalClient = LocalId >= 0 && LocalId < MAX_CLIENTS && GameClient()->m_aClients[LocalId].m_Active && GameClient()->m_Snap.m_apPlayerInfos[LocalId] != nullptr;
 	const int LocalTeam = HasLocalClient ? GameClient()->m_Teams.Team(LocalId) : -1;
 	const bool IncludeTeamZero = g_Config.m_TcDrownBoardIncludeTeam0 != 0;
 	if(!CTClientDrownBoard::IsBoardVisible(GameClient()->m_TClient.IsDrownBoardMode(), HasLocalClient, LocalTeam, IncludeTeamZero))
-		return;
+		return std::nullopt;
 
 	// 列定义：位掩码 → 列（矢量小图标 + 专属配色，参考 Nova 精简统计板）。除落水外
 	// 均为客户端估算（判据见 docs 落水榜多列语义 2026-11-19）。
@@ -2916,7 +3019,7 @@ void CHud::RenderDrownBoard()
 		vEntries.push_back({ClientId, GameClient()->m_TClient.GetDrownStats(ClientId)});
 	}
 	if(vEntries.empty())
-		return;
+		return std::nullopt;
 
 	std::stable_sort(vEntries.begin(), vEntries.end(), [&](const SEntry &Left, const SEntry &Right) {
 		const int LeftValue = ColumnValueAt(SortBit, Left.m_Stats);
@@ -3048,8 +3151,12 @@ void CHud::RenderDrownBoard()
 	float BoardBottom = Anchor - 6.0f;
 	if(m_SpectatorCountBoxShown)
 		BoardBottom -= m_SpectatorCountBoxHeight + 4.0f;
+	const float SafeBottom = BoardBottom;
+	if(g_Config.m_TcMapProgress)
+		BoardBottom -= TClientHudMapProgress::BOARD_VALUE_GAP + TClientHudMapProgress::BOARD_VALUE_HEIGHT + TClientHudMapProgress::BOARD_VALUE_BOTTOM_PADDING;
 	const float BoardX = m_Width - BoardWidth;
 	const float BoardY = std::max(BoardBottom - BoardHeight, 32.0f);
+	const CUIRect BoardBounds{BoardX, BoardY, BoardWidth, BoardHeight};
 
 	const ColorRGBA PreviousColor = TextRender()->GetTextColor();
 	const ColorRGBA PreviousOutline = TextRender()->GetTextOutlineColor();
@@ -3140,5 +3247,6 @@ void CHud::RenderDrownBoard()
 
 	TextRender()->TextColor(PreviousColor);
 	TextRender()->TextOutlineColor(PreviousOutline);
+	return SDrownBoardPlacement{BoardBounds, SafeBottom};
 }
 

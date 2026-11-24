@@ -1,17 +1,23 @@
 #ifndef GAME_CLIENT_COMPONENTS_TCLIENT_TCLIENT_H
 #define GAME_CLIENT_COMPONENTS_TCLIENT_TCLIENT_H
 
+#include "drown_board.h"
+#include "map_progress.h"
+
+#include <base/io.h>
+
 #include <engine/client/enums.h>
 #include <engine/external/regex.h>
-#include <base/io.h>
 #include <engine/http.h>
 #include <engine/shared/console.h>
 
 #include <game/client/component.h>
 
-#include "drown_board.h"
-
+#include <array>
 #include <deque>
+#include <vector>
+
+class IMap;
 
 class CTClient : public CComponent
 {
@@ -137,6 +143,51 @@ private:
 	void UpdateDrownBoard();
 	void ResetDrownBoard();
 
+	struct SMapProgressTarget
+	{
+		bool m_Valid = false;
+		int m_ClientId = -1;
+		vec2 m_Position = vec2(0.0f, 0.0f);
+		int m_Index = -1;
+		int m_TeleCheckpoint = 0;
+		vec2 m_PreviousPosition = vec2(0.0f, 0.0f);
+		bool m_HasPreviousPosition = false;
+	};
+	TClientMapProgress::CMap m_MapProgressMap;
+	std::array<TClientMapProgress::CPlayer, NUM_DUMMIES + 1> m_aMapProgressPlayers;
+	std::array<SMapProgressTarget, NUM_DUMMIES + 1> m_aMapProgressTargets;
+	std::array<int, NUM_DUMMIES + 1> m_aMapProgressClientIds = [] {
+		std::array<int, NUM_DUMMIES + 1> aClientIds{};
+		aClientIds.fill(-1);
+		return aClientIds;
+	}();
+	IMap *m_pMapProgressMap = nullptr;
+	const CCollision *m_pMapProgressCollision = nullptr;
+	const CTile *m_pMapProgressGameLayer = nullptr;
+	const CTile *m_pMapProgressFrontLayer = nullptr;
+	const CTeleTile *m_pMapProgressTeleLayer = nullptr;
+	char m_aMapProgressMapName[128] = "";
+	int m_MapProgressBaseScanCursor = 0;
+	unsigned m_MapProgressMapCrc = 0;
+	bool m_MapProgressGoresMode = false;
+	std::vector<uint8_t> m_vMapProgressWaterImages;
+	bool m_MapProgressWaterImagesLoaded = false;
+	int m_MapProgressVisualGroup = 0;
+	int m_MapProgressVisualLayer = 0;
+	int m_MapProgressVisualTile = 0;
+	bool m_MapProgressVisualLayersComplete = true;
+	bool m_MapProgressFailedForMap = false;
+	IMap *m_pMapProgressFailedMap = nullptr;
+	const CCollision *m_pMapProgressFailedCollision = nullptr;
+	unsigned m_MapProgressFailedMapCrc = 0;
+	void FailMapProgressForMap(IMap *pMap, const CCollision *pCollision, unsigned MapCrc);
+	void ResetMapProgress();
+
+	void UpdateMapProgress(bool NewSnapshot);
+	void ScanMapProgressVisualLayers(int Budget);
+	int MapProgressSlot(int Conn) const;
+	int ResolveMapProgressClientId(int Slot) const;
+
 public:
 	CTClient();
 	int Sizeof() const override { return sizeof(*this); }
@@ -180,6 +231,10 @@ public:
 	// 落水榜：服务器声明的 Gores 模式才生效，Team 0 是否计入由配置决定。
 	bool IsGoresGameMode() const;
 	bool IsDrownBoardMode() const { return IsGoresGameMode(); }
+	// Conn is a dummy index; -1 uses the active dummy and resolves its followed target.
+	TClientMapProgress::SEstimate MapProgressEstimate(int Conn = -1) const;
+	bool HasMapProgress(int Conn = -1) const;
+	int MapProgressClientId(int Conn = -1) const;
 	int GetDrownCount(int ClientId) const { return m_DrownBoard.Count(ClientId); }
 	CTClientDrownBoard::SPlayerStats GetDrownStats(int ClientId) const { return m_DrownBoard.Stats(ClientId); }
 

@@ -31,6 +31,7 @@
 #include <engine/shared/datafile.h>
 #include <engine/shared/json.h>
 #include <engine/shared/linereader.h>
+#include <engine/shared/map_settings.h>
 #include <engine/shared/memheap.h>
 #include <engine/shared/protocol.h>
 #include <engine/shared/protocolglue.h>
@@ -4508,14 +4509,13 @@ bool CGameContext::OnMapChange(char *pNewMapName, int MapNameSize)
 					SettingsIndex = pInfo->m_Settings;
 					char *pMapSettings = (char *)Reader.GetData(SettingsIndex);
 					int DataSize = Reader.GetDataSize(SettingsIndex);
-					if(DataSize == TotalLength && mem_comp(pSettings, pMapSettings, DataSize) == 0)
+					if(DataSize == TotalLength && IsMapSettingsDataValid(pMapSettings, DataSize) && mem_comp(pSettings, pMapSettings, DataSize) == 0)
 					{
 						// Configs coincide, no need to update map.
 						free(pSettings);
 						return true;
 					}
-					Reader.UnloadData(pInfo->m_Settings);
-				}
+					}
 				else
 				{
 					MapInfo = *pInfo;
@@ -4633,16 +4633,13 @@ void CGameContext::LoadMapSettings()
 		if(!(pItem->m_Settings > -1))
 			break;
 
-		int Size = pMap->GetDataSize(pItem->m_Settings);
-		char *pSettings = (char *)pMap->GetData(pItem->m_Settings);
-		char *pNext = pSettings;
-		while(pNext < pSettings + Size)
-		{
-			int StrSize = str_length(pNext) + 1;
-			Console()->ExecuteLine(pNext, IConsole::CLIENT_ID_GAME);
-			pNext += StrSize;
-		}
-		pMap->UnloadData(pItem->m_Settings);
+		const int Size = pMap->GetDataSize(pItem->m_Settings);
+		const char *pSettings = (const char *)pMap->GetData(pItem->m_Settings);
+		if(!ForEachMapSetting(pSettings, Size, [&](const char *pCommand, size_t) {
+			Console()->ExecuteLine(pCommand, IConsole::CLIENT_ID_GAME);
+		}))
+			dbg_msg("map/settings", "ignoring invalid map settings data");
+		// Keep the data cached until the map is unloaded; other map items may share this index.
 		break;
 	}
 

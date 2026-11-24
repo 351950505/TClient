@@ -2108,6 +2108,42 @@ More teammates...
 Counts drownings, saves (the tee leaves freeze) and player hooks for your DDRace team. Only shown on Gores maps.
 == 统计你 DDRace 队伍的落水、救援（队友离开冻结）与钩人次数；仅在 Gores 地图显示。
 
+Map
+== 地图
+
+Map progress
+== 终点进度
+
+Show estimated finish percentage below the drown board
+== 在落水榜下方显示预估终点百分比
+
+Also show the percentage inside the Dynamic Island
+== 也在灵动岛内部显示百分比
+
+Also show the percentage inside the Dynamic Island.
+== 开启灵动岛且有进度估算时，也在岛内显示百分比。
+
+Map progress percentage color
+== 终点百分比颜色
+
+Fallback percentage width
+== 回退百分比宽度
+
+Fallback percentage height
+== 回退百分比字号
+
+Fallback horizontal position
+== 回退水平位置
+
+Fallback vertical position
+== 回退垂直位置
+
+Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available.
+== 终点进度在 Gores 和 DDRace 地图上由本地估算；路线尚不可用时会显示未知。
+
+Show the estimated finish percentage below the drown board on Gores and DDRace maps.
+== 在支持的地图上显示预计完赛百分比；落水榜下方有空间时显示在那里，否则单独显示。
+
 Freezes
 == 落水次数
 
@@ -2313,430 +2349,430 @@ Traditional Chinese lyrics (default simplified)
 == 歌词显示繁体（默认简体）
 
 Resends packets until the server confirms them, so hits still register on bad connections.
-== 丢包时自动重发未确认的包，网络不好时攻击照样生效
+== 网络不稳时，客户端会重复发送操作数据，尽量减少丢包对击中的影响。
 
 Sends the copies a few milliseconds apart instead of back to back.
-== 副本包错开几毫秒发送，而不是紧挨着连发
+== 把重复发送的数据包错开几毫秒，避免紧挨着连发。
 
 Shows how many teammates are frozen instead of how many are alive.
-== 显示冻结中的队友数量，而不是存活数量
+== 人数提示改为显示已确认被冻结的队友数，而不是未冻结的队友数。
 
 Send aiming data at sub-tick accuracy.
-== 以 tick 内精度发送瞄准数据。
+== 开火或出钩时，按下按键那一刻的瞄准方向会生效。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Use TClient's alternate antiping smoothing algorithm.
-== 使用 TClient 的另一套反延迟平滑算法。
+== 显示其他玩家移动时，改用 TClient 的平滑方式，不再叠加原版方式。
 
 Retain instability information longer for more cautious prediction.
-== 延长不稳定状态的记忆时间，让预测更谨慎。
+== 使用 TClient 平滑时，对方移动忽快忽慢或反复转向，就多等一会儿再提前显示位置。
 
 Use more optimistic prediction along a tee's stable direction.
-== 沿角色稳定的移动方向进行更积极的预测。
+== 使用 TClient 平滑时，对方持续朝同一方向移动，画面就沿那个方向多显示一点提前量。
 
 Adjust the prediction margin from measured latency and jitter; restore its previous value when disabled or disconnected.
-== 根据测得的延迟和抖动自动调整预测余量；关闭或断开连接时恢复原值。
+== 按网络延迟和波动自动调整给操作预留的时间；关闭或断线后恢复原值。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Predict your tee from your input before the next game tick.
-== 在下一个游戏 tick 到来前，根据你的操作预测自己的角色。
+== 不用等到游戏下次更新，画面就会先显示你角色的动作；不会降低网络延迟。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Re-predict Fast Input when hook direction changes mid-tick; unavailable with Sub-Tick aiming.
-== 钩子方向在 tick 中途改变时重新预测快速输入；子 tick 瞄准开启时不可用。
+== 仅限 Tater 快速输入且关闭细分帧瞄准时生效；刚出钩就转向，会按新方向重算钩子。
 
 Use linear interpolation for players and flying hooks, independently of input mode.
-== 不受输入模式影响，对角色和飞行中的钩子使用线性插值。
+== 两次位置更新之间，角色和飞行中的钩子按匀速过渡；只改画面，不必开启快速输入。
 
 Adapt snapshot interpolation delay when network timing varies, to smooth motion.
-== 网络时序波动时自适应调整快照插值延迟，让移动画面更平滑。
+== 仅对 0.6 连接生效：游戏更新到达时快时慢时，让画面稍晚显示，以减轻移动顿挫。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Use a separate prediction amount for Light hook interactions.
-== Light 模式的钩子交互使用单独的预测量。
+== BestClient-Light 模式下，钩子动作使用单独设置的预测量。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Reject NovaPilot positions on freeze tiles or outside its plausible range.
-== 忽略落在冻结地块内或明显异常的 NovaPilot 预测位置。
+== NovaPilot 估算位置落在冻结地块、偏移过远或几乎没动时，仍显示原位置。
 
 Use curved interpolation for NovaPilot movement rendering when applicable.
-== 在适用时使用曲线插值渲染 NovaPilot 的移动。
+== NovaPilot 用曲线连接连续的位置估算；数据不全或位置跳变过大时，仍用直线。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Adjust NovaPilot prediction using variation in recent timing samples.
-== 根据近期延迟样本的波动调整 NovaPilot 预测量。
+== NovaPilot 会根据近期延迟波动，稍微增加位置估算的提前量。
 
 Enable the Ping wheel to send signals and show signals received from others.
-== 启用 Ping 轮盘，以发送信号并显示收到的他人信号。
+== 用轮盘发送地图信号，也能看到他人发来的信号；信号通道未连接时，自己发的信号只有自己可见。
 
 Also route Ping signals through the Cloudflare relay besides direct UDP.
-== Ping 信号多走一条 Cloudflare 中继路线，作为直连之外的备用。
+== Windows 开启信号中继后，可通过 Cloudflare 收发地图信号；除非设为仅用它，否则优先用 UDP。
 
 Reduce local player prediction and antiping smoothing while frozen.
-== 冻结时减少本地角色预测和反延迟平滑。
+== 自己被冻结时，减少画面中提前显示的移动，也减少位置间的平滑过渡。
 
 Start the Bind Wheel selector centered when it opens.
-== 打开 Bind Wheel 时将选择位置置中。
+== 打开按键转盘时，将鼠标指针移到屏幕中央。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Use a separate prediction amount for Snow hook interactions.
-== Snow 模式的钩子交互使用单独的预测量。
+== Snow 模式的钩子操作使用单独设置的提前量。
 
 Apply the selected fast-input prediction to other players.
-== 将当前快速输入模式的预测应用到其他玩家。
+== 让其他玩家的位置也按当前选定的快速输入模式提前显示。
 
 Stop predicting other players while your tee is frozen.
-== 自己的角色被冻结时，不预测其他玩家。
+== 你被冻结时，按服务器传回的位置显示其他玩家，不再提前估算其位置。
 
 Show your team's board on Gores maps; drownings are inferred from death events, alongside saves and player hooks.
-== 仅在 Gores 地图显示本队落水榜；落水数按死亡推算，并列救援和钩人。
+== 在 Gores 地图显示本队的落水、救援和钩人次数；移动或出钩后被冻住，算一次落水。
 
 Include Team 0 players and their stats in the board.
-== 将 Team 0 玩家及其统计纳入榜单。
+== 在 Gores 服务器上，你处于 0 队时也会统计本队数据并显示落水榜。
 
 Show each player's Tee beside their row in the board.
-== 在榜单每行旁显示玩家 Tee 形象。
+== 在落水榜的玩家名字旁显示其角色形象。
 
 Put friends in a separate group at the top of the spectator selector, before everyone else.
-== 观战选择器中好友单独成组并排在其他玩家前面。
+== 选择观战对象时，将好友单独分组并排在最前。
 
 Show the TClient penguin beside TClient players on your scoreboard; this does not change the identity broadcast.
-== 在记分板的 TClient 玩家旁显示企鹅标记；不影响身份广播。
+== 在记分板上用企鹅标出 TClient 玩家；不影响别人识别你的客户端。
 
 Keep the client disconnected from Steam so friends cannot see you playing; turning this off reconnects immediately, but a failed reconnect requires a restart.
-== 让客户端与 Steam 保持断开，好友看不到你在线；关闭后立即重连，失败需重启。
+== 断开与 Steam 的连接，好友就看不到你在玩；关闭后若连不上，需重启客户端。
 
 Hide team-chat messages from your local display.
-== 在本机隐藏队伍聊天消息。
+== 不在聊天栏里显示队伍频道的消息。
 
 Hide whisper messages from your local display.
-== 在本机隐藏私聊消息。
+== 不在聊天栏里显示收到或发出的私聊。
 
 Hide system and server chat messages from your local display.
-== 在本机隐藏系统和服务器聊天消息。
+== 不在聊天栏里显示服务器发来的系统消息。
 
 Hide kill-feed messages from your local display.
-== 在本机隐藏击杀提示。
+== 不在你的击杀栏里显示玩家死亡或全队阵亡的提示。
 
 Hide race-finish messages from your local display.
-== 在本机隐藏竞速完成提示。
+== 不在你的比赛动态里显示谁到达了终点。
 
 Enable streamer privacy handling: country flags stay hidden, sub-options take effect, and your name and skin remain visible to you and friends.
-== 启用主播隐私模式：始终隐藏国旗，子选项才会生效；自己和好友不受隐藏。
+== 在你的画面里隐藏国旗，并启用你勾选的主播模式选项。
 
 Filter sensitive words in chat, player names, and clans, including words from an optional custom list; requires Streamer Mode.
-== 过滤聊天、玩家名称和战队名中的敏感词；需开启主播模式。
+== 主播模式下遮住聊天、玩家名和战队名中的敏感词，也包括你自己添加的词。
 
 Replace non-friends' in-game names with client IDs and hide their clans; server-list names use asterisks, while you and friends remain visible. Requires Streamer Mode.
-== 非好友名称改为客户端编号并隐藏战队名；自己和好友不受影响。需开启主播模式。
+== 主播模式下，非好友在游戏里只显示编号，在服务器列表里显示为星号；战队名也会隐藏。
 
 Show non-friends with the default skin; your skin and friends' skins are unaffected. Requires Streamer Mode.
-== 非好友显示为默认皮肤；自己和好友不受影响。需开启主播模式。
+== 主播模式下，非好友显示为默认皮肤；你和好友的皮肤不变。
 
 Use the compact modern weapon and jump HUD layout.
-== 使用紧凑的现代武器和跳跃 HUD 布局。
+== 在 DDRace 状态栏紧凑排列武器和跳跃信息，并在当前武器下方加线。
 
 Show the modern freeze countdown in the HUD.
-== 在 HUD 中显示现代冻结倒计时。
+== 在 DDRace 状态栏显示冻结剩余秒数和进度条；没有倒计时的冻结显示 ∞。
 
 Show message-colored chat cards; hover over chat with a menu open to scroll its history.
-== 聊天显示为消息色边框卡片；打开菜单后悬停聊天可滚动历史。
+== 聊天卡片边框会跟随消息颜色；打开菜单的“游戏”页，把鼠标移到聊天区可滚轮查看旧消息。
 
 Use the modern vote panel.
-== 使用现代投票面板。
+== 用带票数条的圆角面板显示投票；即使开启迷你投票，也优先用此样式。
 
 Color tune-zone tiles by zone number; without this option, entity tiles have no added tune-zone colors.
-== 按区域编号给调参区地块着色；关闭后实体地块不带调参区颜色。
+== 按地图参数区域编号为地块着色；其他实体地块不额外着色。
 
 Flash the freeze tile when your own Tee enters it.
-== 自己的 Tee 进入冻结地块时闪烁提示该地块。
+== 服务器确认你的角色踩中冻结地块并被冻结时，那块地会闪一下。
 
 Color the tile your hook is holding; at a seam, both adjacent tiles are highlighted.
-== 为钩子抓住的地块着色；钩在接缝处时同时高亮相邻两块。
+== 点亮钩子抓住的地块；钩在两块地的接缝上时，两块都亮。
 
 Preview the tile your aim would hook before firing; it shares the hooked-tile color and opacity settings.
-== 出钩前预览瞄准方向会钩中的地块；共用抓住态的颜色和透明度。
+== 出钩前标出瞄准方向预计会钩住的地块，颜色和透明度与钩住时相同。
 
 Tint a frozen Tee when the current hook prediction can reach it; this is separate from tile highlighting and landing preview.
-== 钩子预判能钩中冻结 Tee 时为其着色；独立于钩砖高亮和落点预览。
+== 瞄准时标出预计能钩中的冻结角色，钩住或解冻后取消；不必开启地块预览。
 
 Add a glow around a shown hooked or previewed tile; a tile highlight or landing preview must be visible.
-== 为显示中的抓取地块或预览地块加光晕；需先开启对应显示。
+== 给已点亮的地块加一圈光晕；需先开启钩住地块高亮或落点预览。
 
 Mark same-team frozen Tees when they use their hook; your Tee and dummy are included only if the self option is enabled.
-== 本队冻结 Tee 使用钩子时标记；开启自身选项后包含自己和 dummy。
+== 同队角色被冻结时，按住出钩键半秒就会变色；要标记自己和分身，需另开自身高亮。
 
 Mark same-team frozen Tees when they fire the hammer; your Tee and dummy are included only if the self option is enabled.
-== 本队冻结 Tee 开锤时标记；开启自身选项后包含自己和 dummy。
+== 同队角色被冻结时，持锤按住攻击键半秒就会变色；要标记自己和分身，需另开自身高亮。
 
 Include your own frozen Tee and dummy in hook or hammer highlights; at least one of those highlights must be enabled.
-== 钩/锤高亮中也标记自己的冻结 Tee 和 dummy；需先开启对应高亮。
+== 开启冻结出钩或挥锤变色后，也用同样规则标记你自己和分身。
 
 Use separate body and feet colors for hook and hammer highlights instead of sharing one pair.
-== 为钩子和锤子高亮分别设置身体与脚部颜色，不再共用一组。
+== 出钩和挥锤各用一套身体和脚部颜色；两种标记同时触发时，优先用锤子的颜色。
 
 Animate player names with the selected gradient; the Apply to setting determines whose names change.
-== 用所选渐变为玩家名称添加动画；应用对象由"应用对象"设置决定。
+== 让玩家昵称渐变换色，可选只改自己、只改他人或全部。
 
 Animate player clan names with the selected gradient; the Apply to setting determines whose clans change.
-== 用所选渐变为玩家战队名添加动画；应用对象由"应用对象"设置决定。
+== 让战队名渐变换色，可选只改自己、只改他人或全部。
 
 Animate Tee body and feet colors with the selected gradient; the Apply to setting determines whose skins change.
-== 用所选渐变为 Tee 身体和脚部颜色添加动画；应用对象由设置决定。
+== 让角色的身体和脚渐变换色，可选只改自己、只改他人或全部。
 
 Apply the selected gradient to text without an explicit color; text with its own color is left unchanged.
-== 将所选渐变应用于未指定颜色的文字；已有颜色的文字不变。
+== 让未指定颜色的文字渐变换色；本来就有颜色的文字保持原样。
 
 Add a latency-colored ring to each nameplate.
-== 名牌旁加一个随延迟变色的圆圈指示。
+== 在玩家名字旁显示延迟圆点：延迟越低越绿，越高越红。
 
 Add the player's country flag to the nameplate.
-== 名牌里显示该玩家的国家旗帜。
+== 在其他玩家名牌旁显示旗帜；主播模式设为隐藏旗帜时不显示。
 
 Append the skin name text to the nameplate.
-== 名牌上追加显示玩家所用皮肤的名字。
+== 在其他玩家的名牌上显示他们所用皮肤的名称。
 
 Mark players with open menus with a gear icon.
-== 打开设置菜单的玩家头顶会显示齿轮标记。
+== 玩家打开设置菜单时，在其角色上方显示齿轮标记。
 
 Show legacy star particles on frozen tees.
-== 冻结的 tee 身上显示旧版星星粒子。
+== 角色被冻结时，头顶会出现旧版倒计时星星。
 
 Keep frozen tees in their own skin colors.
-== 冻结的 tee 改用自己皮肤的原有配色。
+== 不使用队伍配色时，冻结后的忍者外观会按玩家自己的皮肤上色。
 
 Frozen players visibly hold a katana.
-== 冻结的玩家手里会握着一把武士刀。
+== 让被冻结的玩家看起来手持武士刀，不改变实际武器。
 
 Draw pistol sprites for most weapons.
-== 除锤和忍者外武器都画成手枪外观。
+== 把霰弹枪、榴弹枪和激光枪显示成手枪，不改变射击方式。
 
 Force every tee's feet to pure white.
-== 所有 tee 的脚统一画成纯白色。
+== 对自定义配色的 0.6 版皮肤，脚部改用所选白脚皮肤的图案。
 
 Draw moving tiles inside the entities layer.
-== 会移动的图块改在实体图层中渲染。
+== 实体图层显示比例为 100% 时，也显示可识别的移动图块。
 
 Vote no on map votes after enough playtime.
-== 本图游玩超过设定时长后换图票自动投反对。
+== 本局计时达到设定时长后自动反对换图；挂机时不投，也不反对自己、好友或队友发起的票。
 
 Auto-answer whispers from players you muted.
-== 被你静音的人私聊时自动代回设定消息。
+== 被你屏蔽的玩家私聊或点名时，用预设消息回复；服务器不支持私聊时会公开回复。
 
 Auto-answer whispers while the window is hidden.
-== 游戏切到后台时私聊自动回复对方。
+== 游戏切到后台时，用预设消息回复私聊或点名；服务器不支持私聊时会公开回复。
 
 Radially mark other players around your tee.
-== 在自己 tee 周围以圆点标出其他玩家的方位。
+== 在允许缩放的竞速对局中，用角色周围的圆点标出其他玩家方向；回放中不显示。
 
 Hide indicators for tees already on screen.
-== 已出现在画面里的玩家不再显示指示。
+== 玩家已在画面内时，不再显示指向该玩家的方向标记。
 
 Only indicate frozen players.
-== 指示器只标出冻结状态的玩家。
+== 开启玩家方向提示后，只标出被冻结的玩家。
 
 Show indicators only after joining a team.
-== 加入队伍后才开始显示玩家指示。
+== 你在默认的 0 队时不显示玩家方向标记，加入其他队伍后才显示。
 
 Draw tiny tees instead of circles.
-== 指示点画成小 tee 图案而非圆圈。
+== 用玩家的小角色图案代替圆点，标出该玩家的方向。
 
 Push indicators outward as players get farther.
-== 玩家越远其指示点离你的 tee 越远。
+== 玩家离你越远，方向标记也离你的角色越远，直到设定上限。
 
 Let warlist groups drive the indicators.
-== 指示器改按战争名单分组标色。
+== 玩家方向提示只显示敌对列表中所选分组的玩家。
 
 Prefer warlist colors over freeze-state colors.
-== 指示颜色用名单组色代替冻结状态色。
+== 方向圆点改用名单分组颜色，不再用颜色区分冻结状态。
 
 Indicate players from every warlist group.
-== 显示所有战争名单组的玩家指示。
+== 方向提示包含名单中任一分组的玩家，仍遵守其他显示条件。
 
 Indicate players from the first group.
-== 显示战争名单第一组玩家的指示。
+== 方向提示包含名单第一组；使用分组颜色时，第一组圆点颜色优先。
 
 Indicate players from the second group.
-== 显示战争名单第二组玩家的指示。
+== 方向提示包含名单第二组；若同时符合前两组，圆点优先用第一组颜色。
 
 Show a small pet following your tee.
-== 屏幕上出现一只跟着你跑的小宠物。
+== 在自己的画面里显示一只跟随角色的小宠物。
 
 Shrink the vote interface into a mini panel.
-== 投票界面缩小成不挡视野的小窗。
+== 未开启现代投票面板时，用小面板显示投票。
 
 Overlay your position and aim angle.
-== 屏幕上显示自己的坐标和朝向。
+== 显示自己或观战角色的坐标、瞄准方向和速度；自由视角下只显示光标坐标。
 
 Keep your aim cursor visible in freeview.
-== 自由观景时仍显示自己的准星游标。
+== 用自由视角观战时，显示手枪准星。
 
 Alert when you are the last one alive.
-== 全队只剩你存活时显示提醒文字。
+== DDRace 队伍里只剩一人未被冻结且队员状态已确认时，显示提醒文字。
 
 Draw screen-center crosshair reference lines.
-== 画出屏幕中心的十字参考线。
+== 显示屏幕中心的十字参考线。
 
 Show the Dynamic Island music capsule.
-== 顶部显示灵动岛样式的音乐悬浮条。
+== 在对局和回放中显示灵动岛音乐条，取代顶部中央的计时器。
 
 Dock the capsule against the screen top edge.
-== 悬浮条贴住屏幕上缘呈刘海胶囊状。
+== 把悬浮的灵动岛改成贴在屏幕上沿的刘海样式。
 
 Display lyrics synced to the song.
-== 悬浮条上显示随播放同步的歌词。
+== 有同步歌词时，灵动岛会跟随歌曲进度显示当前唱到的一句。
 
 Preview the next lyric under the current one.
-== 当前歌词下方加一行下一句的淡色预览。
+== 开启歌词后，当前歌词下方改为显示译文或预览下一句，不再显示歌名。
 
 Render fetched lyrics in traditional Chinese.
-== 歌词改以繁体中文显示。
+== 获取到的中文歌词用繁体字显示，不用简体字。
 
 Show the round timer on the island.
-== 悬浮条上显示当局游戏计时。
+== 在灵动岛上显示对局计时，与歌曲进度条分开控制。
 
 Add a song progress rail at the bottom.
-== 悬浮条底部显示歌曲进度条。
+== 在灵动岛底部用进度条显示歌曲播到哪里。
 
 Show your computer's local time.
-== 悬浮条上显示本机时间。
+== 在灵动岛上显示电脑本地时间，精确到分钟。
 
 Show probe loss, snapshot gaps and RTT.
-== 在游戏计时前显示丢包、快照缺口和延迟数据。
+== 联机时在灵动岛显示往返延迟；出现警告时也显示网络检查未回应或游戏更新缺失情况。
 
 Drop the black capsule, use outlined text.
-== 去掉黑色胶囊底，改用描边文字。
+== 去掉灵动岛的黑色背景，给文字加描边，方便看清。
 
 Show a frozen teammates overview panel.
-== 屏幕上显示冻结队友小面板。
+== 显示队伍中被冻结角色的状态面板。
 
 Draw real skins instead of ninja figures.
-== 面板里用真实皮肤而非忍者图形显示队友。
+== 冻结角色面板中显示玩家皮肤，而非忍者图案。
 
 Show the panel only while in a team.
-== 加入队伍后才显示冻结队友面板。
+== 你在默认的 0 队时隐藏队友冻结面板，加入其他队伍后才显示。
 
 List only unfrozen teammates in the panel.
-== 面板只列出未冻结的存活队友。
+== 队友冻结面板只列出已确认未被冻结的队友。
 
 Draw outline strokes around map tiles.
-== 给地图图块描出轮廓边线。
+== 给已选类型的地块描边，例如墙体或冻结地块。
 
 Restrict outlines to the entities layer.
-== 描边只在实体图层中显示。
+== 只在实体图层可见时绘制已开启的地块描边。
 
 Show ghosts of other players' unpredicted positions.
-== 显示其他玩家未预测位置的幽灵影像。
+== 显示其他玩家服务器位置的残影。
 
 Render the predicted position as the ghost instead.
-== 幽灵与本体对调，预测位画成幽灵。
+== 显示其他玩家残影时，残影放在本机估算位置，角色放在服务器传回位置。
 
 Hide ghosts while that player is frozen.
-== 冻结中的玩家不再显示幽灵。
+== 显示其他玩家残影时，若对方被冻结，只隐藏残影，不隐藏角色。
 
 Draw ghosts as plain circles, not tees.
-== 幽灵画成圆点而非 tee 形状。
+== 玩家残影已显示时，用圆点代替角色轮廓。
 
 Cycle your own tee body through rainbow hues.
-== 自己的 tee 身体循环变换彩虹色。
+== 在自己的画面里，让角色身体和脚使用所选的彩虹配色。
 
 Cycle your own weapon through rainbow hues.
-== 自己的武器循环变换彩虹色。
+== 在自己的画面里，让手持武器使用所选的彩虹配色。
 
 Cycle your own hook through rainbow hues.
-== 自己的钩绳循环变换彩虹色。
+== 在自己的画面里，让钩子和钩绳使用所选的彩虹配色。
 
 Apply the rainbow cycling to other tees too.
-== 其他玩家的 tee 也套用彩虹变色。
+== 在自己的画面里，其他玩家的角色、钩子或武器也使用你为对应部位开启的彩虹配色。
 
 Draw a motion trail behind moving tees.
-== tee 移动时身后留下拖尾轨迹。
+== 角色移动时，在身后画出刚走过的路线。
 
 Draw motion trails for other players too.
-== 其他玩家的移动也显示拖尾。
+== 允许缩放视野时，也显示其他玩家的移动轨迹。
 
 Let the trail fade out along its length.
-== 拖尾沿长度逐渐变透明。
+== 移动轨迹越靠近尾端，颜色越淡。
 
 Let the trail narrow along its length.
-== 拖尾沿长度逐渐变细收窄。
+== 移动轨迹从角色身后向尾端逐渐变细。
 
 Rename you to the finish name near the finish.
-== 靠近终点砖时自动改用设定的终点名。
+== 靠近终点砖时，自动向服务器请求改用你设定的终点名。
 
 Translate incoming chat automatically.
-== 收到的聊天消息自动翻译显示。
+== 自动翻译其他玩家的聊天；已经是所选语言的发言和系统消息会跳过。
 
 Translate outgoing chat before sending.
-== 发出的消息先翻译成设定语言再发送。
+== 发言前先尝试翻译成所选语言；以斜杠开头的命令按原文发送。
 
 Enable all warlist color highlighting.
-== 启用战争名单的全部标色显示。
+== 玩家名或家族名在敌对列表中时，用对应的分组颜色标记。
 
 Allow adding the same entry twice.
-== 允许名单重复添加同一条记录。
+== 再次添加同一玩家名或家族名时，保留名单里的旧记录。
 
 Color names in chat by warlist.
-== 聊天里的玩家名按战争名单着色。
+== 聊天中的玩家名按名单分组着色；玩家名和家族名都在名单中时，优先用玩家名的组色。
 
 Color names on the scoreboard by warlist.
-== 记分板里按战争名单给名字着色。
+== 记分板上的玩家名和家族名分别按名单分组着色，名单颜色优先于渐变色。
 
 Color spectator menu entries by warlist.
-== 观战选择菜单按战争名单着色。
+== 选择观战对象时用名单组色显示玩家名；玩家名和家族名都在名单中时，优先用玩家名的组色。
 
 Show war players' clan on their nameplate.
-== 战争对象名牌上会显示其家族名。
+== 如果家族名在敌对列表中，就在该家族玩家的头顶名牌上显示家族名。
 
 Show the bottom status bar.
-== 屏幕底部显示一条状态栏。
+== 在屏幕底部的状态栏显示你选中的信息。
 
 Label each status bar item with text.
-== 状态栏条目旁显示文字标签。
+== 在支持标签的状态栏数值前显示名称。
 
 Use 12-hour format for the clock.
-== 状态栏时钟改用十二小时制。
+== 状态栏本地时间改用十二小时制，并标明上午或下午。
 
 Append seconds to the status bar clock.
-== 状态栏时钟显示到秒。
+== 状态栏显示本地时间时，精确到秒。
 
 Stack Tee
 == 叠 Tee

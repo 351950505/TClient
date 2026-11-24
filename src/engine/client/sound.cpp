@@ -2,6 +2,8 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "sound.h"
 
+#include "sound_wavpack_helpers.h"
+
 #include <base/bytes.h>
 #include <base/dbg.h>
 #include <base/log.h>
@@ -435,9 +437,29 @@ void CSound::RateConvert(CSample &Sample) const
 	if(Sample.m_Rate == m_MixingRate)
 		return;
 
-	// allocate new data
-	const int NumFrames = (int)((Sample.m_NumFrames / (float)Sample.m_Rate) * m_MixingRate);
-	short *pNewData = (short *)calloc((size_t)NumFrames * Sample.m_Channels, sizeof(short));
+	// Keep the existing sample if its output cannot be represented or allocated.
+	if(Sample.m_NumFrames <= 0 || Sample.m_Rate <= 0 || m_MixingRate <= 0 || Sample.m_Channels < 1 || Sample.m_Channels > 2)
+		return;
+	const double NumFramesScaled = (Sample.m_NumFrames / (float)Sample.m_Rate) * m_MixingRate;
+	if(!std::isfinite(NumFramesScaled) || NumFramesScaled < 1 || NumFramesScaled > std::numeric_limits<int>::max())
+	{
+		log_error("sound", "Resampled frame count is not supported (%f)", NumFramesScaled);
+		return;
+	}
+	const int NumFrames = (int)NumFramesScaled;
+	std::size_t NumSamples;
+	std::size_t BufferSize;
+	if(!sound_detail::GetCheckedSampleBufferSize(NumFrames, Sample.m_Channels, sizeof(short), &NumSamples, &BufferSize))
+	{
+		log_error("sound", "Resampled sample is too large (%d frames, %d channels)", NumFrames, Sample.m_Channels);
+		return;
+	}
+	short *pNewData = (short *)calloc(1, BufferSize);
+	if(!pNewData)
+	{
+		log_error("sound", "Failed to allocate resampled sample (%zu bytes)", BufferSize);
+		return;
+	}
 
 	for(int i = 0; i < NumFrames; i++)
 	{
@@ -685,7 +707,12 @@ public:
 	static int ReadData(void *pId, void *pBuffer, int Size)
 	{
 		CWavpackReader *pReader = static_cast<CWavpackReader *>(pId);
-		int ChunkSize = std::min(Size, pReader->m_Size - pReader->m_Position);
+		if(!pReader)
+			return 0;
+		const int ChunkSize = sound_detail::GetWavpackReadSize(Size, pReader->m_Size, pReader->m_Position);
+		if(ChunkSize == 0 || !pReader->m_pBuffer || !pBuffer)
+			return 0;
+
 		mem_copy(pBuffer, pReader->m_pBuffer + pReader->m_Position, ChunkSize);
 		pReader->m_Position += ChunkSize;
 		return ChunkSize;
@@ -728,8 +755,34 @@ public:
 
 	static int PushBackByte(void *pId, int Char)
 	{
-		static_cast<CWavpackReader *>(pId)->m_Position -= 1;
+		CWavpackReader *pReader = static_cast<CWavpackReader *>(pId);
+		if(!pReader || !sound_detail::TryPushBackWavpackByte(pReader->m_Size, &pReader->m_Position))
+			return -1;
 		return 0;
+	}
+};
+
+class CWavpackDecodeOperations
+{
+public:
+	void Close(WavpackContext *pContext)
+	{
+		WavpackCloseFile(pContext);
+	}
+
+	uint32_t Unpack(WavpackContext *pContext, int32_t *pBuffer, uint32_t NumSamples)
+	{
+		return WavpackUnpackSamples(pContext, pBuffer, NumSamples);
+	}
+
+	void *Allocate(size_t Size)
+	{
+		return calloc(1, Size);
+	}
+
+	void Free(void *pBuffer)
+	{
+		free(pBuffer);
 	}
 };
 
@@ -738,10 +791,15 @@ bool CSound::DecodeWV(CSample &Sample, const void *pData, unsigned DataSize, con
 	// no need to load sound when we are running with no sound
 	if(!m_SoundEnabled)
 		return false;
+	if(!pData || !sound_detail::IsValidWavpackInputLength(DataSize))
+	{
+		log_error("sound/wv", "Input data size is not supported (%u). Filename='%s'", DataSize, pContextName);
+		return false;
+	}
 
 	char aError[100];
 
-	CWavpackReader Reader(pData, DataSize);
+	CWavpackReader Reader(pData, static_cast<int>(DataSize));
 	WavpackStreamReader Callback = {};
 	Callback.can_seek = CWavpackReader::CanSeek;
 	Callback.get_length = CWavpackReader::GetLength;
@@ -751,64 +809,51 @@ bool CSound::DecodeWV(CSample &Sample, const void *pData, unsigned DataSize, con
 	Callback.set_pos_abs = CWavpackReader::SetPosAbs;
 	Callback.set_pos_rel = CWavpackReader::SetPosRel;
 	WavpackContext *pContext = WavpackOpenFileInputEx(&Callback, &Reader, nullptr, aError, 0, 0);
-	if(pContext)
-	{
-		const int BitsPerSample = WavpackGetBitsPerSample(pContext);
-		const unsigned int SampleRate = WavpackGetSampleRate(pContext);
-		const int NumChannels = WavpackGetNumChannels(pContext);
-
-		if(NumChannels > 2)
-		{
-			log_error("sound/wv", "File is not mono or stereo. Filename='%s'", pContextName);
-			return false;
-		}
-
-		if(BitsPerSample != 16)
-		{
-			log_error("sound/wv", "Bits per sample is %d, not 16. Filename='%s'", BitsPerSample, pContextName);
-			return false;
-		}
-
-		// wavpack reports -1 when the length of the stream is unknown
-		const int64_t NumSamples = WavpackGetNumSamples64(pContext);
-		if(NumSamples <= 0 || NumSamples > std::numeric_limits<int>::max())
-		{
-			log_error("sound/wv", "Number of samples is %" PRId64 ", not supported. Filename='%s'", NumSamples, pContextName);
-			WavpackCloseFile(pContext);
-			return false;
-		}
-
-		int *pBuffer = (int *)calloc((size_t)NumSamples * NumChannels, sizeof(int));
-		if(!WavpackUnpackSamples(pContext, pBuffer, NumSamples))
-		{
-			free(pBuffer);
-			log_error("sound/wv", "WavpackUnpackSamples failed. NumSamples=%" PRId64 " NumChannels=%d Filename='%s'", NumSamples, NumChannels, pContextName);
-			return false;
-		}
-
-		Sample.m_pData = (short *)calloc((size_t)NumSamples * NumChannels, sizeof(short));
-
-		int *pSrc = pBuffer;
-		short *pDst = Sample.m_pData;
-		for(int64_t i = 0; i < NumSamples * NumChannels; i++)
-			*pDst++ = (short)*pSrc++;
-
-		free(pBuffer);
-		WavpackCloseFile(pContext);
-
-		Sample.m_NumFrames = NumSamples;
-		Sample.m_Rate = SampleRate;
-		Sample.m_Channels = NumChannels;
-		Sample.m_LoopStart = 0;
-		Sample.m_PausedAt = 0;
-	}
-	else
+	if(!pContext)
 	{
 		log_error("sound/wv", "Failed to decode sample (%s). Filename='%s'", aError, pContextName);
 		return false;
 	}
 
-	return true;
+	const int BitsPerSample = WavpackGetBitsPerSample(pContext);
+	const unsigned int SampleRate = WavpackGetSampleRate(pContext);
+	const int NumChannels = WavpackGetNumChannels(pContext);
+	const int64_t NumSamples = WavpackGetNumSamples64(pContext);
+	CWavpackDecodeOperations Operations;
+	const sound_detail::EWavpackDecodeResult Result = sound_detail::DecodeWavpackSamples(Sample, pContext, SampleRate, BitsPerSample, NumChannels, NumSamples, Operations);
+	switch(Result)
+	{
+	case sound_detail::EWavpackDecodeResult::SUCCESS:
+		return true;
+	case sound_detail::EWavpackDecodeResult::INVALID_CHANNEL_COUNT:
+		log_error("sound/wv", "File is not mono or stereo (channels=%d). Filename='%s'", NumChannels, pContextName);
+		break;
+	case sound_detail::EWavpackDecodeResult::INVALID_SAMPLE_RATE:
+		log_error("sound/wv", "Sample rate is not supported (%u). Filename='%s'", SampleRate, pContextName);
+		break;
+	case sound_detail::EWavpackDecodeResult::INVALID_BITS_PER_SAMPLE:
+		log_error("sound/wv", "Bits per sample is %d, not 16. Filename='%s'", BitsPerSample, pContextName);
+		break;
+	case sound_detail::EWavpackDecodeResult::INVALID_SAMPLE_COUNT:
+		log_error("sound/wv", "Number of samples is %" PRId64 ", not supported. Filename='%s'", NumSamples, pContextName);
+		break;
+	case sound_detail::EWavpackDecodeResult::SAMPLE_BUFFER_TOO_LARGE:
+		log_error("sound/wv", "Sample buffer is too large (samples=%" PRId64 " channels=%d). Filename='%s'", NumSamples, NumChannels, pContextName);
+		break;
+	case sound_detail::EWavpackDecodeResult::INPUT_ALLOCATION_FAILED:
+		log_error("sound/wv", "Failed to allocate unpack buffer. Filename='%s'", pContextName);
+		break;
+	case sound_detail::EWavpackDecodeResult::INCOMPLETE_DECODE:
+		log_error("sound/wv", "WavpackUnpackSamples returned an unexpected sample count (expected=%" PRId64 "). Filename='%s'", NumSamples, pContextName);
+		break;
+	case sound_detail::EWavpackDecodeResult::OUTPUT_ALLOCATION_FAILED:
+		log_error("sound/wv", "Failed to allocate output buffer. Filename='%s'", pContextName);
+		break;
+	case sound_detail::EWavpackDecodeResult::INVALID_CONTEXT:
+		log_error("sound/wv", "WavPack context is null. Filename='%s'", pContextName);
+		break;
+	}
+	return false;
 }
 
 int CSound::LoadOpus(const char *pFilename, int StorageType)

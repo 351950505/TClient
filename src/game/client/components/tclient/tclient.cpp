@@ -9,14 +9,12 @@
 #include <base/process.h>
 #include <base/time.h>
 
-
-
 #include <engine/client.h>
 #include <engine/client/enums.h>
-#include <engine/map.h>
 #include <engine/external/regex.h>
 #include <engine/external/tinyexpr.h>
 #include <engine/graphics.h>
+#include <engine/map.h>
 #include <engine/shared/config.h>
 #include <engine/shared/json.h>
 #include <engine/storage.h>
@@ -28,6 +26,7 @@
 #include <game/client/gameclient.h>
 #include <game/client/render.h>
 #include <game/client/ui.h>
+#include <game/layers.h>
 #include <game/localization.h>
 #include <game/version.h>
 
@@ -39,10 +38,12 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #endif
-#include <engine/external/ed25519/ed25519.h>
 #include "update_public_key.h"
 
+#include <engine/external/ed25519/ed25519.h>
+
 #include <cstdarg>
+#include <new>
 
 static constexpr const char *TCLIENT_INFO_URL = "https://update.tclient.app/info.json";
 
@@ -214,7 +215,6 @@ static bool IsHexSha256(const char *pStr)
 	return true;
 }
 
-
 CTClient::CTClient()
 {
 	OnReset();
@@ -298,7 +298,8 @@ void CTClient::OnInit()
 	// 的秒级轮询)抢占游戏线程会造成瞬时卡顿 —— 把进程提到高于普通一档,尖峰
 	// 来时调度器优先保游戏。tc_process_priority:F1 可改,重启生效。
 	const DWORD PriorityClass = g_Config.m_TcProcessPriority == 2 ? HIGH_PRIORITY_CLASS :
-		g_Config.m_TcProcessPriority == 1 ? ABOVE_NORMAL_PRIORITY_CLASS : NORMAL_PRIORITY_CLASS;
+				    g_Config.m_TcProcessPriority == 1 ? ABOVE_NORMAL_PRIORITY_CLASS :
+									NORMAL_PRIORITY_CLASS;
 	SetPriorityClass(GetCurrentProcess(), PriorityClass);
 #endif
 	TextRender()->SetCustomFace(g_Config.m_TcCustomFont);
@@ -372,7 +373,7 @@ void CTClient::OnMessage(int MsgType, void *pRawMsg)
 		bool PingMessage = false;
 
 		bool ValidIds = GameClient()->m_aLocalIds[0] >= 0 && GameClient()->m_aLocalIds[0] < MAX_CLIENTS &&
-			(!GameClient()->Client()->DummyConnected() || (GameClient()->m_aLocalIds[1] >= 0 && GameClient()->m_aLocalIds[1] < MAX_CLIENTS));
+				(!GameClient()->Client()->DummyConnected() || (GameClient()->m_aLocalIds[1] >= 0 && GameClient()->m_aLocalIds[1] < MAX_CLIENTS));
 
 		if(ValidIds && ClientId >= 0 && ClientId != GameClient()->m_aLocalIds[0] && (!GameClient()->Client()->DummyConnected() || ClientId != GameClient()->m_aLocalIds[1]))
 		{
@@ -1097,8 +1098,6 @@ void CTClient::UpdateCheck(bool Force)
 	log_info("tclient-update", "checking for update (force=%d, current=%s)", Force ? 1 : 0, TCLIENT_APP_VERSION);
 	FetchUpdateManifest();
 }
-
-
 
 void CTClient::FetchUpdateManifest()
 {
@@ -1982,11 +1981,13 @@ void CTClient::OnUpdate()
 		m_ForcedAspectQueued = false;
 		ApplyForcedAspect();
 	}
+	UpdateMapProgress(false);
 }
 
 void CTClient::OnStateChange(int OldState, int NewState)
 {
 	QueueForcedAspectUpdate();
+	ResetMapProgress();
 	ResetDrownBoard();
 	for(auto &AirRescuePositions : m_aAirRescuePositions)
 		AirRescuePositions = {};
@@ -2037,6 +2038,7 @@ void CTClient::OnNewSnapshot()
 			m_aAirRescuePositions[Dummy].push_front(NewPos);
 		}
 	}
+	UpdateMapProgress(true);
 	UpdateDrownBoard();
 }
 
@@ -2046,6 +2048,493 @@ bool CTClient::IsGoresGameMode() const
 	return pGameType != nullptr && pGameType[0] != '\0' && str_find_nocase(pGameType, "gores") != nullptr;
 }
 
+namespace
+{
+	constexpr int MAP_PROGRESS_TILE_SCAN_BUDGET = 4096;
+	constexpr int MAP_PROGRESS_DIJKSTRA_BUDGET = 2048;
+
+	bool IsMapProgressWaterImage(const char *pImageName)
+	{
+		// QmClient Gores water art uses both black-water and ordinary water atlases.
+		return pImageName && !str_find_nocase(pImageName, "sun") && str_find_nocase(pImageName, "water");
+	}
+
+	bool IsMapProgressTeleportInput(int Type)
+	{
+		return Type == TILE_TELEIN || Type == TILE_TELEINEVIL ||
+		       Type == TILE_TELECHECKIN || Type == TILE_TELECHECKINEVIL;
+	}
+} // namespace
+
+void CTClient::FailMapProgressForMap(IMap *pMap, const CCollision *pCollision, unsigned MapCrc)
+{
+	ResetMapProgress();
+	m_MapProgressFailedForMap = true;
+	m_pMapProgressFailedMap = pMap;
+	m_pMapProgressFailedCollision = pCollision;
+	m_MapProgressFailedMapCrc = MapCrc;
+}
+
+void CTClient::ResetMapProgress()
+{
+	m_MapProgressMap = TClientMapProgress::CMap();
+	for(auto &Player : m_aMapProgressPlayers)
+		Player.Reset();
+	for(auto &Target : m_aMapProgressTargets)
+		Target = SMapProgressTarget();
+	m_aMapProgressClientIds.fill(-1);
+	m_pMapProgressMap = nullptr;
+	m_pMapProgressCollision = nullptr;
+	m_pMapProgressGameLayer = nullptr;
+	m_pMapProgressFrontLayer = nullptr;
+	m_pMapProgressTeleLayer = nullptr;
+	m_aMapProgressMapName[0] = '\0';
+	m_MapProgressBaseScanCursor = 0;
+	m_MapProgressMapCrc = 0;
+	m_MapProgressGoresMode = false;
+	m_vMapProgressWaterImages.clear();
+	m_MapProgressWaterImagesLoaded = false;
+	m_MapProgressVisualGroup = 0;
+	m_MapProgressVisualLayer = 0;
+	m_MapProgressVisualTile = 0;
+	m_MapProgressVisualLayersComplete = true;
+	m_MapProgressFailedForMap = false;
+	m_pMapProgressFailedMap = nullptr;
+	m_pMapProgressFailedCollision = nullptr;
+	m_MapProgressFailedMapCrc = 0;
+}
+
+int CTClient::ResolveMapProgressClientId(int Slot) const
+{
+	if(Slot == NUM_DUMMIES)
+	{
+		const auto &Spec = GameClient()->m_Snap.m_SpecInfo;
+		return Spec.m_Active && Spec.m_SpectatorId >= 0 && Spec.m_SpectatorId < MAX_CLIENTS ? Spec.m_SpectatorId : -1;
+	}
+	if(Slot < 0 || Slot >= NUM_DUMMIES || (Slot == 1 && !Client()->DummyConnected()))
+		return -1;
+	const int ClientId = GameClient()->m_aLocalIds[Slot];
+	return ClientId >= 0 && ClientId < MAX_CLIENTS ? ClientId : -1;
+}
+
+int CTClient::MapProgressSlot(int Conn) const
+{
+	if(Conn < -1 || Conn >= NUM_DUMMIES)
+		return -1;
+	const int ActiveConn = std::clamp(g_Config.m_ClDummy, 0, NUM_DUMMIES - 1);
+	const int Slot = Conn < 0 ? ActiveConn : Conn;
+	if(Slot == ActiveConn && GameClient()->m_Snap.m_SpecInfo.m_Active)
+	{
+		const int SpectatorId = ResolveMapProgressClientId(NUM_DUMMIES);
+		return SpectatorId >= 0 ? NUM_DUMMIES : -1;
+	}
+	return ResolveMapProgressClientId(Slot) >= 0 ? Slot : -1;
+}
+
+int CTClient::MapProgressClientId(int Conn) const
+{
+	const int Slot = MapProgressSlot(Conn);
+	return Slot >= 0 ? ResolveMapProgressClientId(Slot) : -1;
+}
+
+TClientMapProgress::SEstimate CTClient::MapProgressEstimate(int Conn) const
+{
+	if(!g_Config.m_TcMapProgress)
+		return {};
+	const int Slot = MapProgressSlot(Conn);
+	const CLayers *pLayers = Layers();
+	const IMap *pCurrentMap = GameClient()->Map();
+	if(!pCurrentMap || !pCurrentMap->IsLoaded())
+		return {};
+	const char *pMapName = pCurrentMap->BaseName();
+	if(Slot < 0 || m_aMapProgressClientIds[Slot] != ResolveMapProgressClientId(Slot) || !m_MapProgressMap.Ready() ||
+		!pLayers || pLayers->Map() != m_pMapProgressMap || !m_pMapProgressMap || !m_pMapProgressMap->IsLoaded() || m_pMapProgressMap->Crc() != m_MapProgressMapCrc ||
+		Collision() != m_pMapProgressCollision || str_comp(m_aMapProgressMapName, pMapName) != 0)
+		return {};
+	return m_aMapProgressPlayers[Slot].Estimate();
+}
+
+bool CTClient::HasMapProgress(int Conn) const
+{
+	return MapProgressEstimate(Conn).m_Valid;
+}
+
+void CTClient::ScanMapProgressVisualLayers(int Budget)
+{
+	if(m_MapProgressVisualLayersComplete || Budget <= 0)
+		return;
+	const CLayers *pLayers = Layers();
+	IMap *pMap = pLayers ? pLayers->Map() : nullptr;
+	if(!pLayers || !pMap || !pMap->IsLoaded() || pMap != m_pMapProgressMap || !m_pMapProgressCollision)
+	{
+		m_MapProgressVisualLayersComplete = true;
+		return;
+	}
+	while(m_MapProgressVisualGroup < pLayers->NumGroups())
+	{
+		const CMapItemGroup *pGroup = pLayers->GetGroup(m_MapProgressVisualGroup);
+		if(!pGroup || m_MapProgressVisualLayer >= pGroup->m_NumLayers)
+		{
+			++m_MapProgressVisualGroup;
+			m_MapProgressVisualLayer = 0;
+			m_MapProgressVisualTile = 0;
+			continue;
+		}
+		const int64_t LayerIndex64 = (int64_t)pGroup->m_StartLayer + m_MapProgressVisualLayer;
+		if(LayerIndex64 < 0 || LayerIndex64 >= pLayers->NumLayers())
+		{
+			++m_MapProgressVisualLayer;
+			m_MapProgressVisualTile = 0;
+			continue;
+		}
+		const CMapItemLayer *pLayer = pLayers->GetLayer((int)LayerIndex64);
+		if(!pLayer || pLayer->m_Type != LAYERTYPE_TILES)
+		{
+			++m_MapProgressVisualLayer;
+			m_MapProgressVisualTile = 0;
+			continue;
+		}
+		const auto *pTilemap = reinterpret_cast<const CMapItemLayerTilemap *>(pLayer);
+		if(pTilemap->m_Flags != 0 || pTilemap->m_Width != m_pMapProgressCollision->GetWidth() ||
+			pTilemap->m_Height != m_pMapProgressCollision->GetHeight() || pTilemap->m_Image < 0 ||
+			pTilemap->m_Image >= (int)m_vMapProgressWaterImages.size() ||
+			!m_vMapProgressWaterImages[(size_t)pTilemap->m_Image] || pTilemap->m_Data < 0 || pTilemap->m_Data >= pMap->NumData())
+		{
+			++m_MapProgressVisualLayer;
+			m_MapProgressVisualTile = 0;
+			continue;
+		}
+		const int MapSize = m_MapProgressMap.Size();
+		const int64_t RequiredBytes = (int64_t)MapSize * sizeof(CTile);
+		if(RequiredBytes > std::numeric_limits<int>::max() || pMap->GetDataSize(pTilemap->m_Data) < RequiredBytes)
+		{
+			FailMapProgressForMap(pMap, m_pMapProgressCollision, m_MapProgressMapCrc);
+			return;
+		}
+		// Map data indices can alias the render/collision layers. Borrow their pointer;
+		// only the map owner may unload the shared data.
+		const CTile *pVisualTiles = static_cast<const CTile *>(pMap->GetData(pTilemap->m_Data));
+		if(!pVisualTiles)
+		{
+			FailMapProgressForMap(pMap, m_pMapProgressCollision, m_MapProgressMapCrc);
+			return;
+		}
+		const int Start = m_MapProgressVisualTile;
+		const int End = (int)std::min<int64_t>(MapSize, (int64_t)Start + Budget);
+		for(; m_MapProgressVisualTile < End; ++m_MapProgressVisualTile)
+		{
+			if(pVisualTiles[m_MapProgressVisualTile].m_Index == TILE_AIR)
+				continue;
+			auto Tile = m_MapProgressMap.Tile(m_MapProgressVisualTile);
+			Tile.m_Water = true;
+			m_MapProgressMap.SetTile(m_MapProgressVisualTile, Tile);
+		}
+		Budget -= End - Start;
+		if(m_MapProgressVisualTile < MapSize)
+			return;
+		m_MapProgressVisualTile = 0;
+		++m_MapProgressVisualLayer;
+		if(Budget <= 0)
+			return;
+	}
+	m_MapProgressVisualLayersComplete = true;
+}
+void CTClient::UpdateMapProgress(bool NewSnapshot)
+{
+	IMap *pFailureMap = nullptr;
+	const CCollision *pFailureCollision = nullptr;
+	unsigned FailureMapCrc = 0;
+	try
+	{
+		if(!g_Config.m_TcMapProgress)
+		{
+			ResetMapProgress();
+			return;
+		}
+		const int State = Client()->State();
+		const bool InGameState = State == IClient::STATE_ONLINE || State == IClient::STATE_DEMOPLAYBACK;
+		if(!InGameState)
+		{
+			ResetMapProgress();
+			return;
+		}
+		const IMap *pCurrentMap = GameClient()->Map();
+		if(!pCurrentMap || !pCurrentMap->IsLoaded())
+		{
+			ResetMapProgress();
+			return;
+		}
+		const char *pMapName = pCurrentMap->BaseName();
+		const bool GoresMode = IsGoresGameMode();
+		const bool DDRaceMap = !GoresMode && GameClient()->m_GameInfo.m_Race && GameClient()->m_GameInfo.m_PredictDDRace &&
+				       (!pMapName || str_comp_nocase(pMapName, "NUT_race9") != 0);
+		const bool SpecialMap = pMapName && str_comp_nocase(pMapName, "NUT_race9") == 0;
+		if(!InGameState || (!GoresMode && !DDRaceMap && !SpecialMap))
+		{
+			ResetMapProgress();
+			return;
+		}
+		const CCollision *pCollision = Collision();
+		const CLayers *pLayers = Layers();
+		IMap *pMap = pLayers ? pLayers->Map() : nullptr;
+		const CTile *pGame = pCollision ? pCollision->GameLayer() : nullptr;
+		const CTile *pFront = pCollision ? pCollision->FrontLayer() : nullptr;
+		const CTeleTile *pTele = pCollision ? pCollision->TeleLayer() : nullptr;
+		const int Width = pCollision ? pCollision->GetWidth() : 0;
+		const int Height = pCollision ? pCollision->GetHeight() : 0;
+		const int64_t MapSize64 = (int64_t)Width * Height;
+		if(!pCollision || !pMap || !pGame || Width <= 0 || Height <= 0 || MapSize64 <= 0)
+		{
+			ResetMapProgress();
+			return;
+		}
+		const unsigned CurrentMapCrc = pMap->Crc();
+		pFailureMap = pMap;
+		pFailureCollision = pCollision;
+		FailureMapCrc = CurrentMapCrc;
+		if(m_MapProgressFailedForMap)
+		{
+			if(m_pMapProgressFailedMap == pMap && m_pMapProgressFailedCollision == pCollision &&
+				m_MapProgressFailedMapCrc == CurrentMapCrc)
+				return;
+			ResetMapProgress();
+		}
+		if(!TClientMapProgress::IsMapSizeWithinProgressBudget(Width, Height))
+		{
+			FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
+			return;
+		}
+		const int MapSize = (int)MapSize64;
+		if(!TClientMapProgress::IsMapProgressVisualMetadataWithinBudget(pMap->NumData(), 0,
+			   pLayers ? pLayers->NumGroups() : 0, pLayers ? pLayers->NumLayers() : 0))
+		{
+			FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
+			return;
+		}
+		const char *pSafeMapName = pMapName ? pMapName : "";
+		if(m_pMapProgressMap != pMap || m_pMapProgressCollision != pCollision ||
+			m_pMapProgressGameLayer != pGame || m_pMapProgressFrontLayer != pFront || m_pMapProgressTeleLayer != pTele ||
+			m_MapProgressMap.Size() != MapSize || str_comp(m_aMapProgressMapName, pSafeMapName) != 0 ||
+			m_MapProgressMapCrc != CurrentMapCrc || m_MapProgressGoresMode != GoresMode)
+		{
+			ResetMapProgress();
+			m_MapProgressMap = TClientMapProgress::CMap(Width, Height);
+			if(m_MapProgressMap.Size() != MapSize)
+			{
+				FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
+				return;
+			}
+			m_pMapProgressMap = pMap;
+			m_pMapProgressCollision = pCollision;
+			m_pMapProgressGameLayer = pGame;
+			m_pMapProgressFrontLayer = pFront;
+			m_pMapProgressTeleLayer = pTele;
+			m_MapProgressMapCrc = CurrentMapCrc;
+			str_copy(m_aMapProgressMapName, pSafeMapName, sizeof(m_aMapProgressMapName));
+			m_MapProgressGoresMode = GoresMode;
+			m_MapProgressVisualLayersComplete = !GoresMode;
+		}
+		if(GoresMode && !m_MapProgressWaterImagesLoaded)
+		{
+			m_MapProgressWaterImagesLoaded = true;
+			int ImageStart = 0;
+			int ImageCount = 0;
+			pMap->GetType(MAPITEMTYPE_IMAGE, &ImageStart, &ImageCount);
+			const int NumItems = pMap->NumItems();
+			if(ImageCount < 0 || ImageCount > TClientMapProgress::MAP_PROGRESS_MAX_VISUAL_IMAGES ||
+				ImageStart < 0 || ImageStart > NumItems || ImageCount > NumItems - ImageStart ||
+				!TClientMapProgress::IsMapProgressVisualMetadataWithinBudget(pMap->NumData(), ImageCount,
+					pLayers->NumGroups(), pLayers->NumLayers()))
+			{
+				FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
+				return;
+			}
+			if(ImageCount > 0)
+			{
+				m_vMapProgressWaterImages.assign((size_t)ImageCount, 0);
+				for(int ImageIndex = 0; ImageIndex < ImageCount; ++ImageIndex)
+				{
+					const auto *pImage = static_cast<const CMapItemImage_v2 *>(pMap->GetItem(ImageStart + ImageIndex));
+					if(!pImage || pImage->m_ImageName < 0 || pImage->m_ImageName >= pMap->NumData())
+					{
+						FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
+						return;
+					}
+					// Image-name data can also be shared with the renderer; this scan only borrows it.
+					const char *pImageName = pMap->GetDataString(pImage->m_ImageName);
+					if(!pImageName)
+					{
+						FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
+						return;
+					}
+					m_vMapProgressWaterImages[(size_t)ImageIndex] = IsMapProgressWaterImage(pImageName);
+				}
+			}
+		}
+		const auto ReadTile = [&](int Index) {
+			const int GameTile = pCollision->GetTileIndex(Index);
+			const int FrontTile = pCollision->GetFrontTileIndex(Index);
+			const int TeleType = pTele ? pTele[Index].m_Type : 0;
+			const int TeleNumber = pTele ? pTele[Index].m_Number : 0;
+			auto Tile = TClientMapProgress::MakeTile(GameTile, FrontTile, TeleType, TeleNumber,
+				pCollision->GetMoveRestrictions(nullptr, nullptr, pCollision->GetPos(Index), 18.0f, Index));
+			int TimeCheckpoint = pCollision->IsTimeCheckpoint(Index);
+			if(TimeCheckpoint < 0)
+				TimeCheckpoint = pCollision->IsFrontTimeCheckpoint(Index);
+			Tile.m_TimeCheckpoint = TimeCheckpoint;
+			return Tile;
+		};
+		if(m_MapProgressBaseScanCursor < MapSize)
+		{
+			const int End = (int)std::min<int64_t>(MapSize, (int64_t)m_MapProgressBaseScanCursor + MAP_PROGRESS_TILE_SCAN_BUDGET);
+			for(; m_MapProgressBaseScanCursor < End; ++m_MapProgressBaseScanCursor)
+				m_MapProgressMap.SetTile(m_MapProgressBaseScanCursor, ReadTile(m_MapProgressBaseScanCursor));
+		}
+		if(m_MapProgressBaseScanCursor == MapSize && !m_MapProgressVisualLayersComplete)
+		{
+			ScanMapProgressVisualLayers(MAP_PROGRESS_TILE_SCAN_BUDGET);
+			if(m_MapProgressFailedForMap)
+				return;
+		}
+		if(m_MapProgressBaseScanCursor == MapSize && m_MapProgressVisualLayersComplete && !m_MapProgressMap.Finalized())
+			m_MapProgressMap.FinalizeStep(MAP_PROGRESS_TILE_SCAN_BUDGET);
+		if(NewSnapshot)
+		{
+			for(int Slot = 0; Slot <= NUM_DUMMIES; ++Slot)
+			{
+				const int ClientId = ResolveMapProgressClientId(Slot);
+				auto &Target = m_aMapProgressTargets[Slot];
+				if(ClientId < 0 || ClientId >= MAX_CLIENTS)
+				{
+					m_aMapProgressPlayers[Slot].Reset();
+					Target = SMapProgressTarget();
+					m_aMapProgressClientIds[Slot] = -1;
+					continue;
+				}
+				if(m_aMapProgressClientIds[Slot] != ClientId)
+				{
+					m_aMapProgressPlayers[Slot].Reset();
+					Target = SMapProgressTarget();
+					m_aMapProgressClientIds[Slot] = ClientId;
+				}
+				const auto &Character = GameClient()->m_Snap.m_aCharacters[ClientId];
+				bool CharacterActive = Character.m_Active;
+				bool HasPosition = CharacterActive;
+				vec2 Position(0.0f, 0.0f);
+				if(CharacterActive)
+					Position = vec2((float)Character.m_Cur.m_X, (float)Character.m_Cur.m_Y);
+				else if(Slot == NUM_DUMMIES && GameClient()->m_aClients[ClientId].m_Active)
+				{
+					const auto &ClientInfo = GameClient()->m_aClients[ClientId];
+					if(ClientInfo.m_SpecCharPresent)
+					{
+						Position = ClientInfo.m_SpecChar;
+						HasPosition = true;
+					}
+					else if(const auto *pSpectator = GameClient()->m_Snap.m_pSpectatorInfo;
+						pSpectator && pSpectator->m_SpectatorId == ClientId)
+					{
+						Position = vec2((float)pSpectator->m_X, (float)pSpectator->m_Y);
+						HasPosition = true;
+					}
+				}
+				if(!HasPosition)
+				{
+					m_aMapProgressPlayers[Slot].Reset();
+					Target = SMapProgressTarget();
+					continue;
+				}
+				const int Index = pCollision->GetPureMapIndex(Position);
+				if(Index < 0 || Index >= MapSize)
+				{
+					m_aMapProgressPlayers[Slot].Reset();
+					Target = SMapProgressTarget();
+					continue;
+				}
+				if(Target.m_Valid)
+				{
+					Target.m_PreviousPosition = Target.m_Position;
+					Target.m_HasPreviousPosition = true;
+				}
+				int TeleCheckpoint = Target.m_TeleCheckpoint;
+				if(CharacterActive && Character.m_HasExtendedData)
+					TeleCheckpoint = std::max(0, Character.m_ExtendedData.m_TeleCheckpoint);
+				else if(pTele && pTele[Index].m_Type == TILE_TELECHECK)
+				{
+					const int ObservedTeleCheckpoint = pCollision->IsTeleCheckpoint(Index);
+					if(ObservedTeleCheckpoint >= 0)
+						TeleCheckpoint = ObservedTeleCheckpoint;
+				}
+				Target.m_Valid = true;
+				Target.m_ClientId = ClientId;
+				Target.m_Position = Position;
+				Target.m_Index = Index;
+				Target.m_TeleCheckpoint = TeleCheckpoint;
+				const auto ObserveIndex = [&](int ObserveAt) {
+					if(ObserveAt < 0 || ObserveAt >= MapSize)
+						return;
+					auto Tile = ReadTile(ObserveAt);
+					if(ObserveAt < m_MapProgressBaseScanCursor)
+						Tile.m_Water = Tile.m_Water || m_MapProgressMap.Tile(ObserveAt).m_Water;
+					if((!CharacterActive || !Character.m_HasExtendedData) && pTele && pTele[ObserveAt].m_Type == TILE_TELECHECK)
+					{
+						const int ObservedTeleCheckpoint = pCollision->IsTeleCheckpoint(ObserveAt);
+						if(ObservedTeleCheckpoint >= 0)
+							Target.m_TeleCheckpoint = ObservedTeleCheckpoint;
+					}
+					m_aMapProgressPlayers[Slot].Observe(Tile, ObserveAt);
+				};
+				if(Target.m_HasPreviousPosition)
+				{
+					const int PreviousIndex = pCollision->GetPureMapIndex(Target.m_PreviousPosition);
+					const auto TeleportEndpoint = [&](int TileIndex) {
+						if(!pTele || TileIndex < 0 || TileIndex >= MapSize)
+							return false;
+						const int Type = pTele[TileIndex].m_Type;
+						return IsMapProgressTeleportInput(Type) || Type == TILE_TELEOUT || Type == TILE_TELECHECKOUT;
+					};
+					if(PreviousIndex >= 0 && PreviousIndex < MapSize && PreviousIndex != Index &&
+						length_squared(Position - Target.m_PreviousPosition) <= 128.0f * 128.0f &&
+						!TeleportEndpoint(PreviousIndex) && !TeleportEndpoint(Index))
+					{
+						for(const int CrossedIndex : pCollision->GetMapIndices(Target.m_PreviousPosition, Position, 8))
+							if(CrossedIndex != Index)
+								ObserveIndex(CrossedIndex);
+					}
+				}
+				ObserveIndex(Index);
+				Target.m_HasPreviousPosition = false;
+			}
+		}
+		for(int Slot = 0; Slot <= NUM_DUMMIES; ++Slot)
+		{
+			if(m_aMapProgressClientIds[Slot] != ResolveMapProgressClientId(Slot))
+			{
+				m_aMapProgressPlayers[Slot].Reset();
+				m_aMapProgressTargets[Slot] = SMapProgressTarget();
+				m_aMapProgressClientIds[Slot] = -1;
+				continue;
+			}
+			const auto &Target = m_aMapProgressTargets[Slot];
+			if(!Target.m_Valid || Target.m_ClientId < 0 || Target.m_Index < 0 || Target.m_Index >= MapSize || !m_MapProgressMap.Ready())
+				continue;
+			m_aMapProgressPlayers[Slot].Update(m_MapProgressMap, Target.m_Index, Target.m_TeleCheckpoint,
+				MAP_PROGRESS_DIJKSTRA_BUDGET, Slot < NUM_DUMMIES);
+			if(m_aMapProgressPlayers[Slot].Failed())
+			{
+				FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
+				return;
+			}
+		}
+	}
+	catch(const std::bad_alloc &)
+	{
+		if(pFailureMap && pFailureCollision)
+			FailMapProgressForMap(pFailureMap, pFailureCollision, FailureMapCrc);
+		else
+			ResetMapProgress();
+	}
+}
 void CTClient::ResetDrownBoard()
 {
 	m_DrownBoard.Reset();
@@ -2089,7 +2578,8 @@ void CTClient::UpdateDrownBoard()
 	if(GameTick == m_DrownBoardLastTick)
 		return;
 	const int ElapsedTicks = m_DrownBoardLastTick >= 0 && GameTick > m_DrownBoardLastTick ?
-		std::min(GameTick - m_DrownBoardLastTick, Client()->GameTickSpeed()) : 1;
+					 std::min(GameTick - m_DrownBoardLastTick, Client()->GameTickSpeed()) :
+					 1;
 	m_DrownBoardLastTick = GameTick;
 
 	const CCollision *pCollision = GameClient()->Collision();
@@ -2113,14 +2603,14 @@ void CTClient::UpdateDrownBoard()
 			const int GameTile = pCollision->GetTileIndex(Index);
 			const int FrontTile = pCollision->GetFrontTileIndex(Index);
 			InFreezeTile = GameTile == TILE_FREEZE || GameTile == TILE_DFREEZE || GameTile == TILE_LFREEZE ||
-				FrontTile == TILE_FREEZE || FrontTile == TILE_DFREEZE || FrontTile == TILE_LFREEZE;
+				       FrontTile == TILE_FREEZE || FrontTile == TILE_DFREEZE || FrontTile == TILE_LFREEZE;
 			const float Size = CCharacterCore::PhysicalSize();
 			OnSafeGround = !InFreezeTile && (pCollision->IsOnGround(Pos, Size) ||
-				(pCollision->GetMoveRestrictions(Pos + vec2(0, Size / 2 + 4), 0.0f) & CANTMOVE_DOWN) != 0);
+								(pCollision->GetMoveRestrictions(Pos + vec2(0, Size / 2 + 4), 0.0f) & CANTMOVE_DOWN) != 0);
 		}
-			m_DrownBoard.Observe(ClientId, Active, Player.m_aName, Player.m_aClan, GameClient()->m_Teams.Team(ClientId),
-				Character.m_Active, Player.m_FreezeEnd != 0, Hooking, OnStart, IncludeTeamZero,
-				Character.m_Active && Character.m_Cur.m_Direction != 0);
+		m_DrownBoard.Observe(ClientId, Active, Player.m_aName, Player.m_aClan, GameClient()->m_Teams.Team(ClientId),
+			Character.m_Active, Player.m_FreezeEnd != 0, Hooking, OnStart, IncludeTeamZero,
+			Character.m_Active && Character.m_Cur.m_Direction != 0);
 
 		CTClientDrownBoard::SDrownStatTick &Tick = aStatTicks[ClientId];
 		Tick.m_Active = Active;

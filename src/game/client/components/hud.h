@@ -10,9 +10,11 @@
 
 #include <game/client/component.h>
 #include <game/client/components/tclient/frozen_hud_logic.h>
+#include <game/client/components/tclient/hud_map_progress.h>
 #include <game/client/ui.h>
 
 #include <map>
+#include <optional>
 
 struct SScoreInfo
 {
@@ -57,6 +59,9 @@ class CHud : public CComponent
 	// Only the frozen count/tee row wait for the island's current-frame bounds.
 	bool m_FrozenHudPending = false;
 	int m_FrozenHudTeam = 0;
+	TClientHudMapProgress::CProgressState m_aMapProgressState[NUM_DUMMIES];
+	bool m_aMapProgressValid[NUM_DUMMIES] = {};
+	float m_aMapProgressDisplayed[NUM_DUMMIES] = {};
 	STcFrozenHudFrame<MAX_CLIENTS> m_FrozenHudFrame;
 	ColorRGBA m_FrozenHudTextColor;
 	ColorRGBA m_FrozenHudTextOutlineColor;
@@ -86,6 +91,9 @@ class CHud : public CComponent
 	float m_aPlayerPrevPosition[2];
 
 	void RenderCursor();
+	void UpdateMapProgress();
+	void RenderMapProgressStandalone(int Dummy);
+	bool RenderMapProgressBelowBoard(const CUIRect &Board, float SafeBottom, int Dummy);
 
 	void RenderTextInfo();
 	void RenderConnectionWarning();
@@ -174,6 +182,7 @@ public:
 
 	// Called after island rendering, with its occupied rectangle in HUD units.
 	void RenderFrozenHud(const CUIRect &Island);
+	bool GetMapProgressIslandValue(int Dummy, float &Progress) const;
 	static float FrozenHudRowY(const CUIRect &Row, const CUIRect &Island, float ScreenHeight);
 	static CUIRect FrozenHudCapsulePlacement(CUIRect Capsule, const CUIRect &Island, float ScreenWidth, float ScreenHeight, float OffsetX, float OffsetY);
 
@@ -185,8 +194,13 @@ public:
 private:
 	void RenderRecord();
 	void RenderDDRaceEffects();
+	struct SDrownBoardPlacement
+	{
+		CUIRect m_Bounds;
+		float m_SafeBottom;
+	};
 	// Gores 组队落水榜（QmClient 移植，默认关闭）
-	void RenderDrownBoard();
+	std::optional<SDrownBoardPlacement> RenderDrownBoard();
 	float m_TimeCpDiff;
 	float m_aPlayerRecord[NUM_DUMMIES];
 	float m_FinishTimeDiff;

@@ -8,6 +8,7 @@
 #include <base/vmath.h>
 
 #include <engine/graphics.h>
+#include <engine/serverbrowser.h>
 #include <engine/shared/config.h>
 
 #include <game/client/components/envelope_state.h>
@@ -57,9 +58,68 @@ inline static bool QuadName(const int *pInts, size_t NumInts, char *pStr, size_t
 	return false;
 }
 
+// Adapted from QmClient's moving-water layer recognition. Map artwork is water
+// when its name contains "water" but not "sun"; the alpha source is unavailable.
+static bool IsMovingWaterName(const char *pName)
+{
+	return pName && pName[0] != '\0' && str_find_nocase(pName, "sun") == nullptr && str_find_nocase(pName, "water") != nullptr;
+}
+
+static bool QuadLayerUsesMovingWaterImage(IMap *pMap, const CMapItemLayerQuads *pLayer)
+{
+	if(!pMap || !pLayer)
+		return false;
+
+	int ImagesStart = 0;
+	int ImagesNum = 0;
+	pMap->GetType(MAPITEMTYPE_IMAGE, &ImagesStart, &ImagesNum);
+	if(pLayer->m_Image < 0 || pLayer->m_Image >= ImagesNum)
+		return false;
+
+	const auto *pImage = static_cast<const CMapItemImage_v2 *>(pMap->GetItem(ImagesStart + pLayer->m_Image));
+	if(!pImage || pImage->m_ImageName < 0 || pImage->m_ImageName >= pMap->NumData())
+		return false;
+
+	// Map data is shared with collision and rendering, including aliased data indices.
+	const char *pImageName = pMap->GetDataString(pImage->m_ImageName);
+	return IsMovingWaterName(pImageName);
+}
+
 void CMovingTiles::Reset()
 {
 	m_vQuads.clear();
+	m_HasGoresOrAxiomQuads = false;
+}
+
+bool CMovingTiles::ShouldRenderGoresOrAxiomWater() const
+{
+	if(Client()->State() != IClient::STATE_ONLINE)
+		return false;
+
+	const CServerInfo &ServerInfo = Client()->ServerInfo();
+	const char *pServerGameType = ServerInfo.m_aGameType;
+	const char *pCommunityId = ServerInfo.m_aCommunityId;
+	IServerBrowser *pServerBrowser = GameClient()->ServerBrowser();
+	const IServerBrowser::CServerEntry *pEntry = pServerBrowser ? pServerBrowser->Find(Client()->ServerAddress()) : nullptr;
+	if(pEntry)
+	{
+		if(!pServerGameType || pServerGameType[0] == '\0')
+			pServerGameType = pEntry->m_Info.m_aGameType;
+		pCommunityId = pEntry->m_Info.m_aCommunityId;
+	}
+	else if(GameClient()->m_ConnectServerInfo)
+	{
+		if(!pServerGameType || pServerGameType[0] == '\0')
+			pServerGameType = GameClient()->m_ConnectServerInfo->m_aGameType;
+		pCommunityId = GameClient()->m_ConnectServerInfo->m_aCommunityId;
+	}
+
+	const CCommunity *pCommunity = pServerBrowser && pCommunityId && pCommunityId[0] != '\0' ? pServerBrowser->Community(pCommunityId) : nullptr;
+	const char *pCommunityName = pCommunity ? pCommunity->Name() : nullptr;
+	return (GameClient()->m_GameInfo.m_aGameType[0] && str_find_nocase(GameClient()->m_GameInfo.m_aGameType, "gores")) ||
+		(pServerGameType && str_find_nocase(pServerGameType, "gores")) ||
+		(pCommunityId && str_find_nocase(pCommunityId, "axiom")) ||
+		(pCommunityName && str_find_nocase(pCommunityName, "axiom"));
 }
 
 void CMovingTiles::OnStateChange(int NewState, int OldState)
@@ -89,40 +149,56 @@ void CMovingTiles::OnMapLoad()
 			if(pLayer->m_Type != LAYERTYPE_QUADS || GameClient()->Map()->GetItemSize(LayerItemIndex) < (int)sizeof(CMapItemLayerQuads))
 				continue;
 
-			char aLayerName[30];
-			CMapItemLayerQuads *pTilemap = reinterpret_cast<CMapItemLayerQuads *>(pLayer);
-			if(pTilemap->m_Version < 2 || pTilemap->m_NumQuads <= 0)
-				continue;
-			QuadName(pTilemap->m_aName, std::size(pTilemap->m_aName), aLayerName, std::size(aLayerName));
+				char aLayerName[30];
+				CMapItemLayerQuads *pTilemap = reinterpret_cast<CMapItemLayerQuads *>(pLayer);
+				if(pTilemap->m_Version < 2 || pTilemap->m_NumQuads <= 0)
+					continue;
+				QuadName(pTilemap->m_aName, std::size(pTilemap->m_aName), aLayerName, std::size(aLayerName));
 
-			for(size_t Names = 0; Names < std::size(ValidQuadNames); Names++)
-			{
-				if(!str_comp(ValidQuadNames[Names], aLayerName))
+				EQType Type = EQType::NONE;
+				bool RequiresGoresOrAxiom = false;
+				for(size_t Names = 0; Names < std::size(ValidQuadNames); Names++)
 				{
-					EQType Type = static_cast<EQType>(Names);
-					if(!m_RenderAbove && (Type == EQType::HOOKABLE || Type == EQType::UNHOOKABLE))
-						continue;
-					else if(m_RenderAbove && Type != EQType::HOOKABLE && Type != EQType::UNHOOKABLE)
-						continue;
-
-					// NumQuadLayers++;
-					CQuad *pQuads = static_cast<CQuad *>(GameClient()->Map()->GetDataSwapped(pTilemap->m_Data));
-					if(pQuads == nullptr || (size_t)pTilemap->m_NumQuads > (size_t)GameClient()->Map()->GetDataSize(pTilemap->m_Data) / sizeof(CQuad))
-						break;
-					for(int NumQuads = 0; NumQuads < pTilemap->m_NumQuads; NumQuads++)
+					if(!str_comp(ValidQuadNames[Names], aLayerName))
 					{
-						CQuadData QuadData;
-						QuadData.m_pQuad = &pQuads[NumQuads];
-						QuadData.m_pGroup = pGroup;
-						QuadData.m_pLayer = pTilemap;
-						QuadData.m_Type = Type;
-						for(int j = 0; j < 5; j++)
-							QuadData.m_Pos[j] = vec2(fx2f(QuadData.m_pQuad->m_aPoints[j].x), fx2f(QuadData.m_pQuad->m_aPoints[j].y));
-						m_vQuads.push_back(QuadData);
+						Type = static_cast<EQType>(Names);
+						break;
 					}
-					break;
 				}
-			}
+				if(Type == EQType::NONE && IsMovingWaterName(aLayerName))
+				{
+					Type = EQType::FREEZE;
+					RequiresGoresOrAxiom = true;
+				}
+				if(Type == EQType::NONE && QuadLayerUsesMovingWaterImage(GameClient()->Map(), pTilemap))
+				{
+					Type = EQType::FREEZE;
+					RequiresGoresOrAxiom = true;
+				}
+				if(Type == EQType::NONE)
+					continue;
+				if(!m_RenderAbove && (Type == EQType::HOOKABLE || Type == EQType::UNHOOKABLE))
+					continue;
+				if(m_RenderAbove && Type != EQType::HOOKABLE && Type != EQType::UNHOOKABLE)
+					continue;
+
+				CQuad *pQuads = static_cast<CQuad *>(GameClient()->Map()->GetDataSwapped(pTilemap->m_Data));
+				if(pQuads == nullptr || (size_t)pTilemap->m_NumQuads > (size_t)GameClient()->Map()->GetDataSize(pTilemap->m_Data) / sizeof(CQuad))
+					continue;
+				for(int NumQuads = 0; NumQuads < pTilemap->m_NumQuads; NumQuads++)
+				{
+					CQuadData QuadData;
+					QuadData.m_pQuad = &pQuads[NumQuads];
+					QuadData.m_pGroup = pGroup;
+					QuadData.m_pLayer = pTilemap;
+					QuadData.m_Type = Type;
+					QuadData.m_RequiresGoresOrAxiom = RequiresGoresOrAxiom;
+					m_HasGoresOrAxiomQuads = m_HasGoresOrAxiomQuads || RequiresGoresOrAxiom;
+					for(int j = 0; j < 5; j++)
+						QuadData.m_Pos[j] = vec2(fx2f(QuadData.m_pQuad->m_aPoints[j].x), fx2f(QuadData.m_pQuad->m_aPoints[j].y));
+					m_vQuads.push_back(QuadData);
+				}
+
 		}
 	}
 	// log_info("moving-tiles", "%" PRIzu " valid quadlayer%s with %d quads", NumQuadLayers, NumQuadLayers == 1 ? "" : "s", (int)m_vQuads.size());
@@ -138,6 +214,10 @@ void CMovingTiles::OnRender()
 		return;
 	if(m_vQuads.empty())
 		return;
+
+	// EnvelopeEval reads cached time; refresh it once for both position and color.
+	m_EnvEvaluator.Update();
+	const bool RenderGoresOrAxiomWater = !m_HasGoresOrAxiomQuads || ShouldRenderGoresOrAxiomWater();
 
 	const vec2 Center = GameClient()->m_Camera.m_Center;
 	const float Zoom = GameClient()->m_Camera.m_Zoom;
@@ -222,6 +302,8 @@ void CMovingTiles::OnRender()
 		for(size_t QuadIndex = QuadStart; QuadIndex < QuadEnd; QuadIndex++)
 		{
 			const CQuadData &QuadData = m_vQuads[QuadIndex];
+			if(QuadData.m_RequiresGoresOrAxiom && !RenderGoresOrAxiomWater)
+				continue;
 			const CQuad *pQuad = QuadData.m_pQuad;
 			if(!pQuad)
 				continue;

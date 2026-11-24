@@ -10,10 +10,11 @@ fn strip_crc32(s: &str) -> Option<&str> {
     }
     let (result, encoded_crc32) = s.split_at(s.len() - 6);
     let mut crc32 = [0; 4];
-    assert_eq!(
-        base64::decode_config_slice(encoded_crc32, base64::URL_SAFE_NO_PAD, &mut crc32).ok()?,
-        4
-    );
+    if base64::decode_config_slice(encoded_crc32, base64::URL_SAFE_NO_PAD, &mut crc32).ok()?
+        != crc32.len()
+    {
+        return None;
+    }
     if crc32fast::hash(result.as_bytes()).to_be_bytes() != crc32 {
         return None;
     }
@@ -21,6 +22,7 @@ fn strip_crc32(s: &str) -> Option<&str> {
 }
 
 fn token(s: &str) -> Option<(&str, &str)> {
+    let s = strip_crc32(s)?;
     let mut underscore = None;
     for (i, b) in s.bytes().enumerate() {
         match b {
@@ -34,10 +36,6 @@ fn token(s: &str) -> Option<(&str, &str)> {
         }
     }
     let underscore = underscore?;
-    let s = strip_crc32(s)?;
-    if s.len() < underscore {
-        return None;
-    }
     Some((&s[..underscore], &s[underscore + 1..]))
 }
 
@@ -91,12 +89,13 @@ impl Verification {
             return None;
         }
         let (plain_prefix, hash_base64) = token.split_at(PLAIN_PREFIX_LEN);
-        let plain_prefix = PlainPrefix::from(plain_prefix).unwrap();
+        let plain_prefix = PlainPrefix::from(plain_prefix).ok()?;
         let mut hash = Hash([0; 16]);
-        assert_eq!(
-            base64::decode_config_slice(hash_base64, base64::URL_SAFE_NO_PAD, &mut hash.0,).ok()?,
-            16,
-        );
+        if base64::decode_config_slice(hash_base64, base64::URL_SAFE_NO_PAD, &mut hash.0).ok()?
+            != hash.0.len()
+        {
+            return None;
+        }
         Some(Verification { plain_prefix, hash })
     }
 }
@@ -113,6 +112,15 @@ mod tests {
     use super::get_plain_prefix_from_token;
     use super::Verification;
 
+    fn append_crc32(payload: &str) -> String {
+        let crc32 = crc32fast::hash(payload.as_bytes()).to_be_bytes();
+        format!(
+            "{}{}",
+            payload,
+            base64::encode_config(crc32, base64::URL_SAFE_NO_PAD)
+        )
+    }
+
     #[test]
     fn verification() {
         let token = "ddtc_6DnZq5Ix0J2kvDHbkPNtb6bsZxOVQg4ly2jw";
@@ -124,5 +132,46 @@ mod tests {
             &*verification.plain_prefix
         );
         assert!(verification.hash.verify(token).is_ok());
+    }
+
+    #[test]
+    fn parses_regular_crc_valid_community_token() {
+        let payload = format!("ddtc_{}", "A".repeat(super::TOKEN_LEN));
+        let token = append_crc32(&payload);
+        assert_eq!(get_plain_prefix_from_token(&token), Some("AAAAAA"));
+    }
+
+    #[test]
+    fn rejects_crc_valid_token_without_payload_separator() {
+        let payload = (0..100_000)
+            .map(|index| format!("ddtc{}", index))
+            .find(|candidate| {
+                let crc32 = crc32fast::hash(candidate.as_bytes()).to_be_bytes();
+                let encoded = base64::encode_config(crc32, base64::URL_SAFE_NO_PAD);
+                encoded.starts_with('_')
+                    && encoded[1..]
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric())
+            })
+            .expect("test payload with an underscore-leading CRC");
+        let token = append_crc32(&payload);
+        assert_eq!(token.bytes().filter(|&byte| byte == b'_').count(), 1);
+        assert_eq!(get_plain_prefix_from_token(&token), None);
+    }
+
+    #[test]
+    fn rejects_invalid_characters_and_bad_crc() {
+        let invalid_payload_token = append_crc32("ddtc_A+AAAA");
+        assert_eq!(get_plain_prefix_from_token(&invalid_payload_token), None);
+
+        let payload = format!("ddtc_{}", "B".repeat(super::TOKEN_LEN));
+        let mut bad_crc_token = append_crc32(&payload);
+        let replacement = if bad_crc_token.as_bytes()[payload.len()] == b'A' {
+            "B"
+        } else {
+            "A"
+        };
+        bad_crc_token.replace_range(payload.len()..payload.len() + 1, replacement);
+        assert_eq!(get_plain_prefix_from_token(&bad_crc_token), None);
     }
 }

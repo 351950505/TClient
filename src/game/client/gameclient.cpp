@@ -69,6 +69,7 @@
 #include <engine/serverbrowser.h>
 #include <engine/shared/config.h>
 #include <engine/shared/csv.h>
+#include <engine/shared/map_settings.h>
 #include <engine/sound.h>
 #include <engine/storage.h>
 #include <engine/textrender.h>
@@ -6374,6 +6375,23 @@ static bool UnknownMapSettingCallback(const char *pCommand, void *pUser)
 	return true;
 }
 
+class CUnknownMapSettingCallbackGuard
+{
+	IConsole *m_pConsole;
+
+public:
+	explicit CUnknownMapSettingCallbackGuard(IConsole *pConsole) :
+		m_pConsole(pConsole)
+	{
+		m_pConsole->SetUnknownCommandCallback(UnknownMapSettingCallback, nullptr);
+	}
+
+	~CUnknownMapSettingCallbackGuard()
+	{
+		m_pConsole->SetUnknownCommandCallback(IConsole::EmptyUnknownCommandCallback, nullptr);
+	}
+};
+
 void CGameClient::LoadMapSettings()
 {
 	m_MapBugs = CMapBugs::Create(Map()->BaseName(), Map()->Size(), Map()->Sha256());
@@ -6405,18 +6423,16 @@ void CGameClient::LoadMapSettings()
 		if(!(pItem->m_Settings > -1))
 			break;
 
-		int Size = Map()->GetDataSize(pItem->m_Settings);
-		char *pSettings = (char *)Map()->GetData(pItem->m_Settings);
-		char *pNext = pSettings;
-		Console()->SetUnknownCommandCallback(UnknownMapSettingCallback, nullptr);
-		while(pNext < pSettings + Size)
+		const int Size = Map()->GetDataSize(pItem->m_Settings);
+		const char *pSettings = (const char *)Map()->GetData(pItem->m_Settings);
 		{
-			int StrSize = str_length(pNext) + 1;
-			Console()->ExecuteLine(pNext, IConsole::CLIENT_ID_GAME);
-			pNext += StrSize;
+			CUnknownMapSettingCallbackGuard CallbackGuard(Console());
+			if(!ForEachMapSetting(pSettings, Size, [&](const char *pCommand, size_t) {
+				Console()->ExecuteLine(pCommand, IConsole::CLIENT_ID_GAME);
+			}))
+				dbg_msg("map/settings", "ignoring invalid map settings data");
 		}
-		Console()->SetUnknownCommandCallback(IConsole::EmptyUnknownCommandCallback, nullptr);
-		Map()->UnloadData(pItem->m_Settings);
+		// Keep the data cached until the map is unloaded; other map items may share this index.
 		break;
 	}
 }

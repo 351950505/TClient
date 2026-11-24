@@ -7,7 +7,7 @@
 // 只收录绑定真实配置变量的复选框（勾选后立刻生效的开关）。
 // 滑块、包装开关（局部临时变量）与普通 UI 复选框不在表内，不显示悬停说明。
 // 死开关（无运行时读取点，如 tc_pred_margin_in_freeze）不入表，避免对玩家做假承诺。
-// 文案按成员名排序；新增条目须同时补 data/tclient/languages 两本词典
+// 帮助按成员名排序；新增条目须补简体中文词典
 // （scripts/test_checkbox_tooltip_wiring.js 会校验词典覆盖）。
 const SCheckBoxHelpEntry g_aCheckBoxHelp[] = {
 	{&g_Config.m_ClFreezeStars, "Show legacy star particles on frozen tees."},
@@ -78,6 +78,8 @@ const SCheckBoxHelpEntry g_aCheckBoxHelp[] = {
 	{&g_Config.m_TcLightInputHook, "Use a separate prediction amount for Light hook interactions."},
 	{&g_Config.m_TcLightInputOthers, "Apply the selected fast-input prediction to other players."},
 	{&g_Config.m_TcMeowInputOthers, "Apply the selected fast-input prediction to other players."},
+	{&g_Config.m_TcMapProgress, "Show the estimated finish percentage below the drown board on Gores and DDRace maps."},
+	{&g_Config.m_TcMapProgressStyle, "Also show the percentage inside the Dynamic Island."},
 	{&g_Config.m_TcMiniDebug, "Overlay your position and aim angle."},
 	{&g_Config.m_TcMiniVoteHud, "Shrink the vote interface into a mini panel."},
 	{&g_Config.m_TcModernChat, "Show message-colored chat cards; hover over chat with a menu open to scroll its history."},

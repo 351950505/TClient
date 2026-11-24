@@ -11,6 +11,19 @@ TEST(ClientFrozenEntryHighlight, FirstFrozenSnapshotHighlightsCurrentTile)
 	EXPECT_EQ(Lookups, 1);
 }
 
+TEST(ClientFrozenEntryHighlight, PredictionWithoutServerConfirmationDoesNotHighlight)
+{
+	tclient_frozen_entry::CHighlight Highlight;
+	int Lookups = 0;
+	const bool ServerConfirmedFrozen = false;
+	EXPECT_FLOAT_EQ(Highlight.Update(true, ServerConfirmedFrozen, true, [&] { ++Lookups; return 5; }), 0.0f);
+	EXPECT_EQ(Highlight.TileIndex(), -1);
+	EXPECT_EQ(Lookups, 0);
+	EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [&] { ++Lookups; return 5; }), 1.0f);
+	EXPECT_EQ(Highlight.TileIndex(), 5);
+	EXPECT_EQ(Lookups, 1);
+}
+
 TEST(ClientFrozenEntryHighlight, TileTurnsOnWithFreezeAndOffWithThaw)
 {
 	tclient_frozen_entry::CHighlight Highlight;
@@ -92,6 +105,20 @@ TEST(ClientFrozenEntryHighlight, InactiveViewClearsHighlightImmediately)
 	EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [] { return 10; }), 1.0f);
 	EXPECT_FLOAT_EQ(Highlight.Update(false, true, true, [] { return 10; }), 0.0f);
 	EXPECT_EQ(Highlight.TileIndex(), -1);
+}
+
+TEST(ClientFrozenEntryHighlight, SpectatorGapDoesNotCountTheSameFreezeEntryAgain)
+{
+	tclient_frozen_entry::CHighlight Highlight;
+	int Lookups = 0;
+	EXPECT_FLOAT_EQ(Highlight.Update(true, false, true, [] { return -1; }, 10.0f), 0.0f);
+	EXPECT_FLOAT_EQ(Highlight.Update(true, true, true, [&] { ++Lookups; return 10; }, 10.0f), 1.0f);
+	Highlight.Suspend();
+	EXPECT_FLOAT_EQ(Highlight.Alpha(), 0.0f);
+	EXPECT_EQ(Highlight.TileIndex(), -1);
+	EXPECT_NEAR(Highlight.Update(true, true, true, [&] { ++Lookups; return 10; }, 10.2f), 0.6f, 0.00001f);
+	EXPECT_EQ(Lookups, 1);
+	EXPECT_EQ(Highlight.TileIndex(), 10);
 }
 
 TEST(ClientFrozenEntryHighlight, OnlyPrimaryLocalTeeIsSelected)

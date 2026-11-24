@@ -1,9 +1,9 @@
 #include <base/dbg.h>
 #include <base/fs.h>
 #include <base/io.h>
-#include <base/str.h>
 
 #include <engine/shared/datafile.h>
+#include <engine/shared/map_settings.h>
 #include <engine/storage.h>
 
 #include <game/mapitems.h>
@@ -33,26 +33,35 @@ static void Process(IStorage *pStorage, const char *pMapName, const char *pConfi
 			break;
 
 		ConfigFound = true;
-		IOHANDLE Config = pStorage->OpenFile(pConfigName, IOFLAG_WRITE, IStorage::TYPE_ABSOLUTE);
-		if(!Config)
+		const int Size = Reader.GetDataSize(pItem->m_Settings);
+		const char *pSettings = (const char *)Reader.GetData(pItem->m_Settings);
+		IOHANDLE Config = nullptr;
+		bool ConfigOpenFailed = false;
+		const bool ValidSettings = ForEachMapSetting(pSettings, Size, [&](const char *pCommand, size_t CommandLength) {
+			if(ConfigOpenFailed)
+				return;
+			if(Config == nullptr)
+			{
+				Config = pStorage->OpenFile(pConfigName, IOFLAG_WRITE, IStorage::TYPE_ABSOLUTE);
+				if(!Config)
+				{
+					dbg_msg("config_retrieve", "error opening config for writing '%s'", pConfigName);
+					ConfigOpenFailed = true;
+					return;
+				}
+			}
+			io_write(Config, pCommand, CommandLength);
+			io_write_newline(Config);
+		});
+		if(Config != nullptr)
+			io_close(Config);
+		if(!ValidSettings)
+			dbg_msg("config_retrieve", "ignoring invalid map settings data in '%s'", pMapName);
+		if(ConfigOpenFailed)
 		{
-			dbg_msg("config_retrieve", "error opening config for writing '%s'", pConfigName);
 			Reader.Close();
 			return;
 		}
-
-		int Size = Reader.GetDataSize(pItem->m_Settings);
-		char *pSettings = (char *)Reader.GetData(pItem->m_Settings);
-		char *pNext = pSettings;
-		while(pNext < pSettings + Size)
-		{
-			int StrSize = str_length(pNext) + 1;
-			io_write(Config, pNext, StrSize - 1);
-			io_write_newline(Config);
-			pNext += StrSize;
-		}
-		Reader.UnloadData(pItem->m_Settings);
-		io_close(Config);
 		break;
 	}
 	Reader.Close();

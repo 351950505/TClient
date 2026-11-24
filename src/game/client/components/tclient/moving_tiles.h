@@ -49,6 +49,7 @@ public:
 	CMapItemGroup *m_pGroup = nullptr;
 	CMapItemLayerQuads *m_pLayer = nullptr;
 	EQType m_Type = EQType::NONE;
+	bool m_RequiresGoresOrAxiom = false;
 	vec2 m_Pos[5] = {vec2(0, 0)}; // 4 corners + center
 	float m_Angle = 0.0f;
 };
@@ -59,7 +60,10 @@ class CMovingTiles : public CComponent
 	std::vector<CQuadData> m_vQuads;
 
 	bool m_RenderAbove; // hookables are rendered above tilemap, the rest below
+	bool m_HasGoresOrAxiomQuads = false;
 	CEnvelopeState m_EnvEvaluator;
+
+	bool ShouldRenderGoresOrAxiomWater() const;
 
 public:
 	CMovingTiles(bool Above) :

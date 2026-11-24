@@ -5,6 +5,7 @@
 
 #include <engine/shared/datafile.h>
 #include <engine/shared/linereader.h>
+#include <engine/shared/map_settings.h>
 #include <engine/storage.h>
 
 #include <game/mapitems.h>
@@ -69,14 +70,13 @@ static void Process(IStorage *pStorage, const char *pMapName, const char *pConfi
 					SettingsIndex = pInfo->m_Settings;
 					char *pMapSettings = (char *)Reader.GetData(SettingsIndex);
 					int DataSize = Reader.GetDataSize(SettingsIndex);
-					if(DataSize == TotalLength && mem_comp(pSettings, pMapSettings, DataSize) == 0)
+					if(DataSize == TotalLength && IsMapSettingsDataValid(pMapSettings, DataSize) && mem_comp(pSettings, pMapSettings, DataSize) == 0)
 					{
 						log_info("config_store", "Configs coincide, not updating map");
 						free(pSettings);
 						return;
 					}
-					Reader.UnloadData(pInfo->m_Settings);
-				}
+					}
 				else
 				{
 					MapInfo = *pInfo;

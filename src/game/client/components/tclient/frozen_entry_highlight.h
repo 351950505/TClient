@@ -15,6 +15,7 @@ namespace tclient_frozen_entry
 		bool m_StateKnown = false;
 		bool m_WasFrozen = false;
 		bool m_WasEnabled = false;
+		bool m_Suspended = false;
 		int m_TileIndex = -1;
 		float m_ExpireTime = 0.0f;
 		float m_TimeLeft = 0.0f;
@@ -25,8 +26,9 @@ namespace tclient_frozen_entry
 			*this = CHighlight();
 		}
 
-		int TileIndex() const { return m_TileIndex; }
-		float Alpha() const { return m_TileIndex >= 0 ? m_TimeLeft / FLASH_DURATION_SECONDS : 0.0f; }
+		int TileIndex() const { return m_Suspended ? -1 : m_TileIndex; }
+		float Alpha() const { return !m_Suspended && m_TileIndex >= 0 ? m_TimeLeft / FLASH_DURATION_SECONDS : 0.0f; }
+		void Suspend() { m_Suspended = true; }
 
 		template<typename FGetFreezeTile>
 		float Update(bool Active, bool Frozen, bool Enabled, FGetFreezeTile GetFreezeTile, float Now = 0.0f)
@@ -37,6 +39,7 @@ namespace tclient_frozen_entry
 				return 0.0f;
 			}
 
+			m_Suspended = false;
 			if(!Enabled)
 			{
 				m_StateKnown = true;

@@ -2512,6 +2512,7 @@ set_src(ENGINE_SHARED GLOB_RECURSE src/engine/shared
   localization.h
   map.cpp
   map.h
+  map_settings.h
   masterserver.cpp
   masterserver.h
   memheap.cpp
@@ -2781,6 +2782,7 @@ if(CLIENT)
     smooth_time.h
     sound.cpp
     sound.h
+    sound_wavpack_helpers.h
     sqlite.cpp
     steam.cpp
     text.cpp
@@ -2887,6 +2889,7 @@ if(CLIENT)
     components/particles.h
     components/players.cpp
     components/players.h
+    components/quick_zoom.h
     components/race_demo.cpp
     components/race_demo.h
     components/scoreboard.cpp
@@ -2923,10 +2926,12 @@ if(CLIENT)
     components/tclient/gradient_math.cpp
     components/tclient/gradient_math.h
     components/tclient/hook_tile_highlight.h
+    components/tclient/hud_map_progress.h
     components/tclient/island_music.cpp
     components/tclient/island_music.h
     components/tclient/lyric_parser.cpp
     components/tclient/lyric_parser.h
+    components/tclient/map_progress.h
     components/tclient/menus_tclient.cpp
     components/tclient/menus_tclient_assets.cpp
     components/tclient/mod.cpp
@@ -3735,6 +3740,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     bezier_test.cpp
     blocklist_driver_test.cpp
     bytes_be_test.cpp
+    camera_quick_zoom_test.cpp
     chunk_header_test.cpp
     color_test.cpp
     compression_test.cpp
@@ -3759,6 +3765,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     map_test.cpp
     mapbugs_test.cpp
     mapitems_test.cpp
+    map_settings_test.cpp
     math_test.cpp
     mem_test.cpp
     mutes_test.cpp
@@ -3777,6 +3784,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     serverbrowser_test.cpp
     serverinfo_test.cpp
     snapshot_test.cpp
+    sound_wavpack_test.cpp
     str_test.cpp
     swap_endian_test.cpp
     tclient_auto_session_log_test.cpp
@@ -3787,7 +3795,9 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     tclient_frozen_hud_test.cpp
     tclient_gradient_test.cpp
     tclient_hook_tile_test.cpp
+    tclient_hud_map_progress_test.cpp
     tclient_jitter_buffer_test.cpp
+    tclient_map_progress_test.cpp
     tclient_relay_test.cpp
     tclient_skinprofiles_test.cpp
     tclient_stack_tee_hint_test.cpp

@@ -1065,431 +1065,179 @@ Hook display
 Traditional Chinese lyrics (default simplified)
 == 歌詞顯示繁體（預設簡體）
 
-Resends packets until the server confirms them, so hits still register on bad connections.
-== 丟包時自動重發未確認的封包，網路不好時攻擊照樣生效
 
-Sends the copies a few milliseconds apart instead of back to back.
-== 副本封包錯開數毫秒發送，而不是緊挨著連發
 
-Shows how many teammates are frozen instead of how many are alive.
-== 顯示凍結中的隊友數量，而不是存活數量
 
-Send aiming data at sub-tick accuracy.
-== 以 tick 內精度傳送瞄準資料。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Use TClient's alternate antiping smoothing algorithm.
-== 使用 TClient 的另一套反延遲平滑演算法。
 
-Retain instability information longer for more cautious prediction.
-== 延長不穩定狀態的記憶時間，讓預測更謹慎。
 
-Use more optimistic prediction along a tee's stable direction.
-== 沿角色穩定的移動方向進行更積極的預測。
 
-Adjust the prediction margin from measured latency and jitter; restore its previous value when disabled or disconnected.
-== 根據測得的延遲和抖動自動調整預測餘量；關閉或中斷連線時恢復原值。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Predict your tee from your input before the next game tick.
-== 在下一個遊戲 tick 到來前，根據你的操作預測自己的角色。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Re-predict Fast Input when hook direction changes mid-tick; unavailable with Sub-Tick aiming.
-== 鉤子方向在 tick 中途改變時重新預測快速輸入；子 tick 瞄準開啟時無法使用。
 
-Use linear interpolation for players and flying hooks, independently of input mode.
-== 不受輸入模式影響，對角色和飛行中的鉤子使用線性插值。
 
-Adapt snapshot interpolation delay when network timing varies, to smooth motion.
-== 網路時序波動時自適應調整快照插值延遲，讓移動畫面更平滑。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Use a separate prediction amount for Light hook interactions.
-== Light 模式的鉤子互動使用個別的預測量。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Reject NovaPilot positions on freeze tiles or outside its plausible range.
-== 忽略落在凍結地塊內或明顯異常的 NovaPilot 預測位置。
 
-Use curved interpolation for NovaPilot movement rendering when applicable.
-== 在適用時使用曲線插值渲染 NovaPilot 的移動。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Adjust NovaPilot prediction using variation in recent timing samples.
-== 根據近期延遲樣本的波動調整 NovaPilot 預測量。
 
-Enable the Ping wheel to send signals and show signals received from others.
-== 啟用 Ping 轉盤，以傳送訊號並顯示收到的他人訊號。
 
-Also route Ping signals through the Cloudflare relay besides direct UDP.
-== Ping 訊號多走一條 Cloudflare 中繼路線，作為直連之外的備用。
 
-Reduce local player prediction and antiping smoothing while frozen.
-== 凍結時減少本地角色預測和反延遲平滑。
 
-Start the Bind Wheel selector centered when it opens.
-== 開啟 Bind Wheel 時將選擇位置置中。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Use a separate prediction amount for Snow hook interactions.
-== Snow 模式的鉤子互動使用個別的預測量。
 
-Apply the selected fast-input prediction to other players.
-== 將目前快速輸入模式的預測套用到其他玩家。
 
-Stop predicting other players while your tee is frozen.
-== 自己的角色被凍結時，不預測其他玩家。
 
-Show your team's board on Gores maps; drownings are inferred from death events, alongside saves and player hooks.
-== 僅在 Gores 地圖顯示本隊落水榜；落水數按死亡推算，並列救援和鉤人。
 
-Include Team 0 players and their stats in the board.
-== 將 Team 0 玩家及其統計納入榜單。
+Map
+== 地圖
 
-Show each player's Tee beside their row in the board.
-== 在榜單每列旁顯示玩家 Tee 造型。
+Map progress
+== 終點進度
 
-Put friends in a separate group at the top of the spectator selector, before everyone else.
-== 觀戰選擇器中好友獨立成組並排在其他玩家前面。
+Show estimated finish percentage below the drown board
+== 在落水榜下方顯示預估終點百分比
 
-Show the TClient penguin beside TClient players on your scoreboard; this does not change the identity broadcast.
-== 在記分板的 TClient 玩家旁顯示企鵝標記；不影響身分廣播。
+Also show the percentage inside the Dynamic Island
+== 也在靈動島內顯示百分比
 
-Keep the client disconnected from Steam so friends cannot see you playing; turning this off reconnects immediately, but a failed reconnect requires a restart.
-== 讓客戶端與 Steam 保持斷線，好友看不到你在線；關閉後立即重連，失敗需重啟。
 
-Hide team-chat messages from your local display.
-== 在本機隱藏隊伍聊天訊息。
+Map progress percentage color
+== 終點百分比顏色
 
-Hide whisper messages from your local display.
-== 在本機隱藏密語訊息。
+Fallback percentage width
+== 回退百分比寬度
 
-Hide system and server chat messages from your local display.
-== 在本機隱藏系統與伺服器聊天訊息。
+Fallback percentage height
+== 回退百分比字號
 
-Hide kill-feed messages from your local display.
-== 在本機隱藏擊殺提示。
+Fallback horizontal position
+== 回退水平位置
 
-Hide race-finish messages from your local display.
-== 在本機隱藏競速完成提示。
+Fallback vertical position
+== 回退垂直位置
 
-Enable streamer privacy handling: country flags stay hidden, sub-options take effect, and your name and skin remain visible to you and friends.
-== 啟用主播隱私模式：一律隱藏國旗，子選項才會生效；自己與好友不受隱藏。
+Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available.
+== 終點進度在 Gores 和 DDRace 地圖上由本地估算；路線尚不可用時會顯示未知。
 
-Filter sensitive words in chat, player names, and clans, including words from an optional custom list; requires Streamer Mode.
-== 過濾聊天、玩家名稱與戰隊名稱中的敏感詞；需開啟主播模式。
 
-Replace non-friends' in-game names with client IDs and hide their clans; server-list names use asterisks, while you and friends remain visible. Requires Streamer Mode.
-== 非好友名稱改為客戶端編號並隱藏戰隊名；自己與好友不受影響。需開啟主播模式。
 
-Show non-friends with the default skin; your skin and friends' skins are unaffected. Requires Streamer Mode.
-== 非好友顯示為預設造型；自己與好友不受影響。需開啟主播模式。
 
-Use the compact modern weapon and jump HUD layout.
-== 使用精簡的現代武器與跳躍 HUD 版面。
 
-Show the modern freeze countdown in the HUD.
-== 在 HUD 中顯示現代凍結倒數。
 
-Show message-colored chat cards; hover over chat with a menu open to scroll its history.
-== 聊天顯示為訊息色邊框卡片；開啟選單後停在聊天上可捲動歷史。
 
-Use the modern vote panel.
-== 使用現代投票面板。
 
-Color tune-zone tiles by zone number; without this option, entity tiles have no added tune-zone colors.
-== 按區域編號給調參區地塊著色；關閉後實體地塊不帶調參區顏色。
 
-Flash the freeze tile when your own Tee enters it.
-== 自己的 Tee 進入凍結地塊時閃爍提示該地塊。
 
-Color the tile your hook is holding; at a seam, both adjacent tiles are highlighted.
-== 為鉤子抓住的地塊著色；鉤在接縫處時同時標亮相鄰兩塊。
 
-Preview the tile your aim would hook before firing; it shares the hooked-tile color and opacity settings.
-== 出鉤前預覽瞄準方向會鉤中的地塊；共用抓住態的顏色與透明度。
 
-Tint a frozen Tee when the current hook prediction can reach it; this is separate from tile highlighting and landing preview.
-== 鉤子預判能鉤中凍結 Tee 時為其著色；獨立於鉤磚標亮與落點預覽。
 
-Add a glow around a shown hooked or previewed tile; a tile highlight or landing preview must be visible.
-== 為顯示中的抓取地塊或預覽地塊加光暈；需先開啟對應顯示。
 
-Mark same-team frozen Tees when they use their hook; your Tee and dummy are included only if the self option is enabled.
-== 本隊凍結 Tee 使用鉤子時標記；開啟自身選項後包含自己和 dummy。
 
-Mark same-team frozen Tees when they fire the hammer; your Tee and dummy are included only if the self option is enabled.
-== 本隊凍結 Tee 開槌時標記；開啟自身選項後包含自己和 dummy。
 
-Include your own frozen Tee and dummy in hook or hammer highlights; at least one of those highlights must be enabled.
-== 鉤／槌標亮中也標記自己的凍結 Tee 與 dummy；需先開啟對應標亮。
 
-Use separate body and feet colors for hook and hammer highlights instead of sharing one pair.
-== 為鉤子與槌子標亮分別設定身體與腳部顏色，不再共用一組。
 
-Animate player names with the selected gradient; the Apply to setting determines whose names change.
-== 用所選漸層為玩家名稱加入動畫；套用對象由「套用對象」設定決定。
 
-Animate player clan names with the selected gradient; the Apply to setting determines whose clans change.
-== 用所選漸層為玩家戰隊名稱加入動畫；套用對象由「套用對象」設定決定。
 
-Animate Tee body and feet colors with the selected gradient; the Apply to setting determines whose skins change.
-== 用所選漸層為 Tee 身體與腳部顏色加入動畫；套用對象由設定決定。
 
-Apply the selected gradient to text without an explicit color; text with its own color is left unchanged.
-== 將所選漸層套用於未指定顏色的文字；已有顏色的文字不變。
 
-Add a latency-colored ring to each nameplate.
-== 名牌旁加一個隨延遲變色的圓圈指示。
 
-Add the player's country flag to the nameplate.
-== 名牌裡顯示該玩家的國家旗幟。
 
-Append the skin name text to the nameplate.
-== 名牌上追加顯示玩家所用皮膚的名字。
 
-Mark players with open menus with a gear icon.
-== 打開設定選單的玩家頭頂會顯示齒輪標記。
 
-Show legacy star particles on frozen tees.
-== 凍結的 tee 身上顯示舊版星星粒子。
 
-Keep frozen tees in their own skin colors.
-== 凍結的 tee 改用自己皮膚的原有配色。
 
-Frozen players visibly hold a katana.
-== 凍結的玩家手裡會握著一把武士刀。
 
-Draw pistol sprites for most weapons.
-== 除錘和忍者外武器都畫成手槍外觀。
 
-Force every tee's feet to pure white.
-== 所有 tee 的腳統一畫成純白色。
 
-Draw moving tiles inside the entities layer.
-== 會移動的圖塊改在實體圖層中渲染。
 
-Vote no on map votes after enough playtime.
-== 本圖遊玩超過設定時長後換圖票自動投反對。
 
-Auto-answer whispers from players you muted.
-== 被你靜音的人私聊時自動代回設定消息。
 
-Auto-answer whispers while the window is hidden.
-== 遊戲切到後台時私聊自動回覆對方。
 
-Radially mark other players around your tee.
-== 在自己 tee 周圍以圓點標出其他玩家的方位。
 
-Hide indicators for tees already on screen.
-== 已出現在畫面裡的玩家不再顯示指示。
 
-Only indicate frozen players.
-== 指示器只標出凍結狀態的玩家。
 
-Show indicators only after joining a team.
-== 加入隊伍後才開始顯示玩家指示。
 
-Draw tiny tees instead of circles.
-== 指示點畫成小 tee 圖案而非圓圈。
 
-Push indicators outward as players get farther.
-== 玩家越遠其指示點離你的 tee 越遠。
 
-Let warlist groups drive the indicators.
-== 指示器改按戰爭名單分組標色。
 
-Prefer warlist colors over freeze-state colors.
-== 指示顏色用名單組色代替凍結狀態色。
 
-Indicate players from every warlist group.
-== 顯示所有戰爭名單組的玩家指示。
 
-Indicate players from the first group.
-== 顯示戰爭名單第一組玩家的指示。
 
-Indicate players from the second group.
-== 顯示戰爭名單第二組玩家的指示。
 
-Show a small pet following your tee.
-== 螢幕上出現一隻跟著你跑的小寵物。
 
-Shrink the vote interface into a mini panel.
-== 投票介面縮小成不擋視野的小窗。
 
-Overlay your position and aim angle.
-== 螢幕上顯示自己的座標和朝向。
 
-Keep your aim cursor visible in freeview.
-== 自由觀景時仍顯示自己的準星游標。
 
-Alert when you are the last one alive.
-== 全隊只剩你存活時顯示提醒文字。
 
-Draw screen-center crosshair reference lines.
-== 畫出螢幕中心的十字參考線。
 
-Show the Dynamic Island music capsule.
-== 頂部顯示靈動島樣式的音樂懸浮條。
 
-Dock the capsule against the screen top edge.
-== 懸浮條貼住螢幕上緣呈劉海膠囊狀。
 
-Display lyrics synced to the song.
-== 懸浮條上顯示隨播放同步的歌詞。
 
-Preview the next lyric under the current one.
-== 當前歌詞下方加一行下一句的淡色預覽。
 
-Render fetched lyrics in traditional Chinese.
-== 歌詞改以繁體中文顯示。
 
-Show the round timer on the island.
-== 懸浮條上顯示當局遊戲計時。
 
-Add a song progress rail at the bottom.
-== 懸浮條底部顯示歌曲進度條。
 
-Show your computer's local time.
-== 懸浮條上顯示本機時間。
 
-Show probe loss, snapshot gaps and RTT.
-== 在遊戲計時前顯示丟包、快照缺口和延遲數據。
 
-Drop the black capsule, use outlined text.
-== 去掉黑色膠囊底，改用描邊文字。
 
-Show a frozen teammates overview panel.
-== 螢幕上顯示凍結隊友小面板。
 
-Draw real skins instead of ninja figures.
-== 面板裡用真實皮膚而非忍者圖形顯示隊友。
 
-Show the panel only while in a team.
-== 加入隊伍後才顯示凍結隊友面板。
 
-List only unfrozen teammates in the panel.
-== 面板只列出未凍結的存活隊友。
 
-Draw outline strokes around map tiles.
-== 給地圖圖塊描出輪廓邊線。
 
-Restrict outlines to the entities layer.
-== 描邊只在實體圖層中顯示。
 
-Show ghosts of other players' unpredicted positions.
-== 顯示其他玩家未預測位置的幽靈影像。
 
-Render the predicted position as the ghost instead.
-== 幽靈與本體對調，預測位畫成幽靈。
 
-Hide ghosts while that player is frozen.
-== 凍結中的玩家不再顯示幽靈。
 
-Draw ghosts as plain circles, not tees.
-== 幽靈畫成圓點而非 tee 形狀。
 
-Cycle your own tee body through rainbow hues.
-== 自己的 tee 身體循環變換彩虹色。
 
-Cycle your own weapon through rainbow hues.
-== 自己的武器循環變換彩虹色。
 
-Cycle your own hook through rainbow hues.
-== 自己的鉤繩循環變換彩虹色。
 
-Apply the rainbow cycling to other tees too.
-== 其他玩家的 tee 也套用彩虹變色。
 
-Draw a motion trail behind moving tees.
-== tee 移動時身後留下拖尾軌跡。
 
-Draw motion trails for other players too.
-== 其他玩家的移動也顯示拖尾。
 
-Let the trail fade out along its length.
-== 拖尾沿長度逐漸變透明。
 
-Let the trail narrow along its length.
-== 拖尾沿長度逐漸變細收窄。
 
-Rename you to the finish name near the finish.
-== 靠近終點磚時自動改用設定的終點名。
 
-Translate incoming chat automatically.
-== 收到的聊天訊息自動翻譯顯示。
 
-Translate outgoing chat before sending.
-== 發出的訊息先翻譯成設定語言再發送。
 
-Enable all warlist color highlighting.
-== 啟用戰爭名單的全部標色顯示。
 
-Allow adding the same entry twice.
-== 允許名單重複添加同一條記錄。
 
-Color names in chat by warlist.
-== 聊天裡的玩家名按戰爭名單著色。
 
-Color names on the scoreboard by warlist.
-== 記分板裡按戰爭名單給名字著色。
 
-Color spectator menu entries by warlist.
-== 觀戰選擇選單按戰爭名單著色。
 
-Show war players' clan on their nameplate.
-== 戰爭對象名牌上會顯示其家族名。
 
-Show the bottom status bar.
-== 螢幕底部顯示一條狀態列。
 
-Label each status bar item with text.
-== 狀態列條目旁顯示文字標籤。
 
-Use 12-hour format for the clock.
-== 狀態列時鐘改用十二小時制。
 
-Append seconds to the status bar clock.
-== 狀態列時鐘顯示到秒。
+
+
+
+
+
+
+
+
+
+
+
+
 
 Stack Tee
 == 疊 Tee

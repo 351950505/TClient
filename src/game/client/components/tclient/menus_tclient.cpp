@@ -4461,6 +4461,29 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("Counts drownings, saves (the tee leaves freeze) and player hooks for your DDRace team. Only shown on Gores maps."), EditBoxFontSize, TEXTALIGN_TL);
 
+	// Map-to-finish estimate (QmClient algorithm, adapted to TClient's HUD; default off).
+	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Map progress"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgress, TCLocalize("Show estimated finish percentage below the drown board"), &g_Config.m_TcMapProgress, &LeftView, LineSize);
+	if(g_Config.m_TcMapProgress)
+	{
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgressStyle, TCLocalize("Also show the percentage inside the Dynamic Island"), &g_Config.m_TcMapProgressStyle, &LeftView, LineSize);
+		static CButtonContainer s_MapProgressColor;
+		DoLine_ColorPicker(&s_MapProgressColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Map progress percentage color"), &g_Config.m_TcMapProgressColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcMapProgressColor)), false);
+		LeftView.HSplitTop(LineSize, &Button, &LeftView);
+		Ui()->DoScrollbarOption(&g_Config.m_TcMapProgressWidth, &g_Config.m_TcMapProgressWidth, &Button, TCLocalize("Fallback percentage width"), 10, 80, &CUi::ms_LinearScrollbarScale, 0, "%");
+		LeftView.HSplitTop(LineSize, &Button, &LeftView);
+		Ui()->DoScrollbarOption(&g_Config.m_TcMapProgressHeight, &g_Config.m_TcMapProgressHeight, &Button, TCLocalize("Fallback percentage height"), 6, 30, &CUi::ms_LinearScrollbarScale, 0, "");
+		LeftView.HSplitTop(LineSize, &Button, &LeftView);
+		Ui()->DoScrollbarOption(&g_Config.m_TcMapProgressX, &g_Config.m_TcMapProgressX, &Button, TCLocalize("Fallback horizontal position"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+		LeftView.HSplitTop(LineSize, &Button, &LeftView);
+		Ui()->DoScrollbarOption(&g_Config.m_TcMapProgressY, &g_Config.m_TcMapProgressY, &Button, TCLocalize("Fallback vertical position"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+		LeftView.HSplitTop(LineSize, &Label, &LeftView);
+		Ui()->DoLabel(&Label, TCLocalize("Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available."), EditBoxFontSize, TEXTALIGN_TL);
+	}
+
 	// 一键缩放（从 Ping 页挪来）
 	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
 	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);

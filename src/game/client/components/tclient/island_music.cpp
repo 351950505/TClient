@@ -3883,6 +3883,11 @@ public:
 			GameTextW = MeasureCached(m_pTextRender, TimerSize, "00:00");
 		}
 		const float GameTextOffset = (ShowGameTime && aGameTime[5] == '\0') ? (GameW - GameTextW) * 0.5f : 0.0f;
+		float MapProgressValue = 0.0f;
+		const bool ShowMapProgressValue = m_pGameClient && m_pGameClient->m_Hud.GetMapProgressIslandValue(g_Config.m_ClDummy, MapProgressValue);
+		char aMapProgress[16];
+		if(ShowMapProgressValue)
+			str_format(aMapProgress, sizeof(aMapProgress), "%.1f%%", MapProgressValue * 100.0f);
 
 		// ---- link status cell (left of the game clock) -----------------------
 		// Keep the probe's round-trip unconfirmed rate and the downlink snapshot
@@ -3996,6 +4001,8 @@ public:
 		// panel rather than one long smear of text.
 		const float CoverSize = 44.0f * Scale;
 		const float ClockPad = 19.0f * Scale;          // padding inside the clock cell
+		const float MapProgressTextW = ShowMapProgressValue ? MeasureCached(m_pTextRender, TimerSize, "100.0%") : 0.0f;
+		const float MapProgressCellW = ShowMapProgressValue ? TClientHudMapProgress::IslandValueCellWidth(MapProgressTextW, ClockPad) : 0.0f;
 		const float DiscPad = 15.0f * Scale;           // padding either side of the disc
 		// 端帽是半径 = Height/2 的半圆，右边缘要留出整个端帽宽度再放柱子，
 		// 否则柱子的右半截会被圆角裁掉（玩家反馈的"右边没了"）。
@@ -4025,7 +4032,7 @@ public:
 		const float LocalClockCellW = ShowLocalClock ? (ClockPad + LocalClockTextW + ClockPad) : 0.0f;
 		const float TextGapL = 14.0f * Scale;          // disc cell -> lyric text
 		const float TextGapR = 20.0f * Scale;          // lyric text -> divider（与绘制侧保持一致）
-		const float LeftChrome = LinkCellW + (ShowGameTime ? ClockCellW : 0.0f) + DiscCellW + TextGapL;
+		const float LeftChrome = LinkCellW + (ShowGameTime ? ClockCellW : 0.0f) + MapProgressCellW + DiscCellW + TextGapL;
 		const float RightChrome = TextGapR + EqCellW + (ShowLocalClock ? ClockPad + LocalClockTextW + ClockPad : 0.0f);
 		const float ChromeW = LeftChrome + RightChrome;
 		// the widest the capsule may get on this screen: keep it on-screen with a
@@ -4039,14 +4046,14 @@ public:
 		// 宽度至少要容得下 chrome + 最小歌词区，否则右侧单元会被挤出胶囊。
 		const float NeededW = ChromeW + 120.0f * Scale;
 		// 空态且没有任何时钟要显示：干脆连胶囊都不画，不留一个空壳在屏幕顶上。
-		if(Idle && !ShowGameTime && !ShowLocalClock && !ShowLink)
+		if(Idle && !ShowGameTime && !ShowLocalClock && !ShowLink && !ShowMapProgressValue)
 		{
 			RestoreFace();
 			return;
 		}
 		// 空态胶囊只包住时钟单元和右端的装饰等化器（两个时钟都开时并排，中间
 		// 一条分隔线），宽度因此可以缩到远小于播放态的固定宽；播放态宽度仍按内容算。
-		const float IdleW = LinkCellW + (ShowGameTime ? ClockCellW : 0.0f) + (ShowLocalClock ? LocalClockCellW : 0.0f) +
+		const float IdleW = LinkCellW + (ShowGameTime ? ClockCellW : 0.0f) + MapProgressCellW + (ShowLocalClock ? LocalClockCellW : 0.0f) +
 			EqPadL + EqSize + EqPadR;
 		const float TargetWidth = Idle
 			? std::floor(std::clamp(IdleW, MinPillW, ScreenW * 0.96f) / 8.0f) * 8.0f
@@ -4133,6 +4140,19 @@ public:
 				m_pTextRender->Text(CursorX + ClockPad + GameTextOffset, TextY, TimerSize, aGameTime);
 				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 				CursorX += ClockCellW;
+				DrawSep(CursorX);
+			}
+			if(ShowMapProgressValue)
+			{
+				const auto ValueLayout = TClientHudMapProgress::IslandValueLayout(
+					CursorX, PillY, MapProgressCellW, Height, MapProgressTextW, TimerSize, ClockPad);
+				if(ValueLayout.m_Visible)
+				{
+					m_pTextRender->TextColor(AccentColor(0.85f));
+					m_pTextRender->Text(ValueLayout.m_ValueX, ValueLayout.m_ValueY, ValueLayout.m_FontSize, aMapProgress);
+					m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
+				}
+				CursorX += MapProgressCellW;
 				DrawSep(CursorX);
 			}
 			if(ShowLocalClock)
@@ -4236,6 +4256,19 @@ public:
 			m_pTextRender->Text(CellX + ClockPad + GameTextOffset, PillY + (Height - TimerSize) * 0.5f, TimerSize, aGameTime);
 			m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 			CellX += ClockCellW;
+			DrawDivider(CellX);
+		}
+		if(ShowMapProgressValue)
+		{
+			const auto ValueLayout = TClientHudMapProgress::IslandValueLayout(
+				CellX, PillY, MapProgressCellW, Height, MapProgressTextW, TimerSize, ClockPad);
+			if(ValueLayout.m_Visible)
+			{
+				m_pTextRender->TextColor(AccentColor(0.85f * Dim));
+				m_pTextRender->Text(ValueLayout.m_ValueX, ValueLayout.m_ValueY, ValueLayout.m_FontSize, aMapProgress);
+				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
+			}
+			CellX += MapProgressCellW;
 			DrawDivider(CellX);
 		}
 
@@ -4665,8 +4698,8 @@ void CIslandMusic::OnRender()
 	m_pImpl->StartCoverDecodeThread();
 	m_pImpl->Render(OccupiedRect);
 #endif
-	// HUD precedes the island in the render stack. Finish only its frozen rows
-	// now, using this frame's bounds (also empty on unsupported/hidden islands).
+	// HUD precedes the island in the render stack. Finish its frozen rows using
+	// this frame's bounds (empty when hidden).
 	GameClient()->m_Hud.RenderFrozenHud(OccupiedRect);
 }
 

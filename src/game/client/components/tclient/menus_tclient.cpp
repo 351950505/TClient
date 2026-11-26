@@ -1912,6 +1912,12 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcOutline, TCLocalize("Show any enabled outlines"), &g_Config.m_TcOutline, &Column, LineSize);
 	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcOutlineEntities, TCLocalize("Only show outlines in entities"), &g_Config.m_TcOutlineEntities, &Column, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcOutlineTransparent, TCLocalize("Tile outline transparent mode"), &g_Config.m_TcOutlineTransparent, &Column, LineSize);
+	if(g_Config.m_TcOutlineTransparent)
+	{
+		Column.HSplitTop(LineSize, &Button, &Column);
+		Ui()->DoScrollbarOption(&g_Config.m_TcOutlineOpacity, &g_Config.m_TcOutlineOpacity, &Button, TCLocalize("Outline opacity multiplier"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+	}
 
 	auto DoOutlineType = [&](CButtonContainer &ButtonContainer, const char *pName, int &Enable, int &Width, unsigned int &Color, const unsigned int &ColorDefault) {
 		// Checkbox & Color
@@ -4457,17 +4463,20 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(LineSize, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("Counts drownings, saves (the tee leaves freeze) and player hooks for your DDRace team. Only shown on Gores maps."), EditBoxFontSize, TEXTALIGN_TL);
 
-	// Map-to-finish estimate (QmClient algorithm, adapted to TClient's HUD; default off).
-	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
-	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
-	Ui()->DoLabel(&Label, TCLocalize("Map progress"), HeadlineFontSize, TEXTALIGN_ML);
-	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgress, TCLocalize("Show estimated finish percentage"), &g_Config.m_TcMapProgress, &LeftView, LineSize);
-	if(g_Config.m_TcMapProgress)
+	// Keep the preference accessible offline, even without a Gores connection.
+	if((Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK) || GameClient()->m_TClient.IsGoresGameMode())
 	{
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgressStyle, TCLocalize("Use the Dynamic Island instead of the HUD"), &g_Config.m_TcMapProgressStyle, &LeftView, LineSize);
-		LeftView.HSplitTop(LineSize, &Label, &LeftView);
-		Ui()->DoLabel(&Label, TCLocalize("Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available."), EditBoxFontSize, TEXTALIGN_TL);
+		LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+		LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+		Ui()->DoLabel(&Label, TCLocalize("Map progress"), HeadlineFontSize, TEXTALIGN_ML);
+		LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgress, TCLocalize("Show estimated finish percentage"), &g_Config.m_TcMapProgress, &LeftView, LineSize);
+		if(g_Config.m_TcMapProgress)
+		{
+			DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgressStyle, TCLocalize("Use the Dynamic Island instead of the HUD"), &g_Config.m_TcMapProgressStyle, &LeftView, LineSize);
+			LeftView.HSplitTop(LineSize, &Label, &LeftView);
+			Ui()->DoLabel(&Label, TCLocalize("On Gores, shows your finish progress or that of the player you are watching. No target or route: --."), EditBoxFontSize, TEXTALIGN_TL);
+		}
 	}
 
 	// 一键缩放（从 Ping 页挪来）

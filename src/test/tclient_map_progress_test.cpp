@@ -58,14 +58,26 @@ TEST(TClientMapProgressTarget, ExplicitSpectatorTargetTakesPriorityOverLocalPlay
 	EXPECT_EQ(TClientMapProgress::ResolveClientId(3, true, 18), 18);
 }
 
-TEST(TClientMapProgressTarget, FreeviewAndInvalidTargetsKeepTheLocalPlayer)
+TEST(TClientMapProgressTarget, FollowSwitchFreeviewAndReturnToLocal)
 {
+	EXPECT_EQ(TClientMapProgress::ResolveClientId(3, false, -1), 3);
+	EXPECT_EQ(TClientMapProgress::ResolveClientId(3, true, 17), 17);
+	EXPECT_EQ(TClientMapProgress::ResolveClientId(3, true, 18), 18);
 	for(const int SpectatorId : std::array<int, 3>{-1, MAX_CLIENTS, MAX_CLIENTS + 1})
 	{
 		SCOPED_TRACE(SpectatorId);
-		EXPECT_EQ(TClientMapProgress::ResolveClientId(3, true, SpectatorId), 3);
+		EXPECT_EQ(TClientMapProgress::ResolveClientId(3, true, SpectatorId), -1);
 	}
 	EXPECT_EQ(TClientMapProgress::ResolveClientId(3, false, 17), 3);
+	EXPECT_EQ(TClientMapProgress::ResolveClientId(MAX_CLIENTS, false, 17), -1);
+}
+
+TEST(TClientMapProgressTarget, InactiveSpectatorSlotDoesNotDuplicateLocalPlayer)
+{
+	EXPECT_EQ(TClientMapProgress::ResolveSpectatorClientId(false, 3), -1);
+	EXPECT_EQ(TClientMapProgress::ResolveSpectatorClientId(true, 17), 17);
+	EXPECT_EQ(TClientMapProgress::ResolveSpectatorClientId(true, -1), -1);
+	EXPECT_EQ(TClientMapProgress::ResolveSpectatorClientId(true, MAX_CLIENTS), -1);
 }
 
 TEST(TClientMapProgressPosition, FullCharacterTakesPriorityOverSpectatorCoordinates)

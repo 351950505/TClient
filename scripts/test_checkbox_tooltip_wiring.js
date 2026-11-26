@@ -26,7 +26,7 @@ let m;
 while((m = ENTRY_RE.exec(HELP_CPP)))
 	entries.push({ name: m[1], help: m[2].replace(/\\"/g, '"').replace(/\\\\/g, '\\') });
 
-expect(entries.length === 142, `帮助表条目数应为 142，实际为 ${entries.length}`);
+expect(entries.length === 143, `帮助表条目数应为 143，实际为 ${entries.length}`);
 expect(entries.length === [...new Set(entries.map(e => e.name))].length, '帮助表存在重复配置项条目');
 
 // ---- 词典（data/tclient/languages，格式：可选 [context] 段 + 英文行 + "== 译文"）----
@@ -91,6 +91,22 @@ expect(/s_DupUpstreamToggle[\s\S]{0,200}m_Tooltips\.DoToolTip\(&s_DupUpstreamTog
 expect(/s_DupSpreadToggle[\s\S]{0,200}m_Tooltips\.DoToolTip\(&s_DupSpreadToggle/.test(TCLIENT_CPP), '错峰铺开开关缺少悬停说明');
 expect(/s_CountFrozenText[\s\S]{0,220}m_Tooltips\.DoToolTip\(&s_CountFrozenText/.test(TCLIENT_CPP), '冻结计数第二档缺少悬停说明');
 expect(TCLIENT_CPP.includes('DoToolTipCheckBoxHelp(&g_Config.m_TcShowFrozenText'), '冻结存活文字行未走帮助表');
+
+const CONFIG = READ('src', 'engine', 'shared', 'config_variables_tclient.h');
+const OUTLINES_CPP = READ('src', 'game', 'client', 'components', 'tclient', 'outlines.cpp');
+const outlineMenuStart = TCLIENT_CPP.indexOf('// ***** Tile Outlines ***** //');
+const outlineMenuEnd = TCLIENT_CPP.indexOf('s_SectionBoxes.back().h', outlineMenuStart);
+const outlineSection = TCLIENT_CPP.slice(outlineMenuStart, outlineMenuEnd);
+expect(/MACRO_CONFIG_INT\(TcOutlineTransparent, tc_outline_transparent, 0, 0, 1, CFGFLAG_CLIENT \| CFGFLAG_SAVE,/.test(CONFIG), '透明模式默认关闭且需主动开启');
+expect(/MACRO_CONFIG_INT\(TcOutlineOpacity, tc_outline_opacity, 35, 0, 100, CFGFLAG_CLIENT \| CFGFLAG_SAVE,/.test(CONFIG), '透明模式的不透明度默认约 35% 且范围 0–100%');
+expect(/if\(g_Config\.m_TcOutlineTransparent\)\s*\{[^}]*DoScrollbarOption\(&g_Config\.m_TcOutlineOpacity, &g_Config\.m_TcOutlineOpacity, &Button, TCLocalize\("Outline opacity multiplier"\), 0, 100,/.test(outlineSection), '透明模式开启后显示可调不透明度滑条');
+expect(/const float Opacity = g_Config\.m_TcOutlineTransparent \? g_Config\.m_TcOutlineOpacity \/ 100\.0f : 1\.0f;\s*if\(Opacity <= 0\.0f\)\s*return;/.test(OUTLINES_CPP) && OUTLINES_CPP.indexOf('if(Opacity <= 0.0f)') < OUTLINES_CPP.indexOf('Graphics()->QuadsBegin()'), '关闭模式保留原不透明度，0% 时跳过绘制');
+expect(/SetColor\(color_cast<ColorRGBA>\(ColorHSLA\(Config\.m_Color, true\)\)\.WithMultipliedAlpha\(Opacity\)\)/.test(OUTLINES_CPP), '百分比只缩放现有轮廓色的 alpha，保留 RGB 与保存颜色');
+for(const lang of ['simplified_chinese.txt','traditional_chinese.txt']) {
+  const dict = READ('data', 'tclient', 'languages', lang);
+  for(const key of ['Tile outline transparent mode','Outline opacity multiplier','Scale outline opacity without changing saved colors.'])
+    expect(dict.includes(`\n${key}\n== `), `${lang} 缺少透明模式翻译: ${key}`);
+}
 const DIRECT_HELP_KEYS = [
 	'Resends packets until the server confirms them, so hits still register on bad connections.',
 	'Sends the copies a few milliseconds apart instead of back to back.',

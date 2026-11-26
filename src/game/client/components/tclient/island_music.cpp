@@ -3924,17 +3924,9 @@ public:
 			GameTextW = MeasureCached(m_pTextRender, TimerSize, "00:00");
 		}
 		const float GameTextOffset = (ShowGameTime && aGameTime[5] == '\0') ? (GameW - GameTextW) * 0.5f : 0.0f;
-		float MapProgressValue = 0.0f;
-		const bool ShowMapProgressSlot = TClientHudMapProgress::ShouldReserveIslandValue(
-			g_Config.m_TcMapProgress != 0, g_Config.m_TcMapProgressStyle, g_Config.m_TcIslandEnable != 0,
+		const bool ShowMapProgressSlot = m_pGameClient && TClientHudMapProgress::ShouldReserveIslandValue(
+			m_pGameClient->m_TClient.IsMapProgressEnabled(), g_Config.m_TcMapProgressStyle, g_Config.m_TcIslandEnable != 0,
 			TClientHudMapProgress::DYNAMIC_ISLAND_AVAILABLE);
-		const bool HasMapProgressValue = ShowMapProgressSlot && m_pGameClient &&
-			 m_pGameClient->m_Hud.GetMapProgressIslandValue(g_Config.m_ClDummy, MapProgressValue);
-		char aMapProgress[16];
-		if(HasMapProgressValue)
-			str_format(aMapProgress, sizeof(aMapProgress), "%.1f%%", MapProgressValue * 100.0f);
-		else
-			str_copy(aMapProgress, "--");
 
 		// ---- link status cell (left of the game clock) -----------------------
 		// Keep the probe's round-trip unconfirmed rate and the downlink snapshot
@@ -4067,6 +4059,12 @@ public:
 			m_pTextRender->SetFontPreset(EFontPreset::ICON_FONT);
 			m_MapProgressIcon.Update(m_pTextRender, FontIcon::FLAG_CHECKERED, MapProgressIconSize);
 			m_pTextRender->SetFontPreset(EFontPreset::DEFAULT_FONT);
+			float MapProgressValue;
+			char aMapProgress[16];
+			if(m_pGameClient->m_Hud.GetMapProgressIslandValue(g_Config.m_ClDummy, MapProgressValue))
+				str_format(aMapProgress, sizeof(aMapProgress), "%.1f%%", MapProgressValue * 100.0f);
+			else
+				str_copy(aMapProgress, "--");
 			m_MapProgressText.Update(m_pTextRender, aMapProgress, TimerSize);
 		}
 		const float MapProgressContentW = ShowMapProgressSlot ? TClientHudMapProgress::IslandValueContentWidth(

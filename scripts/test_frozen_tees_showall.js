@@ -35,6 +35,7 @@ assert(!source.includes('SendChatCommand(Conn, "/showall 0")'));
 const sender = between(source, 'int CClient::SendMsg(int Conn', 'int CClient::SendMsgActive');
 assert(sender.indexOf('OnChatSent(') > sender.indexOf('if(!(Flags & MSGFLAG_NOSEND))'));
 assert(sender.includes('Unpacker.Reset(Pack.Data(), Pack.Size())') && sender.includes('protocol7::NETMSGTYPE_CL_SAY'));
+const observeChat = between(sender, '\t\tif(Conn >= CONN_MAIN', '\n\t}\n\n\treturn 0;');
 const config = read('src/engine/shared/config_variables_tclient.h');
 assert.match(config, /MACRO_CONFIG_INT\(TcFrozenTeesShowAll\s*,\s*tc_frozen_tees_showall\s*,\s*0\s*,\s*0\s*,\s*1\s*,\s*CFGFLAG_CLIENT \| CFGFLAG_SAVE/, 'native /showall is opt-in and saved');
 assert(update.includes('const bool Requested = g_Config.m_TcFrozenTeesShowAll != 0;'), 'gate the request on the player setting');
@@ -63,12 +64,14 @@ fs.writeFileSync(path.join(out, 'test.cpp'), `
 #define ENGINE_MESSAGE_H
 class CMsgPacker {
 public:
- int m_MsgId; bool m_NoTranslate = false; std::vector<int> m_Ints; std::string m_String;
+ int m_MsgId; bool m_NoTranslate = false, m_System = false; std::vector<int> m_Ints; std::string m_String;
  template<class T> CMsgPacker(const T *) : m_MsgId(T::ms_MsgId) {}
  CMsgPacker(int Id, bool, bool NoTranslate=false) : m_MsgId(Id), m_NoTranslate(NoTranslate) {}
  void AddInt(int Value) { m_Ints.push_back(Value); }
  void AddString(const char *pValue, int) { m_String = pValue; }
  int Error() const { return 0; }
+ const CMsgPacker *Data() const { return this; }
+ int Size() const { return 2 + static_cast<int>(m_Ints.size()); }
 };
 #include <generated/protocol.h>
 #include <generated/protocol7.h>
@@ -85,6 +88,34 @@ const char *str_find_nocase(const char *pHaystack, const char *pNeedle) {
  for(char &C : N) C=(char)std::tolower((unsigned char)C);
  auto Pos=H.find(N); return Pos==std::string::npos ? nullptr : pHaystack+Pos;
 }
+const char *str_startswith_nocase(const char *pText, const char *pPrefix) {
+ return str_find_nocase(pText,pPrefix)==pText ? pText+std::strlen(pPrefix) : nullptr;
+}
+int str_isspace(char C) { return C==' ' || C=='\\n' || C=='\\r' || C=='\\t'; }
+const char *str_skip_whitespaces_const(const char *pText) {
+ while(str_isspace(*pText)) ++pText;
+ return pText;
+}
+// Read the fake packer's fields in wire order, using SendMsg's actual observer.
+class CUnpacker {
+ const CMsgPacker *m_pMsg=nullptr; size_t m_Index=0; bool m_Error=false;
+public:
+ enum { SKIP_START_WHITESPACES=4 };
+ void Reset(const CMsgPacker *pMsg, int) { m_pMsg=pMsg; m_Index=0; m_Error=false; }
+ int GetInt() {
+  const size_t Index=m_Index++;
+  if(Index==0) return (m_pMsg->m_MsgId<<1) | static_cast<int>(m_pMsg->m_System);
+  if(Index<=m_pMsg->m_Ints.size()) return m_pMsg->m_Ints[Index-1];
+  m_Error=true; return 0;
+ }
+ const char *GetString(int Flags) {
+  if(Flags!=0 && Flags!=SKIP_START_WHITESPACES) std::abort();
+  if(m_Index!=m_pMsg->m_Ints.size()+1) m_Error=true;
+  const char *pText=m_pMsg->m_String.c_str();
+  return Flags==SKIP_START_WHITESPACES ? str_skip_whitespaces_const(pText) : pText;
+ }
+ bool Error() const { return m_Error; }
+};
 template<class... T> void str_format(char *pBuf, size_t Size, const char *pFmt, T... Args) { std::snprintf(pBuf, Size, pFmt, Args...); }
 template<size_t N> void str_append(char (&aBuf)[N], const char *pText) { const size_t Length=std::strlen(aBuf); std::snprintf(aBuf+Length,N-Length,"%s",pText); }
 void dbg_msg(const char *, const char *, int) {}
@@ -109,7 +140,9 @@ public:
  int SendMsg(int Conn, CMsgPacker *pMsg, int Flags) {
   if(Flags!=MSGFLAG_VITAL) std::abort();
   m_vAttempts.push_back({Conn,pMsg->m_MsgId,pMsg->m_NoTranslate,Now,pMsg->m_Ints,pMsg->m_String});
-  m_aFrozenTeesShowAll[Conn].OnChatSent(time_get(), time_freq()); return 0;
+  const CMsgPacker &Pack=*pMsg;
+${observeChat}
+  return 0;
  }
  template<class T> int SendPackMsg(int Conn, T *pMsg, int Flags, bool NoTranslate=false) {
   CMsgPacker Packer(T::ms_MsgId,false,NoTranslate); if(pMsg->Pack(&Packer)) return -1; return SendMsg(Conn,&Packer,Flags);
@@ -185,15 +218,46 @@ int main() {
  Check(Quiet.m_vAttempts.size()==2,"user chat delays showall"); Now=3500; Quiet.UpdateFrozenTeesShowAll(0,&Yes);
  Check(Quiet.m_vAttempts.size()==3,"finite later quiet opportunity");
  std::puts("PASS outgoing chat quiet period and finite expiry, no retries");
+ for(bool Sixup : {false,true}) {
+  for(int Conn : {CONN_MAIN,CONN_DUMMY}) {
+   ResetConfig(); CClient Manual; Manual.m_Sixup=Sixup; Manual.m_ServerCapabilities.m_ChatTimeoutCode=false;
+   const int Other=1-Conn;
+   Now=0; Manual.OnPostConnect(Conn); Manual.OnPostConnect(Other);
+   Manual.UpdateFrozenTeesShowAll(Conn,&Yes); Manual.UpdateFrozenTeesShowAll(Other,&Yes);
+   Now=1500;
+   const char *pDirect=Conn==CONN_MAIN ? "/showall 0" : "/SHOWALL";
+   Manual.SendChatCommand(Conn,pDirect);
+   Check(Manual.m_vAttempts.size()==1 && Manual.m_vAttempts[0].m_Conn==Conn && Manual.m_vAttempts[0].m_Text==pDirect,"manual command is sent unchanged");
+   for(const char *pNear : {"/showallhelp","chat /showall 0","/mc;showall 0"})
+    Manual.SendChatCommand(Other,pNear);
+   if(Sixup) {
+    protocol7::CNetMsg_Cl_Say Whisper{protocol7::CHAT_WHISPER,2,"/showall 0"};
+    Manual.SendPackMsg(Other,&Whisper,MSGFLAG_VITAL,true);
+   }
+   const auto Sent=Manual.m_vAttempts.size();
+   Now=3499; Manual.UpdateFrozenTeesShowAll(Other,&Yes);
+   Check(Manual.m_vAttempts.size()==Sent,"near commands and whispers still delay auto-send");
+   Now=3500; Manual.UpdateFrozenTeesShowAll(Conn,&Yes); Manual.UpdateFrozenTeesShowAll(Other,&Yes);
+   Check(Manual.m_vAttempts.size()==Sent+1 && Manual.m_vAttempts.back().m_Conn==Other && Manual.m_vAttempts.back().m_Text=="/showall 1","only the direct command's connection is overridden");
+   g_Config.m_TcFrozenTeesShowAll=0; Manual.UpdateFrozenTeesShowAll(Conn,&Yes);
+   g_Config.m_TcFrozenTeesShowAll=1; Manual.UpdateFrozenTeesShowAll(Conn,&Yes);
+   Check(Manual.m_vAttempts.size()==Sent+1,"switching the option does not erase the manual choice");
+  }
+ }
+ std::puts("PASS direct /showall overrides only its connection on 0.6/0.7; near commands and whispers do not");
  ResetConfig(); CClient Demo; Now=0; Demo.OnPostConnect(0); Now=5000;
  Demo.m_State=IClient::STATE_DEMOPLAYBACK; Demo.UpdateFrozenTeesShowAll(0,&Yes);
  Demo.m_State=IClient::STATE_OFFLINE; Demo.UpdateFrozenTeesShowAll(0,&Yes);
  Demo.m_State=IClient::STATE_ONLINE; Demo.m_aNetClient[0].m_State=0; Demo.UpdateFrozenTeesShowAll(0,&Yes);
  Check(Demo.m_vAttempts.size()==1,"demo/offline/transport offline never showall");
  std::puts("PASS demo, offline and transport gate");
- CFrozenTeesShowAll Toggle; Now=0; Toggle.OnPostConnect(Now,1000); Toggle.Update(Now,1000,true,true,true);
- for(int Index=1;Index<15;++Index) { Now=Index*1000; Toggle.OnChatSent(Now,1000); Toggle.Update(Now,1000,true,false,true); Toggle.Update(Now,1000,true,true,true); }
- Check(!Toggle.Update(20000,1000,true,true,true),"toggle cannot prolong original deadline");
+ CFrozenTeesShowAll Toggle; Toggle.OnPostConnect(0,1000);
+ Check(!Toggle.Update(0,1000,true,true,true),"wait before first automatic request");
+ Check(!Toggle.Update(1000,1000,true,false,true),"disable before sending");
+ Check(!Toggle.Update(20000,1000,true,false,true),"a disabled request never sends");
+ Check(Toggle.Update(20000,1000,true,true,true),"re-enabling starts a fresh request after the cancelled deadline");
+ Check(!Toggle.Update(22000,1000,true,true,true),"a sent request is still one-shot");
+ std::puts("PASS cancelled pending window restarts on re-enable, without retrying a sent request");
  CFrozenTeesShowAll Pause; Pause.OnPostConnect(0,1000); Pause.Update(0,1000,true,true,true); Check(!Pause.Update(15000,1000,true,true,true),"no stale send after snapshot pause");
  CFrozenTeesShowAll Zero; Zero.OnPostConnect(0,0); Check(!Zero.Update(5000,0,true,true,true),"invalid clock fails safe");
  std::puts("PASS repeated-toggle deadline, stale snapshot pause, invalid clock");

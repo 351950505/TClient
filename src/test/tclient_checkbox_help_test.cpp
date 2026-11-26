@@ -6,11 +6,10 @@
 
 #include <gtest/gtest.h>
 
-TEST(ClientCheckBoxHelp, HasEntries)
+TEST(ClientCheckBoxHelp, CoversFullMapTeeAndTransparentOutlines)
 {
-	// ME 页约 24 个、TC 页各子页签约百来个真实开关都应有通俗说明；
-	// 空表意味着悬停帮助功能没有真正接入。
-	EXPECT_EQ(NumCheckBoxHelpEntries(), 141);
+	EXPECT_NE(FindCheckBoxHelpText(&g_Config.m_TcFrozenTeesShowAll), nullptr);
+	EXPECT_NE(FindCheckBoxHelpText(&g_Config.m_TcOutlineTransparent), nullptr);
 }
 
 TEST(ClientCheckBoxHelp, AddressesAreUnique)

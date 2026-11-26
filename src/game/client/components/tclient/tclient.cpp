@@ -2089,7 +2089,6 @@ void CTClient::ResetMapProgress()
 	m_aMapProgressMapName[0] = '\0';
 	m_MapProgressBaseScanCursor = 0;
 	m_MapProgressMapCrc = 0;
-	m_MapProgressGoresMode = false;
 	m_vMapProgressWaterImages.clear();
 	m_MapProgressWaterImagesPrepared = false;
 	m_MapProgressWaterImagesLoaded = false;
@@ -2111,7 +2110,7 @@ int CTClient::ResolveMapProgressClientId(int Slot) const
 	if(Slot == NUM_DUMMIES)
 	{
 		const auto &Spec = GameClient()->m_Snap.m_SpecInfo;
-		return Spec.m_Active && Spec.m_SpectatorId >= 0 && Spec.m_SpectatorId < MAX_CLIENTS ? Spec.m_SpectatorId : -1;
+		return TClientMapProgress::ResolveSpectatorClientId(Spec.m_Active, Spec.m_SpectatorId);
 	}
 	if(Slot < 0 || Slot >= NUM_DUMMIES || (Slot == 1 && !Client()->DummyConnected()))
 		return -1;
@@ -2141,7 +2140,7 @@ int CTClient::MapProgressClientId(int Conn) const
 
 TClientMapProgress::SEstimate CTClient::MapProgressEstimate(int Conn) const
 {
-	if(!g_Config.m_TcMapProgress)
+	if(!IsMapProgressEnabled())
 		return {};
 	const int Slot = MapProgressSlot(Conn);
 	const CLayers *pLayers = Layers();
@@ -2252,9 +2251,13 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 	unsigned FailureMapCrc = 0;
 	try
 	{
-		if(!g_Config.m_TcMapProgress)
+		if(!IsMapProgressEnabled())
 		{
-			ResetMapProgress();
+			const bool HasTrackedState = m_pMapProgressMap || m_MapProgressFailedForMap ||
+				std::any_of(m_aMapProgressTargets.begin(), m_aMapProgressTargets.end(), [](const SMapProgressTarget &Target) { return Target.m_Valid; }) ||
+				std::any_of(m_aMapProgressClientIds.begin(), m_aMapProgressClientIds.end(), [](int ClientId) { return ClientId >= 0; });
+			if(HasTrackedState)
+				ResetMapProgress();
 			return;
 		}
 		const int State = Client()->State();
@@ -2271,15 +2274,6 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 			return;
 		}
 		const char *pMapName = pCurrentMap->BaseName();
-		const bool GoresMode = IsGoresGameMode();
-		const bool DDRaceMap = !GoresMode && GameClient()->m_GameInfo.m_Race && GameClient()->m_GameInfo.m_PredictDDRace &&
-				       (!pMapName || str_comp_nocase(pMapName, "NUT_race9") != 0);
-		const bool SpecialMap = pMapName && str_comp_nocase(pMapName, "NUT_race9") == 0;
-		if(!InGameState || (!GoresMode && !DDRaceMap && !SpecialMap))
-		{
-			ResetMapProgress();
-			return;
-		}
 		const CCollision *pCollision = Collision();
 		const CLayers *pLayers = Layers();
 		IMap *pMap = pLayers ? pLayers->Map() : nullptr;
@@ -2321,7 +2315,7 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 		if(m_pMapProgressMap != pMap || m_pMapProgressCollision != pCollision ||
 			m_pMapProgressGameLayer != pGame || m_pMapProgressFrontLayer != pFront || m_pMapProgressTeleLayer != pTele ||
 			m_MapProgressMap.Size() != MapSize || str_comp(m_aMapProgressMapName, pSafeMapName) != 0 ||
-			m_MapProgressMapCrc != CurrentMapCrc || m_MapProgressGoresMode != GoresMode)
+			m_MapProgressMapCrc != CurrentMapCrc)
 		{
 			ResetMapProgress();
 			m_MapProgressMap = TClientMapProgress::CMap(Width, Height);
@@ -2337,15 +2331,9 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 			m_pMapProgressTeleLayer = pTele;
 			m_MapProgressMapCrc = CurrentMapCrc;
 			str_copy(m_aMapProgressMapName, pSafeMapName, sizeof(m_aMapProgressMapName));
-			m_MapProgressGoresMode = GoresMode;
-			m_MapProgressVisualLayersComplete = !GoresMode;
+			m_MapProgressVisualLayersComplete = false;
 		}
-		if(!GoresMode)
-		{
-			m_MapProgressWaterImagesPrepared = true;
-			m_MapProgressWaterImagesLoaded = true;
-		}
-		else if(!m_MapProgressWaterImagesPrepared)
+		if(!m_MapProgressWaterImagesPrepared)
 		{
 			int ImageStart = 0;
 			int ImageCount = 0;
@@ -2390,7 +2378,7 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 				m_MapProgressMap.SetTile(m_MapProgressBaseScanCursor, ReadTile(m_MapProgressBaseScanCursor));
 				ScanBudget -= End - Start;
 		}
-			if(ScanBudget > 0 && GoresMode && !m_MapProgressWaterImagesLoaded)
+			if(ScanBudget > 0 && !m_MapProgressWaterImagesLoaded)
 			{
 				const int ImageBudget = std::min(ScanBudget, TClientMapProgress::MAP_PROGRESS_IMAGE_SCAN_BUDGET);
 				int ImageScanned = 0;
@@ -2445,7 +2433,7 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 					m_aMapProgressClientIds[Slot] = ClientId;
 				}
 				const auto &Character = GameClient()->m_Snap.m_aCharacters[ClientId];
-				bool CharacterActive = Character.m_Active;
+				const bool CharacterActive = Client()->SnapFindItem(IClient::SNAP_CURRENT, NETOBJTYPE_CHARACTER, ClientId) != nullptr;
 				bool HasPosition = CharacterActive;
 				vec2 Position(0.0f, 0.0f);
 				if(CharacterActive)
@@ -2484,8 +2472,8 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 					Target.m_HasPreviousPosition = true;
 				}
 				int TeleCheckpoint = Target.m_TeleCheckpoint;
-				if(CharacterActive && Character.m_HasExtendedData)
-					TeleCheckpoint = std::max(0, Character.m_ExtendedData.m_TeleCheckpoint);
+				if(CharacterActive && Character.m_HasExtendedData && Character.m_ExtendedData.m_TeleCheckpoint >= 0)
+					TeleCheckpoint = Character.m_ExtendedData.m_TeleCheckpoint;
 				else if(pTele && pTele[Index].m_Type == TILE_TELECHECK)
 				{
 					const int ObservedTeleCheckpoint = pCollision->IsTeleCheckpoint(Index);
@@ -2503,7 +2491,8 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 					auto Tile = ReadTile(ObserveAt);
 					if(ObserveAt < m_MapProgressBaseScanCursor)
 						Tile.m_Water = Tile.m_Water || m_MapProgressMap.Tile(ObserveAt).m_Water;
-					if((!CharacterActive || !Character.m_HasExtendedData) && pTele && pTele[ObserveAt].m_Type == TILE_TELECHECK)
+					if((!CharacterActive || !Character.m_HasExtendedData || Character.m_ExtendedData.m_TeleCheckpoint < 0) &&
+						pTele && pTele[ObserveAt].m_Type == TILE_TELECHECK)
 					{
 						const int ObservedTeleCheckpoint = pCollision->IsTeleCheckpoint(ObserveAt);
 						if(ObservedTeleCheckpoint >= 0)

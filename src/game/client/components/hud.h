@@ -60,8 +60,6 @@ class CHud : public CComponent
 	bool m_FrozenHudPending = false;
 	int m_FrozenHudTeam = 0;
 	TClientHudMapProgress::CProgressState m_aMapProgressState[NUM_DUMMIES];
-	bool m_aMapProgressValid[NUM_DUMMIES] = {};
-	float m_aMapProgressDisplayed[NUM_DUMMIES] = {};
 	CCachedText m_MapProgressHudLabel;
 	CCachedText m_MapProgressHudText;
 	std::string m_MapProgressHudCaption;

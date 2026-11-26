@@ -530,8 +530,21 @@ int CClient::SendMsg(int Conn, CMsgPacker *pMsg, int Flags)
 			CUnpacker Unpacker;
 			Unpacker.Reset(Pack.Data(), Pack.Size());
 			const int MsgId = Unpacker.GetInt() >> 1;
-			if(!Unpacker.Error() && MsgId == (IsSixup() ? (int)protocol7::NETMSGTYPE_CL_SAY : (int)NETMSGTYPE_CL_SAY))
-				m_aFrozenTeesShowAll[Conn].OnChatSent(time_get(), time_freq());
+			const bool Sixup = IsSixup();
+			if(!Unpacker.Error() && MsgId == (Sixup ? (int)protocol7::NETMSGTYPE_CL_SAY : (int)NETMSGTYPE_CL_SAY))
+			{
+				const int Channel = Unpacker.GetInt(); // 0.6 team or 0.7 chat mode.
+				if(Sixup)
+					Unpacker.GetInt(); // 0.7 target.
+				// Skip leading spaces as 0.7 does, but don't sanitize the outgoing packet in place.
+				const char *pText = Unpacker.GetString(Sixup ? CUnpacker::SKIP_START_WHITESPACES : 0);
+				const bool CommandChat = Sixup ? (Channel == protocol7::CHAT_ALL || Channel == protocol7::CHAT_TEAM) : (Channel == 0 || Channel == 1);
+				const char *pAfterShowAll = nullptr;
+				if(!Unpacker.Error() && CommandChat && *pText == '/')
+					pAfterShowAll = str_startswith_nocase(str_skip_whitespaces_const(pText + 1), "showall");
+				const bool DirectShowAll = pAfterShowAll && (!*pAfterShowAll || str_isspace(*pAfterShowAll));
+				m_aFrozenTeesShowAll[Conn].OnChatSent(time_get(), time_freq(), DirectShowAll);
+			}
 		}
 	}
 

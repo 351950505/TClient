@@ -530,7 +530,14 @@ struct SEstimate
 
 inline int ResolveClientId(int LocalClientId, bool Spectating, int SpectatorId)
 {
-	return Spectating && SpectatorId >= 0 && SpectatorId < MAX_CLIENTS ? SpectatorId : LocalClientId;
+	if(Spectating)
+		return SpectatorId >= 0 && SpectatorId < MAX_CLIENTS ? SpectatorId : -1;
+	return LocalClientId >= 0 && LocalClientId < MAX_CLIENTS ? LocalClientId : -1;
+}
+
+inline int ResolveSpectatorClientId(bool Spectating, int SpectatorId)
+{
+	return ResolveClientId(-1, Spectating, SpectatorId);
 }
 
 inline std::optional<vec2> ResolvePosition(std::optional<vec2> Character, std::optional<vec2> SpecCharacter, std::optional<vec2> Spectator)

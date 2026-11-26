@@ -124,7 +124,13 @@ namespace TClientHudMapProgress
 	public:
 		void Reset() { *this = {}; }
 		bool IsTracking(int ClientId) const { return m_Initialized && m_ClientId == ClientId; }
-		float Displayed() const { return m_Displayed; }
+		bool TryGetForClient(int ClientId, float &Progress) const
+		{
+			if(ClientId < 0 || !IsTracking(ClientId))
+				return false;
+			Progress = m_Displayed;
+			return true;
+		}
 		float Update(bool HasProgress, float Progress, float DeltaSeconds, int ClientId = -1)
 		{
 			if(!HasProgress)

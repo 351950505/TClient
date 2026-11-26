@@ -30,7 +30,7 @@ inline bool TcFrozenTeesEntitiesDDRace(int InfoExSize, int Version, int Flags, b
 class CFrozenTeesShowAll
 {
 	bool m_PostConnected = false;
-	bool m_Attempted = false;
+	bool m_Finished = false;
 	bool m_Pending = false;
 	int64_t m_NotBefore = 0;
 	int64_t m_Deadline = 0;
@@ -51,19 +51,29 @@ public:
 		m_NotBefore = std::max(m_NotBefore, Now + CHAT_QUIET_SECONDS * Frequency);
 	}
 
-	void OnChatSent(int64_t Now, int64_t Frequency)
+	void OnChatSent(int64_t Now, int64_t Frequency, bool DirectShowAll)
 	{
 		if(Frequency > 0)
 			m_NotBefore = std::max(m_NotBefore, Now + CHAT_QUIET_SECONDS * Frequency);
+
+		if(DirectShowAll)
+		{
+			m_Finished = true; // A directly sent command takes priority on this connection.
+			m_Pending = false;
+		}
 	}
 
 	bool Update(int64_t Now, int64_t Frequency, bool Online, bool Requested, bool EntitiesDDRace)
 	{
-		if(!m_PostConnected || m_Attempted || !Online || Frequency <= 0)
+		if(!Requested)
+		{
+			m_Pending = false;
 			return false;
-		// Start a bounded window on the first applicable request, including an
-		// option enabled after joining. Repeated off/on keeps the same deadline.
-		if(!m_Pending && Requested && EntitiesDDRace)
+		}
+		if(!m_PostConnected || m_Finished || !Online || Frequency <= 0)
+			return false;
+		// Start a fresh bounded window when enabled and applicable, even after cancelling one.
+		if(!m_Pending && EntitiesDDRace)
 		{
 			m_Pending = true;
 			m_Deadline = Now + WAIT_SECONDS * Frequency;
@@ -72,14 +82,14 @@ public:
 			return false;
 		if(Now >= m_Deadline)
 		{
-			m_Attempted = true; // Expired; don't keep retrying a busy/unsupported server.
+			m_Finished = true; // Expired; don't keep retrying a busy/unsupported server.
 			m_Pending = false;
 			return false;
 		}
-		if(!Requested || !EntitiesDDRace || Now < m_NotBefore)
+		if(!EntitiesDDRace || Now < m_NotBefore)
 			return false;
 
-		m_Attempted = true; // Consume BEFORE the caller sends (no acknowledgement).
+		m_Finished = true; // Consume BEFORE the caller sends (no acknowledgement).
 		m_Pending = false;
 		return true;
 	}

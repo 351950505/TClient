@@ -34,7 +34,8 @@ assert(!onUpdate.includes('ResetMapProgress()'), 'Do not discard an enabled map 
 const snapshot = functionBody(client, 'void CTClient::OnNewSnapshot()');
 assert(snapshot.includes('UpdateMapProgress(true)'), 'Snapshot observations must update the current route estimate');
 const update = functionBody(client, 'void CTClient::UpdateMapProgress(bool NewSnapshot)');
-assert.match(update, /if\(!g_Config\.m_TcMapProgress\)[\s\S]*?ResetMapProgress\(\)/, 'Disabling the cvar must clear cached progress');
+assert.match(update, /if\(!IsMapProgressEnabled\(\)\)[\s\S]*?ResetMapProgress\(\);[\s\S]*?return;/, 'Do not scan or solve outside Gores');
+assert.doesNotMatch(update, /NUT_race9|m_PredictDDRace/, 'No non-Gores exception');
 assert(update.includes('TClientMapProgress::MAP_PROGRESS_SCAN_BUDGET') && update.includes('TClientMapProgress::MAP_PROGRESS_DIJKSTRA_BUDGET'), 'Map scan and route solving must have bounded budgets');
 assert.match(update, /if\(!NewSnapshot\)[\s\S]*?int ScanBudget = TClientMapProgress::MAP_PROGRESS_SCAN_BUDGET[\s\S]*?ScanBudget -= End - Start/, 'the full scan budget must be spent only from the regular update path');
 assert.match(update, /if\(NewSnapshot\)[\s\S]*?m_aMapProgressPlayers\[Slot\]\.Observe[\s\S]*?return;[\s\S]*?if\(!m_MapProgressMap\.Ready\(\)\)/, 'snapshot callbacks must update observations and return before distance-field advancement');
@@ -68,6 +69,7 @@ assert.doesNotMatch(hud, /RenderMapProgressBelowBoard|RenderMapProgressStandalon
 const movement = functionBody(hud, 'void CHud::RenderMovementInformation(');
 assert(movement.includes('RenderMapProgressHud(StartY)') && movement.includes('RightHudTop'), 'The independent readout and stack must share the actual coordinates top, including dummy rows');
 const progressHud = functionBody(hud, 'void CHud::RenderMapProgressHud(');
+assert(movement.includes('IsMapProgressEnabled()'), 'A non-Gores server must not reserve a HUD row');
 assert.doesNotMatch(progressHud, /DrawRect|QuadsBegin|MapProgressEstimate|TextWidth\(/, 'Transparent readout must not draw a panel, solve routes or measure glyphs every frame');
 assert(progressHud.includes('TClientModernUi::Accent(') && progressHud.includes('m_MapProgressHudText.Render(') && progressHud.includes('m_MapProgressHudLabel.Render('), 'The percentage uses the visual accent and both pieces use cached text');
 assert(hud.includes('TCLocalize("Finish", "Map progress")'), 'Use the localized finish label');
@@ -75,6 +77,7 @@ for(const part of ['RenderSpectatorCount', 'RenderDummyActions', 'RenderDrownBoa
   assert(functionBody(hud, 'void CHud::' + part + '(').includes('RightHudTop'), part + ' must use the occupied right-hand stack');
 assert.doesNotMatch(functionBody(hud, 'void CHud::OnRender()'), /UpdateMapProgress\(/, 'Render must not update or generate map progress');
 const islandMusic = read('src/game/client/components/tclient/island_music.cpp');
+assert.match(islandMusic, /const bool ShowMapProgressSlot[\s\S]{0,260}IsMapProgressEnabled\(\)/, 'The island must not reserve progress space outside Gores');
 assert(islandMusic.includes('GetMapProgressIslandValue(g_Config.m_ClDummy, MapProgressValue)'), 'Island reads the HUD-sampled percentage');
 assert.match(islandMusic, /MapProgressIconSize, FontIcon::FLAG_CHECKERED, EFontPreset::ICON_FONT/, 'Measure the finish flag with the same font used to draw it');
 assert.match(islandMusic, /m_MapProgressIcon\.Update\([^;]+;\s*m_pTextRender->SetFontPreset\(EFontPreset::DEFAULT_FONT\)/, 'Restore the text font before drawing the percentage or track title');
@@ -94,8 +97,8 @@ const sharedLocaleKeys = [
 		'Show estimated finish percentage',
 		'Use the Dynamic Island instead of the HUD',
 		'Show progress in the Dynamic Island instead of at the bottom right. If the island is off or unsupported, show it at the bottom right.',
-		'Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available.',
-		'Show the estimated finish percentage in only one place at a time: at the bottom right or in the Dynamic Island.',
+		'On Gores, shows your finish progress or that of the player you are watching. No target or route: --.',
+		'On Gores, show your finish progress. When spectating, show the selected player instead.',
 ];
 for(const locale of ['simplified_chinese.txt', 'traditional_chinese.txt']) {
   const dictionary = read(path.join('data/tclient/languages', locale));
@@ -103,7 +106,7 @@ for(const locale of ['simplified_chinese.txt', 'traditional_chinese.txt']) {
     assert(dictionary.includes(`\n${key}\n== `), `${locale} is missing a translation for: ${key}`);
 }
 const simplifiedChinese = read(path.join('data/tclient/languages', 'simplified_chinese.txt'));
-assert(simplifiedChinese.includes('\nShow the estimated finish percentage in only one place at a time: at the bottom right or in the Dynamic Island.\n== '), 'Simplified Chinese is missing the exclusive-display hover explanation');
+assert(simplifiedChinese.includes('\nOn Gores, show your finish progress. When spectating, show the selected player instead.\n== '), 'Simplified Chinese is missing the exclusive-display hover explanation');
 assert(menus.includes('Show estimated finish percentage'), 'The master switch must describe the enabled progress display');
 assert(menus.includes('Use the Dynamic Island instead of the HUD'), 'The destination choice must be explicitly exclusive');
 assert(!menus.includes('Fallback horizontal position') && !menus.includes('Fallback vertical position'), 'Legacy fallback-position sliders must not imply that the fixed HUD anchor moves');

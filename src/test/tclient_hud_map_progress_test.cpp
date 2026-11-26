@@ -102,3 +102,32 @@ TEST(TClientHudMapProgress, ProgressSmoothsAndResetsWhenTargetChangesOrDisappear
 	EXPECT_FLOAT_EQ(State.Update(false, 0.5f, 1.0f, 5), 0.0f);
 	EXPECT_FALSE(State.IsTracking(5));
 }
+
+TEST(TClientHudMapProgress, ReadoutFollowsActiveTargetEvenBeforeNextHudUpdate)
+{
+	TClientHudMapProgress::CProgressState State;
+	constexpr int Self = 4, OtherA = 7, OtherB = 9, Freeview = -1;
+	float Value = -1.0f;
+	EXPECT_FALSE(State.TryGetForClient(Self, Value));
+	State.Update(true, 0.20f, 0.0f, Self);
+	ASSERT_TRUE(State.TryGetForClient(Self, Value));
+	EXPECT_FLOAT_EQ(Value, 0.20f);
+
+	EXPECT_FALSE(State.TryGetForClient(OtherA, Value));
+	State.Update(true, 0.70f, 0.0f, OtherA);
+	ASSERT_TRUE(State.TryGetForClient(OtherA, Value));
+	EXPECT_FLOAT_EQ(Value, 0.70f);
+
+	EXPECT_FALSE(State.TryGetForClient(OtherB, Value));
+	State.Update(false, 0.0f, 0.0f, OtherB);
+	EXPECT_FALSE(State.TryGetForClient(OtherB, Value));
+	State.Update(true, 0.40f, 0.0f, OtherB);
+	ASSERT_TRUE(State.TryGetForClient(OtherB, Value));
+	EXPECT_FLOAT_EQ(Value, 0.40f);
+
+	EXPECT_FALSE(State.TryGetForClient(Freeview, Value));
+	EXPECT_FALSE(State.TryGetForClient(Self, Value)); // No HUD update during freeview.
+	State.Update(true, 0.30f, 0.0f, Self);
+	ASSERT_TRUE(State.TryGetForClient(Self, Value));
+	EXPECT_FLOAT_EQ(Value, 0.30f);
+}

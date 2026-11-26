@@ -145,6 +145,10 @@ void COutlines::OnRender()
 	if(!g_Config.m_TcOutline)
 		return;
 
+	const float Opacity = g_Config.m_TcOutlineTransparent ? g_Config.m_TcOutlineOpacity / 100.0f : 1.0f;
+	if(Opacity <= 0.0f)
+		return;
+
 	const float Scale = 32.0f;
 
 	const CScreenRect ScreenRect = Graphics()->GetScreen();
@@ -256,7 +260,7 @@ void COutlines::OnRender()
 			}
 			if(NumQuads <= 0)
 				continue;
-			Graphics()->SetColor(color_cast<ColorRGBA>(ColorHSLA(Config.m_Color, true)));
+			Graphics()->SetColor(color_cast<ColorRGBA>(ColorHSLA(Config.m_Color, true)).WithMultipliedAlpha(Opacity));
 			Graphics()->QuadsDrawTL(aQuads, NumQuads);
 		}
 	}

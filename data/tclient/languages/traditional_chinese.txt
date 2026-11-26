@@ -482,6 +482,15 @@ Show any enabled outlines
 Only show outlines in entities
 == 
 
+Tile outline transparent mode
+== 透明模式
+
+Outline opacity multiplier
+== 描邊不透明度比例
+
+Scale outline opacity without changing saved colors.
+== 按比例降低描邊不透明度，不改變已儲存的顏色。
+
 [Outlines]
 Width
 == 
@@ -1120,11 +1129,11 @@ Use the Dynamic Island instead of the HUD
 Show progress in the Dynamic Island instead of at the bottom right. If the island is off or unsupported, show it at the bottom right.
 == 進度改在靈動島顯示。若靈動島關閉或不受支援，進度仍會顯示在右下角。
 
-Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available.
-== 終點進度在 Gores 和 DDRace 地圖上由本地估算；路線尚不可用時會顯示未知。
+On Gores, shows your finish progress or that of the player you are watching. No target or route: --.
+== 僅在 Gores 顯示自己或目前觀戰玩家的終點進度。沒有目標或路線時顯示 --。
 
-Show the estimated finish percentage in only one place at a time: at the bottom right or in the Dynamic Island.
-== 預估終點進度同一時間只會顯示在一個位置：右下角或靈動島。
+On Gores, show your finish progress. When spectating, show the selected player instead.
+== 只在 Gores 顯示終點進度；觀戰時顯示所選玩家的進度。
 
 
 

@@ -231,6 +231,15 @@ Show any enabled outlines
 Only show outlines in entities
 == 仅在实体层中显示轮廓
 
+Tile outline transparent mode
+== 透明模式
+
+Outline opacity multiplier
+== 描边不透明度比例
+
+Scale outline opacity without changing saved colors.
+== 按比例降低描边不透明度，不改变已保存的颜色。
+
 Outline freeze & deep
 == 冻结 & 深度冻结轮廓
 
@@ -2127,11 +2136,11 @@ Use the Dynamic Island instead of the HUD
 Show progress in the Dynamic Island instead of at the bottom right. If the island is off or unsupported, show it at the bottom right.
 == 进度改在灵动岛显示。如果灵动岛关闭或不支持，进度仍显示在右下角。
 
-Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available.
-== 终点进度在 Gores 和 DDRace 地图上由本地估算；路线尚不可用时会显示未知。
+On Gores, shows your finish progress or that of the player you are watching. No target or route: --.
+== 仅在 Gores 显示自己或当前观战玩家的终点进度。没有目标或路线时显示 --。
 
-Show the estimated finish percentage in only one place at a time: at the bottom right or in the Dynamic Island.
-== 同一时间只在一个位置显示预估终点进度：右下角或灵动岛。
+On Gores, show your finish progress. When spectating, show the selected player instead.
+== 只在 Gores 显示终点进度；观战时显示所选玩家的进度。
 
 Freezes
 == 落水次数

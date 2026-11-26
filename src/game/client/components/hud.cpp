@@ -86,12 +86,8 @@ void CHud::OnWindowResize()
 void CHud::OnReset()
 {
 	m_FrozenHudPending = false;
-	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
-	{
-		m_aMapProgressState[Dummy].Reset();
-		m_aMapProgressValid[Dummy] = false;
-		m_aMapProgressDisplayed[Dummy] = 0.0f;
-	}
+	for(auto &State : m_aMapProgressState)
+		State.Reset();
 	m_TimeCpDiff = 0.0f;
 	m_DDRaceTime = 0;
 	m_FinishTimeLastReceivedTick = 0;
@@ -2255,7 +2251,7 @@ void CHud::RenderMovementInformation(float &RightHudTop)
 		(in_range(ClientId, MAX_CLIENTS - 1) && GameClient()->m_aClients[ClientId].m_SpecCharPresent);
 	const bool ShowMovementInformation = g_Config.m_ClShowhudPlayerPosition ||
 		(!PosOnly && (g_Config.m_ClShowhudPlayerSpeed || g_Config.m_ClShowhudPlayerAngle));
-	const bool ShowMapProgressHud = TClientHudMapProgress::ShouldShowStandaloneValue(g_Config.m_TcMapProgress != 0,
+	const bool ShowMapProgressHud = TClientHudMapProgress::ShouldShowStandaloneValue(GameClient()->m_TClient.IsMapProgressEnabled(),
 		g_Config.m_TcMapProgressStyle, g_Config.m_TcIslandEnable != 0, TClientHudMapProgress::DYNAMIC_ISLAND_AVAILABLE);
 	if(!ShowMovementInformation && !ShowMapProgressHud)
 		return;
@@ -2561,24 +2557,19 @@ void CHud::OnNewSnapshot()
 
 void CHud::UpdateMapProgress()
 {
-	const bool Enabled = g_Config.m_TcMapProgress != 0 &&
-		(Client()->State() == IClient::STATE_ONLINE || Client()->State() == IClient::STATE_DEMOPLAYBACK);
+	if((Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK) ||
+		!GameClient()->m_TClient.IsMapProgressEnabled())
+	{
+		for(auto &State : m_aMapProgressState)
+			State.Reset();
+		return;
+	}
 	const float DeltaSeconds = Client()->RenderFrameTime();
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
 	{
-		if(!Enabled)
-		{
-			m_aMapProgressState[Dummy].Reset();
-			m_aMapProgressValid[Dummy] = false;
-			m_aMapProgressDisplayed[Dummy] = 0.0f;
-			continue;
-		}
-
 		const auto Estimate = GameClient()->m_TClient.MapProgressEstimate(Dummy);
 		const int ClientId = GameClient()->m_TClient.MapProgressClientId(Dummy);
-		m_aMapProgressValid[Dummy] = Estimate.m_Valid && ClientId >= 0;
-		m_aMapProgressDisplayed[Dummy] = m_aMapProgressState[Dummy].Update(
-			m_aMapProgressValid[Dummy], Estimate.m_Progress, DeltaSeconds, ClientId);
+		m_aMapProgressState[Dummy].Update(Estimate.m_Valid && ClientId >= 0, Estimate.m_Progress, DeltaSeconds, ClientId);
 	}
 }
 
@@ -2589,12 +2580,9 @@ void CHud::OnUpdate()
 
 bool CHud::GetMapProgressIslandValue(int Dummy, float &Progress) const
 {
-	if(Dummy < 0 || Dummy >= NUM_DUMMIES || Dummy != g_Config.m_ClDummy ||
-			!TClientHudMapProgress::ShouldShowIslandValue(g_Config.m_TcMapProgress != 0, g_Config.m_TcMapProgressStyle,
-				g_Config.m_TcIslandEnable != 0, m_aMapProgressValid[Dummy], TClientHudMapProgress::DYNAMIC_ISLAND_AVAILABLE))
+	if(Dummy < 0 || Dummy >= NUM_DUMMIES || Dummy != g_Config.m_ClDummy)
 		return false;
-	Progress = m_aMapProgressDisplayed[Dummy];
-	return true;
+	return m_aMapProgressState[Dummy].TryGetForClient(GameClient()->m_TClient.MapProgressClientId(Dummy), Progress);
 }
 
 void CHud::CacheMapProgressHudText(int Tenths)
@@ -2630,7 +2618,8 @@ void CHud::RenderMapProgressHud(float MovementInformationTop)
 	const int Dummy = g_Config.m_ClDummy;
 	if(!in_range(Dummy, NUM_DUMMIES - 1))
 		return;
-	const int Tenths = m_aMapProgressValid[Dummy] ? round_to_int(std::clamp(m_aMapProgressDisplayed[Dummy], 0.0f, 1.0f) * 1000.0f) : -1;
+	float Progress;
+	const int Tenths = m_aMapProgressState[Dummy].TryGetForClient(GameClient()->m_TClient.MapProgressClientId(Dummy), Progress) ? round_to_int(Progress * 1000.0f) : -1;
 	CacheMapProgressHudText(Tenths);
 	const float Top = TClientHudMapProgress::MapProgressHudTop(MovementInformationTop);
 	const float X = m_Width - m_MapProgressHudText.Width();

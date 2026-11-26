@@ -10,7 +10,6 @@ const root = path.resolve(__dirname, '..');
 const hud = fs.readFileSync(path.join(root, 'src/game/client/components/hud.cpp'), 'utf8').replace(/\r\n/g, '\n');
 const island = fs.readFileSync(path.join(root, 'src/game/client/components/tclient/island_music.cpp'), 'utf8').replace(/\r\n/g, '\n');
 const config = fs.readFileSync(path.join(root, 'src/engine/shared/config_variables_tclient.h'), 'utf8').replace(/\r\n/g, '\n');
-const client = fs.readFileSync(path.join(root, 'src/engine/client/client.cpp'), 'utf8').replace(/\r\n/g, '\n');
 const menus = fs.readFileSync(path.join(root, 'src/game/client/components/tclient/menus_tclient.cpp'), 'utf8').replace(/\r\n/g, '\n');
 const readLang = name => fs.readFileSync(path.join(root, 'data/tclient/languages', name + '.txt'), 'utf8').replace(/\r\n/g, '\n');
 function between(source, start, end) {
@@ -30,8 +29,6 @@ try {
   assert(!hud.includes('IslandSuppressed'), 'Island must not suppress frozen controls');
   assert(hud.includes('const bool ShowFrozenText = g_Config.m_TcShowFrozenText > 0;'));
   assert(hud.includes('const bool ShowFrozenHud = g_Config.m_TcShowFrozenHud > 0;'));
-  assert(!/MACRO_CONFIG_INT\(TcFrozenTeesShowAll\s*,\s*tc_frozen_tees_showall/.test(config), 'native /showall has no user toggle');
-  assert(client.includes('const bool Requested = true;'), 'native /showall is requested automatically for full-distance snapshots');
   assert(hud.includes('ShowFrozenHud && !GameClient()->m_Scoreboard.IsActive() && !(LocalTeamID == 0 && g_Config.m_TcFrozenHudTeamOnly)'));
   const info = between(hud, 'void CHud::RenderTextInfo()', 'float CHud::FrozenHudRowY(');
   assert(info.includes('g_Config.m_TcNotifyWhenLastX / 100.0f') && info.includes('g_Config.m_TcNotifyWhenLastY / 100.0f'));

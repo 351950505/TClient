@@ -190,10 +190,10 @@ Count frozen tees
 == 显示冻结Tee数量
 
 Request full-distance tee status (native /showall)
-== 请求全距离Tee状态（原生 /showall）
+== 全图查看 Tee
 
-With tee icons or text enabled, requests /showall 1 once per connection on DDRace. Requires native /showall server support and may increase traffic. Other visibility limits still apply; not a confirmation. Disabling does not send /showall 0.
-== 启用Tee图标或文字时，在DDRace中每个连接尝试一次 /showall 1。需服务器支持原生 /showall，可能增加流量。其他可见性限制仍适用；不代表已确认生效。关闭不会发送 /showall 0。
+Ask supported DDRace servers for full-map Tee data; switching off does not retract a request already sent.
+== 向支持的 DDRace 服务器请求全图 Tee 数据；关闭不会撤回已发送的请求。
 
 Input
 == 输入
@@ -2304,8 +2304,6 @@ Progress for encountered skins: %d%% (%d requested)
 Active downloads: %d / 2   Ready: %d   Failed: %d
 == 正在下载：%d / 2　已就绪：%d　失败：%d
 
-Full-distance tee status is requested automatically once per connection (native /showall; requires server support)
-== 全距离 tee 状态会在每次连接时自动请求一次（原生 /showall；需要服务器支持）
 
 Linear visual interpolation
 == 线性视觉插值

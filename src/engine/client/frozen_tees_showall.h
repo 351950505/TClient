@@ -24,9 +24,8 @@ inline bool TcFrozenTeesEntitiesDDRace(int InfoExSize, int Version, int Flags, b
 	return (Flags & (GAMEINFOFLAG_GAMETYPE_DDRACE | GAMEINFOFLAG_GAMETYPE_DDNET)) != 0;
 }
 
-// One native /showall 1 attempt per EnterGame and per connection (always
-// requested on DDRace; there is no user option since 2026-11-19). This records
-// attempts, NOT server acknowledgement. Poll only on verified snapshots, not on
+// At most one opt-in /showall 1 attempt per EnterGame and per connection.
+// This records attempts, NOT server acknowledgement. Poll on verified snapshots, not on
 // rendered frames.
 class CFrozenTeesShowAll
 {

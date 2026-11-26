@@ -4,6 +4,8 @@
 
 本地正式包统一通过 `release_orchestrator.py run --spec <spec.json>` 生成。阶段顺序为 `preflight → mirror_probe → build → stage → package`；需要上传时再显式使用 `--publish`。下文 CI 与 `.55` 的例子保留作历史签名说明，不能替代本节镜像步骤。
 
+TClient 正式发布的 Windows EXE 不做 Authenticode 签名，发布规格使用 `signed_expected: false`。更新清单仍用 Ed25519 签名，更新 ZIP、helper 和六项正式附件照常校验大小及 SHA-256。
+
 发布阶段只接受正式六资产：`DDNet.exe`、`TClient-update-win64.zip`、`TClient-v<版本>-full-win64.zip`、`TClient-update-win64.json`、`TClient-update-win64.json.sig` 和 `TClientUpdater.exe`。已公开的同 tag Release 必须为 `draft=false`、`prerelease=false`，且其 ID 与 `GET /releases/latest` 返回的 ID 相同；检查通过后才继续验证 tag 和远端资产。新建 draft 必须在上传后校验六项远端资产，再发布；发布后还要确认 Release 为 stable 且为 `/releases/latest`，否则不报告成功。`--dry-run` 只运行 preflight，不创建工作目录或状态文件，也不获取发布凭据。
 
 `mirror_probe` 每次从 `https://github.akams.cn/` 获取当次目录，使用客户端的 User-Agent、IPv4、TLS 校验与重定向限制测试当时最新已发布的更新资产。先核对签名清单，再对候选源下载完整更新 ZIP、helper，并验证真实断点续传、大小与 SHA-256；按完整传输表现选出最多 5 个源。没有合格源时停止构建。

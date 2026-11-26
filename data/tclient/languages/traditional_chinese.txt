@@ -465,16 +465,13 @@ Count frozen tees
 == 
 
 Request full-distance tee status (native /showall)
-== 請求全距離Tee狀態（原生 /showall）
-
-Full-distance tee status is requested automatically once per connection (native /showall; requires server support)
-== 全距離 tee 狀態會在每次連線時自動請求一次（原生 /showall；需要伺服器支援）
+== 全圖查看 Tee
 
 Invite to your team
 == 邀請加入我的隊伍
 
-With tee icons or text enabled, requests /showall 1 once per connection on DDRace. Requires native /showall server support and may increase traffic. Other visibility limits still apply; not a confirmation. Disabling does not send /showall 0.
-== 啟用Tee圖示或文字時，在DDRace中每個連線嘗試一次 /showall 1。需伺服器支援原生 /showall，可能增加流量。其他可見性限制仍適用；不代表已確認生效。關閉不會傳送 /showall 0。
+Ask supported DDRace servers for full-map Tee data; switching off does not retract a request already sent.
+== 向支援的 DDRace 伺服器請求全圖 Tee 資料；關閉不會撤回已傳送的請求。
 
 Tile Outlines
 == 

@@ -1900,12 +1900,7 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 			GameClient()->m_Tooltips.DoToolTip(&s_CountFrozenText, &CheckBoxRect2, TCLocalize("Shows how many teammates are frozen instead of how many are alive."));
 		}
 	}
-	{
-		SLabelProperties Props;
-		Props.m_MaxWidth = Column.w;
-		Column.HSplitTop(LineSize * 2, &Label, &Column);
-		Ui()->DoLabel(&Label, TCLocalize("Full-distance tee status is requested automatically once per connection (native /showall; requires server support)"), FontSize, TEXTALIGN_TL, Props);
-	}
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesShowAll, TCLocalize("Request full-distance tee status (native /showall)"), &g_Config.m_TcFrozenTeesShowAll, &Column, LineSize);
 	s_SectionBoxes.back().h = Column.y - s_SectionBoxes.back().y;
 
 	// ***** Tile Outlines ***** //

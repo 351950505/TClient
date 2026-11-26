@@ -48,6 +48,7 @@ const SCheckBoxHelpEntry g_aCheckBoxHelp[] = {
 	{&g_Config.m_TcFrozenHudTeamOnly, "Show the panel only while in a team."},
 	{&g_Config.m_TcFrozenKatana, "Frozen players visibly hold a katana."},
 	{&g_Config.m_TcFrozenTeesAliveOnly, "List only unfrozen teammates in the panel."},
+	{&g_Config.m_TcFrozenTeesShowAll, "Ask supported DDRace servers for full-map Tee data; switching off does not retract a request already sent."},
 	{&g_Config.m_TcGradientClan, "Animate player clan names with the selected gradient; the Apply to setting determines whose clans change."},
 	{&g_Config.m_TcGradientEverything, "Apply the selected gradient to text without an explicit color; text with its own color is left unchanged."},
 	{&g_Config.m_TcGradientName, "Animate player names with the selected gradient; the Apply to setting determines whose names change."},

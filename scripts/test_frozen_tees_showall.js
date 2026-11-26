@@ -36,11 +36,12 @@ const sender = between(source, 'int CClient::SendMsg(int Conn', 'int CClient::Se
 assert(sender.indexOf('OnChatSent(') > sender.indexOf('if(!(Flags & MSGFLAG_NOSEND))'));
 assert(sender.includes('Unpacker.Reset(Pack.Data(), Pack.Size())') && sender.includes('protocol7::NETMSGTYPE_CL_SAY'));
 const config = read('src/engine/shared/config_variables_tclient.h');
-assert(!/MACRO_CONFIG_INT\(TcFrozenTeesShowAll\s*,\s*tc_frozen_tees_showall/.test(config), 'native /showall has no user setting');
-assert(update.includes('const bool Requested = true;'), 'full-distance status is requested automatically');
+assert.match(config, /MACRO_CONFIG_INT\(TcFrozenTeesShowAll\s*,\s*tc_frozen_tees_showall\s*,\s*0\s*,\s*0\s*,\s*1\s*,\s*CFGFLAG_CLIENT \| CFGFLAG_SAVE/, 'native /showall is opt-in and saved');
+assert(update.includes('const bool Requested = g_Config.m_TcFrozenTeesShowAll != 0;'), 'gate the request on the player setting');
 const menu = read('src/game/client/components/tclient/menus_tclient.cpp');
-const label = 'Full-distance tee status is requested automatically once per connection (native /showall; requires server support)';
-assert(menu.includes(`TCLocalize("${label}")`));
+const section = between(menu, 'TCLocalize("Frozen Tee Display")', '// ***** Tile Outlines ***** //');
+const label = 'Request full-distance tee status (native /showall)';
+assert(section.includes(`DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcFrozenTeesShowAll, TCLocalize("${label}"), &g_Config.m_TcFrozenTeesShowAll`), 'showall checkbox belongs in the TC Tee status section');
 for (const lang of ['simplified_chinese', 'traditional_chinese']) {
   const dictionary = read(`data/tclient/languages/${lang}.txt`);
   const matches = dictionary.split('\n').filter(line => line === label);
@@ -76,7 +77,7 @@ constexpr int CONN_MAIN=0, CONN_DUMMY=1, NUM_DUMMIES=2, MSGFLAG_VITAL=1, NETSTAT
 static int64_t Now=0; int64_t time_get() { return Now; } int64_t time_freq() { return 1000; }
 struct IClient { enum { STATE_OFFLINE=0, STATE_ONLINE=3, STATE_DEMOPLAYBACK=4 }; };
 struct CNetClient { int m_State=NETSTATE_ONLINE; int State() const { return m_State; } };
-struct Config { int m_TcShowFrozenHud=1, m_TcShowFrozenText=0;
+struct Config { int m_TcShowFrozenHud=1, m_TcShowFrozenText=0, m_TcFrozenTeesShowAll=0;
  int m_ClDummyDefaultEyes=0, m_ClPlayerDefaultEyes=0, m_ClEyeDuration=5; char m_ClRunOnJoin[100]=""; } g_Config;
 const char *str_find_nocase(const char *pHaystack, const char *pNeedle) {
  std::string H(pHaystack), N(pNeedle);
@@ -120,16 +121,15 @@ ${postConnect}
 ${send}
 ${update}
 void Check(bool Value, const char *pMessage) { if(!Value) { std::fprintf(stderr,"FAIL: %s\\n",pMessage); std::exit(1); } }
-void ResetConfig() { g_Config = Config(); }
+void ResetConfig() { g_Config = Config(); g_Config.m_TcFrozenTeesShowAll = 1; }
 int main() {
  for(bool Sixup : {false,true}) {
   g_Config=Config(); CClient Client; Client.m_Sixup=Sixup; Client.m_ServerCapabilities.m_ChatTimeoutCode=false; CSnapshot DDRace;
   Now=0; Client.OnPostConnect(0); Client.OnPostConnect(1);
   for(int Tick=0;Tick<30;++Tick){Now=Tick*1000;Client.UpdateFrozenTeesShowAll(0,&DDRace);Client.UpdateFrozenTeesShowAll(1,&DDRace);}
-  Check(Client.m_vAttempts.size()==2,"forced request sends once on each connection");
-  Check(Client.m_vAttempts[0].m_Text=="/showall 1" && Client.m_vAttempts[1].m_Text=="/showall 1","forced request uses native command");
+  Check(Client.m_vAttempts.empty(),"default off sends nothing on either connection");
  }
- std::puts("PASS forced /showall: native 0.6/0.7 and both connections request once");
+ std::puts("PASS default-off /showall on 0.6/0.7 and on both connections");
  // Exact CGameClient applicability precedence, including truncated old objects.
  Check(TcFrozenTeesEntitiesDDRace(12,2,GAMEINFOFLAG_ENTITIES_DDRACE,false),"explicit positive entity flags");
  Check(!TcFrozenTeesEntitiesDDRace(12,2,GAMEINFOFLAG_GAMETYPE_DDRACE,true),"explicit negative entity flags override fallback");
@@ -168,13 +168,15 @@ int main() {
  Check(C.m_vAttempts.size()==1 && C.m_vAttempts.back().m_Conn==0,"inactive negative gate independent of main");
  C.UpdateFrozenTeesShowAll(1,&Yes); Check(C.m_vAttempts.size()==2 && C.m_vAttempts.back().m_Conn==1,"dummy can become applicable");
  std::puts("PASS independent Conn applicability without timeout capability");
- ResetConfig(); CClient Late; Now=0; Late.OnPostConnect(0); Now=3000;
- Late.UpdateFrozenTeesShowAll(0,&Yes); Check(Late.m_vAttempts.size()==2 && Late.m_vAttempts.back().m_Text=="/showall 1","automatic request is independent of HUD visibility");
- g_Config.m_TcShowFrozenHud=0; Late.UpdateFrozenTeesShowAll(0,&Yes); Check(Late.m_vAttempts.size()==2,"hiding the HUD does not send showall zero or repeat the request");
- g_Config.m_TcShowFrozenText=2; Late.UpdateFrozenTeesShowAll(0,&Yes); Check(Late.m_vAttempts.size()==2,"enabling text does not repeat the connection request");
+ g_Config=Config(); CClient Late; Now=0; Late.OnPostConnect(0); Now=3000;
+ Late.UpdateFrozenTeesShowAll(0,&Yes); Check(Late.m_vAttempts.size()==1,"default off preserves the existing timeout command without showall");
+ g_Config.m_TcShowFrozenHud=0; g_Config.m_TcShowFrozenText=0; g_Config.m_TcFrozenTeesShowAll=1;
+ Late.UpdateFrozenTeesShowAll(0,&Yes); Check(Late.m_vAttempts.size()==2 && Late.m_vAttempts.back().m_Text=="/showall 1","enabling mid-connection works independently of the HUD");
+ g_Config.m_TcFrozenTeesShowAll=0; Late.UpdateFrozenTeesShowAll(0,&Yes); Check(Late.m_vAttempts.size()==2,"disabling does not send showall zero");
+ g_Config.m_TcFrozenTeesShowAll=1; Late.UpdateFrozenTeesShowAll(0,&Yes); Check(Late.m_vAttempts.size()==2,"re-enabling does not repeat the same connection request");
  Late.m_aFrozenTeesShowAll[0].Reset(); Late.OnPostConnect(0); Now=5000; Late.UpdateFrozenTeesShowAll(0,&Yes);
  Check(Late.m_vAttempts.size()==4,"new entry re-arms just this connection");
- std::puts("PASS automatic request, HUD visibility independence and reconnect reset");
+ std::puts("PASS live opt-in, turning off without a server command, and reconnect reset");
  ResetConfig(); CClient Busy; Now=0; Busy.OnPostConnect(0); Busy.UpdateFrozenTeesShowAll(0,&Yes);
  for(int Index=1;Index<=15;++Index) { Now=Index*1000; Busy.SendChatCommand(0,"/user-command"); Busy.UpdateFrozenTeesShowAll(0,&Yes); }
  Now=100000; Busy.UpdateFrozenTeesShowAll(0,&Yes); Check(Busy.m_vAttempts.size()==16,"bounded busy-chat window expires");

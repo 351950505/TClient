@@ -26,7 +26,7 @@ let m;
 while((m = ENTRY_RE.exec(HELP_CPP)))
 	entries.push({ name: m[1], help: m[2].replace(/\\"/g, '"').replace(/\\\\/g, '\\') });
 
-expect(entries.length === 141, `帮助表条目数应为 141，实际为 ${entries.length}`);
+expect(entries.length === 142, `帮助表条目数应为 142，实际为 ${entries.length}`);
 expect(entries.length === [...new Set(entries.map(e => e.name))].length, '帮助表存在重复配置项条目');
 
 // ---- 词典（data/tclient/languages，格式：可选 [context] 段 + 英文行 + "== 译文"）----

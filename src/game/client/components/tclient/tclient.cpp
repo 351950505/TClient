@@ -2049,6 +2049,11 @@ bool CTClient::IsGoresGameMode() const
 	return pGameType != nullptr && pGameType[0] != '\0' && str_find_nocase(pGameType, "gores") != nullptr;
 }
 
+bool CTClient::IsMapProgressEnabled() const
+{
+	return g_Config.m_TcMapProgress != 0 && IsGoresGameMode();
+}
+
 namespace
 {
 	bool IsMapProgressWaterImage(const char *pImageName)

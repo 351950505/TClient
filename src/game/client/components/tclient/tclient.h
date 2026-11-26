@@ -233,7 +233,7 @@ public:
 
 	// 落水榜：服务器声明的 Gores 模式才生效，Team 0 是否计入由配置决定。
 	bool IsGoresGameMode() const;
-	bool IsMapProgressEnabled() const { return g_Config.m_TcMapProgress != 0 && IsGoresGameMode(); }
+	bool IsMapProgressEnabled() const;
 	bool IsDrownBoardMode() const { return IsGoresGameMode(); }
 	// Conn is a dummy index; -1 uses the active dummy and resolves its followed target.
 	TClientMapProgress::SEstimate MapProgressEstimate(int Conn = -1) const;

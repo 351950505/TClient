@@ -2114,35 +2114,24 @@ Map
 Map progress
 == 终点进度
 
-Show estimated finish percentage below the drown board
-== 在落水榜下方显示预估终点百分比
+[Map progress]
+Finish
+== 完赛
 
-Also show the percentage inside the Dynamic Island
-== 也在灵动岛内部显示百分比
+Show estimated finish percentage
+== 显示预估终点百分比
 
-Also show the percentage inside the Dynamic Island.
-== 开启灵动岛且有进度估算时，也在岛内显示百分比。
+Use the Dynamic Island instead of the HUD
+== 改为在灵动岛显示
 
-Map progress percentage color
-== 终点百分比颜色
-
-Fallback percentage width
-== 回退百分比宽度
-
-Fallback percentage height
-== 回退百分比字号
-
-Fallback horizontal position
-== 回退水平位置
-
-Fallback vertical position
-== 回退垂直位置
+Show progress in the Dynamic Island instead of at the bottom right. If the island is off or unsupported, show it at the bottom right.
+== 进度改在灵动岛显示。如果灵动岛关闭或不支持，进度仍显示在右下角。
 
 Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available.
 == 终点进度在 Gores 和 DDRace 地图上由本地估算；路线尚不可用时会显示未知。
 
-Show the estimated finish percentage below the drown board on Gores and DDRace maps.
-== 在支持的地图上显示预计完赛百分比；落水榜下方有空间时显示在那里，否则单独显示。
+Show the estimated finish percentage in only one place at a time: at the bottom right or in the Dynamic Island.
+== 同一时间只在一个位置显示预估终点进度：右下角或灵动岛。
 
 Freezes
 == 落水次数
@@ -2779,3 +2768,9 @@ Stack Tee
 
 Stack Tee hint toggle key
 == 叠 Tee 提示按键
+
+Weapon switching
+== 武器切换
+
+Hammer / gun toggle
+== 锤子 / 手枪切换键

@@ -239,6 +239,11 @@ def release_cmake_configure_command(cmake, repo, build_dir):
     return [str(cmake), "-S", str(repo), "-B", str(build_dir), "-DTCLIENT_RELEASE_MIRRORS=ON", "-DVULKAN=ON"]
 
 
+def release_cmake_build_command(cmake, build_dir):
+    return [str(cmake), "--build", str(build_dir), "--config", "Release", "--target", "game-client", "TClientUpdater",
+            "testrunner", "--parallel", "2", "--", "/p:CL_MPCount=1"]
+
+
 def phase_build(spec, paths, state):
     cmake = Path("C:/VS2026/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe")
     require(cmake.is_file(), "VS2026 cmake not found")
@@ -247,7 +252,7 @@ def phase_build(spec, paths, state):
     subprocess.run(release_cmake_configure_command(cmake, spec["repo"], build_dir), check=True, timeout=600)
     cache = (build_dir / "CMakeCache.txt").read_text(encoding="utf-8-sig")
     require(re.search(r"^VULKAN:BOOL=ON$", cache, re.M), "release build did not enable the Vulkan backend")
-    subprocess.run([str(cmake), "--build", str(build_dir), "--config", "Release", "--target", "game-client", "TClientUpdater", "testrunner", "--parallel"], check=True, timeout=3600)
+    subprocess.run(release_cmake_build_command(cmake, build_dir), check=True, timeout=3600)
     repo = Path(spec["repo"])
     libs = repo / "ddnet-libs"
     env = dict(os.environ)

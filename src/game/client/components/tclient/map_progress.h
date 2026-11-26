@@ -49,6 +49,17 @@ namespace TClientMapProgress
 	// The largest tracked fixture is 243100 tiles. Keep per-field queues at 2 nodes/tile;
 	// six simultaneous fields plus a worst-case index-vector allowance stay below 160 MiB.
 	constexpr int MAP_PROGRESS_MAX_TILES = 512 * 512;
+	constexpr int MAP_PROGRESS_SCAN_BUDGET = 4096;
+	constexpr int MAP_PROGRESS_IMAGE_SCAN_BUDGET = 64;
+	constexpr int MAP_PROGRESS_DIJKSTRA_BUDGET = 2048;
+
+	inline int ShareMapProgressBudget(int Budget, int SlotsRemaining)
+	{
+		if(Budget <= 0 || SlotsRemaining <= 0)
+			return 0;
+		return Budget / SlotsRemaining + (Budget % SlotsRemaining != 0);
+	}
+
 	constexpr std::size_t MAP_PROGRESS_MAX_ADDITIONAL_BYTES = 160 * 1024 * 1024;
 	constexpr std::size_t MAP_PROGRESS_MAX_FIELDS = 6; // 3 tracked players x global + checkpoint field
 	constexpr std::size_t MAP_PROGRESS_QUEUE_NODES_PER_TILE = 2;
@@ -664,5 +675,6 @@ public:
 	}
 };
 }
+
 
 #endif // GAME_CLIENT_COMPONENTS_TCLIENT_MAP_PROGRESS_H

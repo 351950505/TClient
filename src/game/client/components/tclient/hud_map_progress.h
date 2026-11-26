@@ -27,51 +27,62 @@
 #ifndef GAME_CLIENT_COMPONENTS_TCLIENT_HUD_MAP_PROGRESS_H
 #define GAME_CLIENT_COMPONENTS_TCLIENT_HUD_MAP_PROGRESS_H
 
-#include <game/client/ui_rect.h>
+#include <base/detect.h>
 
 #include <algorithm>
 
 namespace TClientHudMapProgress
 {
-	inline bool ShouldShowIslandValue(bool Enabled, int Style, bool IslandEnabled, bool HasProgress)
+#if defined(CONF_FAMILY_WINDOWS) && __has_include(<winrt/Windows.Media.Control.h>)
+	inline constexpr bool DYNAMIC_ISLAND_AVAILABLE = true;
+#else
+	inline constexpr bool DYNAMIC_ISLAND_AVAILABLE = false;
+#endif
+
+	inline bool ShouldReserveIslandValue(bool Enabled, int Style, bool IslandEnabled, bool IslandAvailable)
 	{
-		return Enabled && Style == 1 && IslandEnabled && HasProgress;
+		return Enabled && Style == 1 && IslandEnabled && IslandAvailable;
 	}
 
-	struct SFallbackTextLayout
+	inline bool ShouldShowIslandValue(bool Enabled, int Style, bool IslandEnabled, bool HasProgress, bool IslandAvailable)
 	{
-		CUIRect m_Text{};
-		float m_FontSize = 0.0f;
-	};
-
-	inline SFallbackTextLayout FallbackTextLayout(float HudWidth, float HudHeight, float WidthPercent, float Size, float PositionXPercent, float PositionYPercent)
-	{
-		SFallbackTextLayout Result;
-		const float TextWidth = std::clamp(HudWidth * std::clamp(WidthPercent / 100.0f, 0.10f, 0.80f), 80.0f, std::max(80.0f, HudWidth - 12.0f));
-		Result.m_FontSize = std::clamp(std::clamp(Size, 1.0f, 50.0f) * 0.72f, 6.0f, 16.0f);
-		const float RawX = HudWidth * std::clamp(PositionXPercent / 100.0f, 0.0f, 1.0f) - TextWidth * 0.5f;
-		const float AnchorY = HudHeight * std::clamp(PositionYPercent / 100.0f, 0.0f, 1.0f);
-		const float X = std::round(std::clamp(RawX, 6.0f, std::max(6.0f, HudWidth - TextWidth - 6.0f)));
-		const float Gap = std::clamp(Size * 0.35f, 2.0f, 8.0f);
-		const float Y = std::round(std::clamp(AnchorY - Result.m_FontSize - Gap, 2.0f, std::max(2.0f, HudHeight - Result.m_FontSize - 2.0f)));
-		Result.m_Text = {X, Y, TextWidth, Result.m_FontSize};
-		return Result;
+		return ShouldReserveIslandValue(Enabled, Style, IslandEnabled, IslandAvailable) && HasProgress;
 	}
 
-	inline constexpr float BOARD_VALUE_GAP = 2.0f;
-	inline constexpr float BOARD_VALUE_HEIGHT = 6.0f;
-	inline constexpr float BOARD_VALUE_BOTTOM_PADDING = 2.0f;
-
-	inline bool HasRoomBelowBoard(const CUIRect &Board, float SafeBottom)
+	inline bool ShouldShowStandaloneValue(bool Enabled, int Style, bool IslandEnabled, bool IslandAvailable)
 	{
-		return Board.w > 0.0f && Board.h > 0.0f &&
-			Board.y + Board.h + BOARD_VALUE_GAP + BOARD_VALUE_HEIGHT + BOARD_VALUE_BOTTOM_PADDING <= SafeBottom;
+		return Enabled && !(Style == 1 && IslandEnabled && IslandAvailable);
 	}
 
-	inline CUIRect BoardValue(const CUIRect &Board)
+	inline constexpr float MOVEMENT_INFORMATION_BOX_WIDTH = 62.0f;
+	inline constexpr float MAP_PROGRESS_HUD_MAX_WIDTH = 25.0f;
+	inline constexpr float MAP_PROGRESS_HUD_HEIGHT = 5.5f;
+	inline constexpr float MAP_PROGRESS_HUD_GAP = 2.0f;
+	inline constexpr float MAP_PROGRESS_HUD_FONT_SIZE = 4.5f;
+	inline constexpr float LABEL_SCALE = 0.70f;
+	inline constexpr float LABEL_GAP = 0.85f;
+	inline constexpr float MINI_DEBUG_TEXT_HEIGHT = 11.0f;
+
+	inline float StandaloneHudStackOffset(bool Visible)
 	{
-		const float ValueWidth = std::min(Board.w, 40.0f);
-		return {Board.x + (Board.w - ValueWidth) * 0.5f, Board.y + Board.h + BOARD_VALUE_GAP, ValueWidth, BOARD_VALUE_HEIGHT};
+		// The reference layout lifts the board by 36 px at a HUD height of 300 / 1056.
+		return Visible ? MAP_PROGRESS_HUD_HEIGHT + MAP_PROGRESS_HUD_GAP + 2.5f : 0.0f;
+	}
+
+	inline float ReadoutFit(float TextWidth)
+	{
+		const float Available = MAP_PROGRESS_HUD_MAX_WIDTH - LABEL_GAP;
+		return TextWidth > Available ? Available / TextWidth : 1.0f;
+	}
+
+	inline float MapProgressHudTop(float MovementInformationTop)
+	{
+		return MovementInformationTop - MAP_PROGRESS_HUD_GAP - MAP_PROGRESS_HUD_HEIGHT;
+	}
+
+	inline float MiniDebugCoordinateOffsetY(bool HasDDraceOffset, bool HasHealthAmmoOffset)
+	{
+		return 3.0f + (HasDDraceOffset ? 50.0f : HasHealthAmmoOffset ? 27.0f : 0.0f);
 	}
 
 	struct SIslandValueLayout
@@ -82,9 +93,14 @@ namespace TClientHudMapProgress
 		bool m_Visible = false;
 	};
 
-	inline float IslandValueCellWidth(float ValueWidth, float Padding)
+	inline float IslandValueContentWidth(float ValueWidth, float IconWidth, float IconGap)
 	{
-		return ValueWidth + 2.0f * Padding;
+		return ValueWidth + (IconWidth > 0.0f ? IconWidth + IconGap : 0.0f);
+	}
+
+	inline float IslandValueCellWidth(float ContentWidth, float Padding)
+	{
+		return ContentWidth + 2.0f * Padding;
 	}
 
 	inline SIslandValueLayout IslandValueLayout(float CellX, float CellY, float CellWidth, float CellHeight, float ValueWidth, float FontSize, float Padding)

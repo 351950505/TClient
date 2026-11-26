@@ -2932,6 +2932,7 @@ if(CLIENT)
     components/tclient/lyric_parser.cpp
     components/tclient/lyric_parser.h
     components/tclient/map_progress.h
+    components/tclient/me_binds.h
     components/tclient/menus_tclient.cpp
     components/tclient/menus_tclient_assets.cpp
     components/tclient/mod.cpp
@@ -3798,6 +3799,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     tclient_hud_map_progress_test.cpp
     tclient_jitter_buffer_test.cpp
     tclient_map_progress_test.cpp
+    tclient_me_binds_test.cpp
     tclient_relay_test.cpp
     tclient_skinprofiles_test.cpp
     tclient_stack_tee_hint_test.cpp

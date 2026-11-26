@@ -24,6 +24,7 @@
 #include <game/client/components/sounds.h>
 #include <game/client/components/tclient/bindchat.h>
 #include <game/client/components/tclient/bindwheel.h>
+#include <game/client/components/tclient/me_binds.h>
 #include <game/client/components/tclient/stack_tee_hint.h>
 #include <game/client/components/tclient/trails.h>
 #include <game/client/gameclient.h>
@@ -4466,20 +4467,10 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
 	Ui()->DoLabel(&Label, TCLocalize("Map progress"), HeadlineFontSize, TEXTALIGN_ML);
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
-	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgress, TCLocalize("Show estimated finish percentage below the drown board"), &g_Config.m_TcMapProgress, &LeftView, LineSize);
+	DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgress, TCLocalize("Show estimated finish percentage"), &g_Config.m_TcMapProgress, &LeftView, LineSize);
 	if(g_Config.m_TcMapProgress)
 	{
-		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgressStyle, TCLocalize("Also show the percentage inside the Dynamic Island"), &g_Config.m_TcMapProgressStyle, &LeftView, LineSize);
-		static CButtonContainer s_MapProgressColor;
-		DoLine_ColorPicker(&s_MapProgressColor, ColorPickerLineSize, ColorPickerLabelSize, ColorPickerLineSpacing, &LeftView, TCLocalize("Map progress percentage color"), &g_Config.m_TcMapProgressColor, color_cast<ColorRGBA>(ColorHSLA(DefaultConfig::TcMapProgressColor)), false);
-		LeftView.HSplitTop(LineSize, &Button, &LeftView);
-		Ui()->DoScrollbarOption(&g_Config.m_TcMapProgressWidth, &g_Config.m_TcMapProgressWidth, &Button, TCLocalize("Fallback percentage width"), 10, 80, &CUi::ms_LinearScrollbarScale, 0, "%");
-		LeftView.HSplitTop(LineSize, &Button, &LeftView);
-		Ui()->DoScrollbarOption(&g_Config.m_TcMapProgressHeight, &g_Config.m_TcMapProgressHeight, &Button, TCLocalize("Fallback percentage height"), 6, 30, &CUi::ms_LinearScrollbarScale, 0, "");
-		LeftView.HSplitTop(LineSize, &Button, &LeftView);
-		Ui()->DoScrollbarOption(&g_Config.m_TcMapProgressX, &g_Config.m_TcMapProgressX, &Button, TCLocalize("Fallback horizontal position"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
-		LeftView.HSplitTop(LineSize, &Button, &LeftView);
-		Ui()->DoScrollbarOption(&g_Config.m_TcMapProgressY, &g_Config.m_TcMapProgressY, &Button, TCLocalize("Fallback vertical position"), 0, 100, &CUi::ms_LinearScrollbarScale, 0, "%");
+		DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgressStyle, TCLocalize("Use the Dynamic Island instead of the HUD"), &g_Config.m_TcMapProgressStyle, &LeftView, LineSize);
 		LeftView.HSplitTop(LineSize, &Label, &LeftView);
 		Ui()->DoLabel(&Label, TCLocalize("Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available."), EditBoxFontSize, TEXTALIGN_TL);
 	}
@@ -4490,9 +4481,16 @@ void CMenus::RenderSettingsMe(CUIRect MainView)
 	Ui()->DoLabel(&Label, TCLocalize("Quick zoom"), HeadlineFontSize, TEXTALIGN_ML);
 	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
 	static CButtonContainer s_QuickZoomReaderButton, s_QuickZoomClearButton;
-	DoLine_KeyReader(LeftView, s_QuickZoomReaderButton, s_QuickZoomClearButton, TCLocalize("Quick zoom key (press to toggle, press again to restore)"), "tc_quick_zoom");
+	DoLine_KeyReader(LeftView, s_QuickZoomReaderButton, s_QuickZoomClearButton, TCLocalize("Quick zoom key (press to toggle, press again to restore)"), tclient_me_binds::QUICK_ZOOM);
 	LeftView.HSplitTop(LineSize, &Button, &LeftView);
 	DoSliderFloat(&g_Config.m_TcQuickZoom, &g_Config.m_TcQuickZoom, &Button, TCLocalize("Quick zoom target"), 0.0f, 20.0f, 0.1f, "");
+
+	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);
+	LeftView.HSplitTop(HeadlineHeight, &Label, &LeftView);
+	Ui()->DoLabel(&Label, TCLocalize("Weapon switching"), HeadlineFontSize, TEXTALIGN_ML);
+	LeftView.HSplitTop(MarginSmall, nullptr, &LeftView);
+	static CButtonContainer s_HammerGunReaderButton, s_HammerGunClearButton;
+	DoLine_KeyReader(LeftView, s_HammerGunReaderButton, s_HammerGunClearButton, TCLocalize("Hammer / gun toggle"), tclient_me_binds::HAMMER_GUN);
 
 	// 观战选择器好友分列（学习 QmClient）
 	LeftView.HSplitTop(MarginBetweenSections, nullptr, &LeftView);

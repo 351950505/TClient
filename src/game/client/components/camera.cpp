@@ -11,6 +11,7 @@
 
 #include <engine/shared/config.h>
 
+#include <game/client/components/tclient/me_binds.h>
 #include <game/client/gameclient.h>
 #include <game/collision.h>
 #include <game/localization.h>
@@ -425,7 +426,7 @@ void CCamera::OnConsoleInit()
 	Console()->Register("zoom+", "?f[amount]", CFGFLAG_CLIENT, ConZoomPlus, this, "Zoom increase");
 	Console()->Register("zoom-", "?f[amount]", CFGFLAG_CLIENT, ConZoomMinus, this, "Zoom decrease");
 	Console()->Register("zoom", "?f", CFGFLAG_CLIENT, ConZoom, this, "Change zoom");
-	Console()->Register("tc_quick_zoom", "", CFGFLAG_CLIENT, ConQuickZoom, this, "一键缩放：切到 tc_quick_zoom_level，再按一次恢复");
+	Console()->Register(tclient_me_binds::QUICK_ZOOM, "", CFGFLAG_CLIENT, ConQuickZoom, this, "一键缩放：切到 tc_quick_zoom_level，再按一次恢复");
 	Console()->Register("set_view", "i[x]i[y]", CFGFLAG_CLIENT, ConSetView, this, "Set camera position to x and y in the map");
 	Console()->Register("set_view_relative", "i[x]i[y]", CFGFLAG_CLIENT, ConSetViewRelative, this, "Set camera position relative to current view in the map");
 	Console()->Register("goto_switch", "i[number]?i[offset]", CFGFLAG_CLIENT, ConGotoSwitch, this, "View switch found (at offset) with given number");

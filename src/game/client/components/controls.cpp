@@ -16,7 +16,9 @@
 #include <game/client/components/chat.h>
 #include <game/client/components/menus.h>
 #include <game/client/components/scoreboard.h>
+#include <game/client/components/tclient/me_binds.h>
 #include <game/client/gameclient.h>
+#include <game/client/prediction/entities/character.h>
 #include <game/collision.h>
 
 #include <algorithm>
@@ -129,6 +131,30 @@ void CControls::ConKeyInputNextPrevWeapon(IConsole::IResult *pResult, void *pUse
 	pSet->m_pControls->m_aInputData[g_Config.m_ClDummy].m_WantedWeapon = 0;
 }
 
+void CControls::ConToggleHammerGun(IConsole::IResult *pResult, void *pUserData)
+{
+	CControls *pSelf = static_cast<CControls *>(pUserData);
+	CGameClient *pGameClient = pSelf->GameClient();
+	const auto &Snap = pGameClient->m_Snap;
+	const int Dummy = g_Config.m_ClDummy;
+	if(pSelf->Client()->State() != IClient::STATE_ONLINE || !Snap.m_pLocalCharacter ||
+		pGameClient->m_Spectator.IsActive() || Snap.m_LocalClientId != pGameClient->m_aLocalIds[Dummy])
+		return;
+
+	int CurrentWeapon = Snap.m_pLocalCharacter->m_Weapon;
+	if(CurrentWeapon != WEAPON_NINJA && pGameClient->Predict() && pGameClient->AntiPingGunfire() &&
+		pGameClient->m_PredictedWorld.GameTick() >= pSelf->Client()->GameTick(Dummy))
+	{
+		if(const CCharacter *pCharacter = pGameClient->m_PredictedWorld.GetCharacterById(Snap.m_LocalClientId))
+		{
+			const int PredictedWeapon = pCharacter->GetActiveWeapon();
+			if(PredictedWeapon >= 0 && PredictedWeapon < NUM_WEAPONS)
+				CurrentWeapon = PredictedWeapon;
+		}
+	}
+	pSelf->m_aInputData[Dummy].m_WantedWeapon = tclient_me_binds::HammerGunInput(CurrentWeapon);
+}
+
 void CControls::OnConsoleInit()
 {
 	// game commands
@@ -177,6 +203,7 @@ void CControls::OnConsoleInit()
 		static CInputSet s_Set = {this, {&m_aInputData[0].m_WantedWeapon, &m_aInputData[1].m_WantedWeapon}, 5};
 		Console()->Register("+weapon5", "", CFGFLAG_CLIENT, ConKeyInputSet, &s_Set, "Switch to laser");
 	}
+	Console()->Register(tclient_me_binds::HAMMER_GUN, "", CFGFLAG_CLIENT, ConToggleHammerGun, this, "Toggle between hammer and gun");
 
 	{
 		static CInputSet s_Set = {this, {&m_aInputData[0].m_NextWeapon, &m_aInputData[1].m_NextWeapon}, 0};

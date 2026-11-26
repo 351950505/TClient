@@ -13,6 +13,7 @@
 
 #include <game/client/components/chat.h>
 #include <game/client/components/console.h>
+#include <game/client/components/tclient/me_binds.h>
 #include <game/client/gameclient.h>
 
 static constexpr LOG_COLOR BIND_PRINT_COLOR{255, 255, 204};
@@ -127,13 +128,26 @@ bool CBinds::OnInput(const IInput::CEvent &Event)
 
 	if(Event.m_Flags & IInput::FLAG_PRESS)
 	{
+		const bool Repeat = (Event.m_Flags & IInput::FLAG_REPEAT) != 0;
 		auto ActiveBind = std::find_if(m_vActiveBinds.begin(), m_vActiveBinds.end(), [&](const CBindSlot &Bind) {
 			return Event.m_Key == Bind.m_Key;
 		});
+		if(!Repeat && ActiveBind != m_vActiveBinds.end())
+		{
+			const char *pBind = m_aapKeyBindings[ActiveBind->m_ModifierMask][ActiveBind->m_Key];
+			if(pBind && !tclient_me_binds::ShouldExecute(pBind, true))
+			{
+				// The editor may have received the release instead of the game.
+				m_vActiveBinds.erase(ActiveBind);
+				ActiveBind = m_vActiveBinds.end();
+			}
+		}
 		if(ActiveBind == m_vActiveBinds.end())
 		{
 			const auto &&OnKeyPress = [&](int Mask) {
 				const char *pBind = m_aapKeyBindings[Mask][Event.m_Key];
+				if(!tclient_me_binds::ShouldExecute(pBind, Repeat))
+					return;
 				if(g_Config.m_ClSubTickAiming)
 				{
 					if(str_comp("+fire", pBind) == 0 || str_comp("+hook", pBind) == 0)
@@ -162,10 +176,11 @@ bool CBinds::OnInput(const IInput::CEvent &Event)
 		{
 			// Repeat active bind while key is held down
 			// Have to check for nullptr again because the previous execute can unbind itself
-			if(m_aapKeyBindings[ActiveBind->m_ModifierMask][ActiveBind->m_Key])
+			const char *pBind = m_aapKeyBindings[ActiveBind->m_ModifierMask][ActiveBind->m_Key];
+			if(pBind && tclient_me_binds::ShouldExecute(pBind, true))
 			{
 				// Copy the bind: executing it can unbind/replace itself.
-				const std::string Bind = m_aapKeyBindings[ActiveBind->m_ModifierMask][ActiveBind->m_Key];
+				const std::string Bind = pBind;
 				Console()->ExecuteLineStroked(1, Bind.c_str(), IConsole::CLIENT_ID_UNSPECIFIED);
 			}
 			Handled = true;

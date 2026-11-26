@@ -25,6 +25,7 @@
 
 #include <engine/client/link_probe.h>
 #include <engine/engine.h>
+#include <engine/font_icons.h>
 #include <engine/graphics.h>
 #include <engine/http.h>
 #include <engine/shared/config.h>
@@ -32,7 +33,10 @@
 #include <engine/shared/json.h>
 #include <engine/textrender.h>
 
+#include <game/client/components/tclient/hud_map_progress.h>
+#include <game/client/components/tclient/modern_ui.h>
 #include <game/client/gameclient.h>
+#include <game/client/ui.h>
 #include <game/localization.h>
 
 // stb_image: single-header decoder for PNG/JPEG/etc. Used for album covers
@@ -85,6 +89,10 @@ public:
 	IEngine *m_pEngine = nullptr;
 	IGraphics *m_pGraphics = nullptr;
 	ITextRender *m_pTextRender = nullptr;
+	CCachedText m_MapProgressText;
+	CCachedText m_MapProgressIcon;
+	std::string m_MapProgressFontFace;
+	int m_MapProgressFontSize = -1;
 
 	// lyric marquee scroll state
 	std::string m_LastScrollText;
@@ -122,6 +130,7 @@ public:
 	public:
 		char m_aText[24] = "";
 		float m_Size = -1.0f;
+		EFontPreset m_FontPreset = EFontPreset::DEFAULT_FONT;
 		// TextWidth 内部还会乘一次 tc_font_size/100(见 text.cpp 的 AppendTextContainer)，
 		// 所以字号 cvar 也要进键，否则玩家改了全局字号后缓存宽度会失真。
 		int m_FontSize = -1;
@@ -150,6 +159,19 @@ public:
 #if defined(CONF_FAMILY_WINDOWS)
 		CloseIslandMap();
 #endif
+	}
+
+	void ResetMapProgressTextCache()
+	{
+		if(m_MapProgressFontSize < 0)
+			return;
+		if(m_pTextRender)
+		{
+			m_MapProgressIcon.Reset(m_pTextRender);
+			m_MapProgressText.Reset(m_pTextRender);
+		}
+		m_MapProgressFontFace.clear();
+		m_MapProgressFontSize = -1;
 	}
 
 	struct STrack
@@ -3381,7 +3403,7 @@ public:
 	// 常量("00:00"、"↑~999.9k"…)、要么来自有界集合(计时器 %02d:%02d)，而字号只在
 	// Scale/字号 cvar 变化时才变；字体变化时先清表，再按 (文本, 字号) 匹配。
 	// 表满后按轮转位覆盖，计时器短串也能复用。
-	float MeasureCached(ITextRender *pTextRender, float Size, const char *pText)
+	float MeasureCached(ITextRender *pTextRender, float Size, const char *pText, EFontPreset FontPreset = EFontPreset::DEFAULT_FONT)
 	{
 		if(!pText || pText[0] == '\0')
 			return 0.0f;
@@ -3402,10 +3424,20 @@ public:
 		const int FontSize = g_Config.m_TcFontSize;
 		for(int i = 0; i < m_TextWidthCacheCount; i++)
 		{
-			if(m_aTextWidthCache[i].m_Size == Size && m_aTextWidthCache[i].m_FontSize == FontSize && str_comp(m_aTextWidthCache[i].m_aText, pText) == 0)
+			if(m_aTextWidthCache[i].m_Size == Size && m_aTextWidthCache[i].m_FontSize == FontSize &&
+				m_aTextWidthCache[i].m_FontPreset == FontPreset && str_comp(m_aTextWidthCache[i].m_aText, pText) == 0)
+			{
+				if(FontPreset == EFontPreset::ICON_FONT)
+					pTextRender->SetFontPreset(EFontPreset::DEFAULT_FONT);
 				return m_aTextWidthCache[i].m_Width;
+			}
 		}
+		if(FontPreset == EFontPreset::ICON_FONT)
+			pTextRender->SetFontPreset(FontPreset);
 		const float Width = pTextRender->TextWidth(Size, pText);
+		if(FontPreset == EFontPreset::ICON_FONT)
+			pTextRender->SetFontPreset(EFontPreset::DEFAULT_FONT);
+
 		if(str_length(pText) < (int)sizeof(m_aTextWidthCache[0].m_aText))
 		{
 			int Slot;
@@ -3417,6 +3449,7 @@ public:
 			str_copy(Entry.m_aText, pText);
 			Entry.m_Size = Size;
 			Entry.m_FontSize = FontSize;
+			Entry.m_FontPreset = FontPreset;
 			Entry.m_Width = Width;
 		}
 		return Width;
@@ -3728,9 +3761,17 @@ public:
 	void Render(CUIRect &OccupiedRect)
 	{
 		if(m_pClient->State() != IClient::STATE_ONLINE && m_pClient->State() != IClient::STATE_DEMOPLAYBACK)
+		{
+			ResetMapProgressTextCache();
 			return;
+		}
 		if(!g_Config.m_TcIslandEnable)
+		{
+			ResetMapProgressTextCache();
 			return;
+		}
+
+		m_pTextRender->SetFontPreset(EFontPreset::DEFAULT_FONT);
 
 		// 灵动岛独立字体：tc_island_font 非空时临时切换默认 face，画完立刻恢复全局
 		// 自定义字体。SetCustomFace 改的是 glyph map 的全局默认 face，只在本次 Render
@@ -3884,10 +3925,16 @@ public:
 		}
 		const float GameTextOffset = (ShowGameTime && aGameTime[5] == '\0') ? (GameW - GameTextW) * 0.5f : 0.0f;
 		float MapProgressValue = 0.0f;
-		const bool ShowMapProgressValue = m_pGameClient && m_pGameClient->m_Hud.GetMapProgressIslandValue(g_Config.m_ClDummy, MapProgressValue);
+		const bool ShowMapProgressSlot = TClientHudMapProgress::ShouldReserveIslandValue(
+			g_Config.m_TcMapProgress != 0, g_Config.m_TcMapProgressStyle, g_Config.m_TcIslandEnable != 0,
+			TClientHudMapProgress::DYNAMIC_ISLAND_AVAILABLE);
+		const bool HasMapProgressValue = ShowMapProgressSlot && m_pGameClient &&
+			 m_pGameClient->m_Hud.GetMapProgressIslandValue(g_Config.m_ClDummy, MapProgressValue);
 		char aMapProgress[16];
-		if(ShowMapProgressValue)
+		if(HasMapProgressValue)
 			str_format(aMapProgress, sizeof(aMapProgress), "%.1f%%", MapProgressValue * 100.0f);
+		else
+			str_copy(aMapProgress, "--");
 
 		// ---- link status cell (left of the game clock) -----------------------
 		// Keep the probe's round-trip unconfirmed rate and the downlink snapshot
@@ -4001,8 +4048,30 @@ public:
 		// panel rather than one long smear of text.
 		const float CoverSize = 44.0f * Scale;
 		const float ClockPad = 19.0f * Scale;          // padding inside the clock cell
-		const float MapProgressTextW = ShowMapProgressValue ? MeasureCached(m_pTextRender, TimerSize, "100.0%") : 0.0f;
-		const float MapProgressCellW = ShowMapProgressValue ? TClientHudMapProgress::IslandValueCellWidth(MapProgressTextW, ClockPad) : 0.0f;
+		const float MapProgressIconSize = 12.0f * Scale;
+		const float MapProgressIconGap = 4.0f * Scale;
+		const float MapProgressIconW = ShowMapProgressSlot ? MeasureCached(
+			m_pTextRender, MapProgressIconSize, FontIcon::FLAG_CHECKERED, EFontPreset::ICON_FONT) : 0.0f;
+		const float MapProgressTextW = ShowMapProgressSlot ? MeasureCached(m_pTextRender, TimerSize, "100.0%") : 0.0f;
+		if(!ShowMapProgressSlot)
+			ResetMapProgressTextCache();
+		else
+		{
+			if(m_MapProgressFontFace != m_TextWidthCacheFace || m_MapProgressFontSize != g_Config.m_TcFontSize)
+			{
+				m_MapProgressIcon.Reset(m_pTextRender);
+				m_MapProgressText.Reset(m_pTextRender);
+				m_MapProgressFontFace = m_TextWidthCacheFace;
+				m_MapProgressFontSize = g_Config.m_TcFontSize;
+			}
+			m_pTextRender->SetFontPreset(EFontPreset::ICON_FONT);
+			m_MapProgressIcon.Update(m_pTextRender, FontIcon::FLAG_CHECKERED, MapProgressIconSize);
+			m_pTextRender->SetFontPreset(EFontPreset::DEFAULT_FONT);
+			m_MapProgressText.Update(m_pTextRender, aMapProgress, TimerSize);
+		}
+		const float MapProgressContentW = ShowMapProgressSlot ? TClientHudMapProgress::IslandValueContentWidth(
+			MapProgressTextW, MapProgressIconW, MapProgressIconGap) : 0.0f;
+		const float MapProgressCellW = ShowMapProgressSlot ? TClientHudMapProgress::IslandValueCellWidth(MapProgressContentW, ClockPad) : 0.0f;
 		const float DiscPad = 15.0f * Scale;           // padding either side of the disc
 		// 端帽是半径 = Height/2 的半圆，右边缘要留出整个端帽宽度再放柱子，
 		// 否则柱子的右半截会被圆角裁掉（玩家反馈的"右边没了"）。
@@ -4046,7 +4115,7 @@ public:
 		// 宽度至少要容得下 chrome + 最小歌词区，否则右侧单元会被挤出胶囊。
 		const float NeededW = ChromeW + 120.0f * Scale;
 		// 空态且没有任何时钟要显示：干脆连胶囊都不画，不留一个空壳在屏幕顶上。
-		if(Idle && !ShowGameTime && !ShowLocalClock && !ShowLink && !ShowMapProgressValue)
+		if(Idle && !ShowGameTime && !ShowLocalClock && !ShowLink && !ShowMapProgressSlot)
 		{
 			RestoreFace();
 			return;
@@ -4111,6 +4180,19 @@ public:
 		// 保留，让人看得出停在哪首；文字、进度轨、等化器一起压暗，一眼区分"停住"
 		// 和"正在播"。
 		const float Dim = m_ClockPlaying ? 1.0f : 0.55f;
+		auto DrawMapProgressCell = [&](float CellX, float Alpha) {
+			const auto ValueLayout = TClientHudMapProgress::IslandValueLayout(
+				CellX, PillY, MapProgressCellW, Height, MapProgressContentW, TimerSize, ClockPad);
+			if(!ValueLayout.m_Visible)
+				return;
+			const float PixelToHud = 300.0f / RealH;
+			ColorRGBA ProgressColor = TClientModernUi::Accent(ValueLayout.m_ValueX * PixelToHud, ValueLayout.m_ValueY * PixelToHud);
+			ProgressColor.a = Alpha;
+			m_MapProgressIcon.Render(m_pTextRender,
+				vec2(ValueLayout.m_ValueX, ValueLayout.m_ValueY + (TimerSize - MapProgressIconSize) * 0.5f), ProgressColor);
+			m_MapProgressText.Render(m_pTextRender,
+				vec2(ValueLayout.m_ValueX + MapProgressIconW + MapProgressIconGap, ValueLayout.m_ValueY), ProgressColor);
+		};
 
 		// ---- idle: clock cells + decorative equaliser ------------------------
 		// 没放歌时音乐模块整块跳过，胶囊里只留时钟和右端那排静止的音柱——用户
@@ -4142,16 +4224,9 @@ public:
 				CursorX += ClockCellW;
 				DrawSep(CursorX);
 			}
-			if(ShowMapProgressValue)
-			{
-				const auto ValueLayout = TClientHudMapProgress::IslandValueLayout(
-					CursorX, PillY, MapProgressCellW, Height, MapProgressTextW, TimerSize, ClockPad);
-				if(ValueLayout.m_Visible)
+				if(ShowMapProgressSlot)
 				{
-					m_pTextRender->TextColor(AccentColor(0.85f));
-					m_pTextRender->Text(ValueLayout.m_ValueX, ValueLayout.m_ValueY, ValueLayout.m_FontSize, aMapProgress);
-					m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
-				}
+					DrawMapProgressCell(CursorX, 0.85f);
 				CursorX += MapProgressCellW;
 				DrawSep(CursorX);
 			}
@@ -4258,16 +4333,9 @@ public:
 			CellX += ClockCellW;
 			DrawDivider(CellX);
 		}
-		if(ShowMapProgressValue)
-		{
-			const auto ValueLayout = TClientHudMapProgress::IslandValueLayout(
-				CellX, PillY, MapProgressCellW, Height, MapProgressTextW, TimerSize, ClockPad);
-			if(ValueLayout.m_Visible)
+			if(ShowMapProgressSlot)
 			{
-				m_pTextRender->TextColor(AccentColor(0.85f * Dim));
-				m_pTextRender->Text(ValueLayout.m_ValueX, ValueLayout.m_ValueY, ValueLayout.m_FontSize, aMapProgress);
-				m_pTextRender->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
-			}
+				DrawMapProgressCell(CellX, 0.85f * Dim);
 			CellX += MapProgressCellW;
 			DrawDivider(CellX);
 		}
@@ -4685,7 +4753,16 @@ void CIslandMusic::OnInit()
 void CIslandMusic::OnReset()
 {
 	if(m_pImpl)
+	{
 		m_pImpl->ResetLyrics();
+		m_pImpl->ResetMapProgressTextCache();
+	}
+}
+
+void CIslandMusic::OnWindowResize()
+{
+	if(m_pImpl)
+		m_pImpl->ResetMapProgressTextCache();
 }
 
 void CIslandMusic::OnRender()
@@ -4706,7 +4783,10 @@ void CIslandMusic::OnRender()
 void CIslandMusic::OnShutdown()
 {
 	if(m_pImpl)
+	{
 		m_pImpl->ResetLyrics();
+		m_pImpl->ResetMapProgressTextCache();
+	}
 #if TCLIENT_HAS_WINRT_MUSIC
 	if(m_pImpl)
 		m_pImpl->StopCoverDecodeThread();

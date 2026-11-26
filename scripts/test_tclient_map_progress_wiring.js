@@ -23,7 +23,9 @@ const config = read('src/engine/shared/config_variables_tclient.h');
 assert.match(config, /MACRO_CONFIG_INT\(TcMapProgress\s*,\s*tc_map_progress\s*,\s*0\s*,\s*0\s*,\s*1/,
   'Map progress must remain disabled for new and existing users by default');
 assert.match(config, /MACRO_CONFIG_INT\(TcMapProgressStyle\s*,\s*tc_map_progress_style\s*,\s*0\s*,\s*0\s*,\s*1/);
-assert.match(config, /tc_map_progress_style[^\n]*percentage inside the Dynamic Island/i);
+assert.match(config, /tc_map_progress_style[^\n]*instead of at the bottom right/i);
+const hudMapProgress = read('src/game/client/components/tclient/hud_map_progress.h');
+assert(hudMapProgress.includes('ShouldShowStandaloneValue') && hudMapProgress.includes('ShouldReserveIslandValue') && hudMapProgress.includes('DYNAMIC_ISLAND_AVAILABLE'), 'HUD and Island destinations must be exclusive and account for Island availability');
 
 const client = read('src/game/client/components/tclient/tclient.cpp');
 const onUpdate = functionBody(client, 'void CTClient::OnUpdate()');
@@ -33,7 +35,11 @@ const snapshot = functionBody(client, 'void CTClient::OnNewSnapshot()');
 assert(snapshot.includes('UpdateMapProgress(true)'), 'Snapshot observations must update the current route estimate');
 const update = functionBody(client, 'void CTClient::UpdateMapProgress(bool NewSnapshot)');
 assert.match(update, /if\(!g_Config\.m_TcMapProgress\)[\s\S]*?ResetMapProgress\(\)/, 'Disabling the cvar must clear cached progress');
-assert(update.includes('MAP_PROGRESS_TILE_SCAN_BUDGET') && update.includes('MAP_PROGRESS_DIJKSTRA_BUDGET'), 'Map scan and route solving must be budgeted');
+assert(update.includes('TClientMapProgress::MAP_PROGRESS_SCAN_BUDGET') && update.includes('TClientMapProgress::MAP_PROGRESS_DIJKSTRA_BUDGET'), 'Map scan and route solving must have bounded budgets');
+assert.match(update, /if\(!NewSnapshot\)[\s\S]*?int ScanBudget = TClientMapProgress::MAP_PROGRESS_SCAN_BUDGET[\s\S]*?ScanBudget -= End - Start/, 'the full scan budget must be spent only from the regular update path');
+assert.match(update, /if\(NewSnapshot\)[\s\S]*?m_aMapProgressPlayers\[Slot\]\.Observe[\s\S]*?return;[\s\S]*?if\(!m_MapProgressMap\.Ready\(\)\)/, 'snapshot callbacks must update observations and return before distance-field advancement');
+assert.match(update, /ImageScanned < ImageBudget[\s\S]*?m_MapProgressWaterImageScanCursor/, 'water image-name metadata must be loaded incrementally');
+assert.match(update, /ShareMapProgressBudget\(DijkstraBudget, ActiveSlots\)/, 'all active player routes must share one per-frame search budget');
 assert(update.includes('m_MapProgressMapCrc != CurrentMapCrc') && update.includes('m_pMapProgressCollision != pCollision'), 'Map/geometry identity changes must invalidate stale routes');
 assert(update.includes('m_MapProgressFailedForMap') && update.includes('m_MapProgressFailedMapCrc == CurrentMapCrc'), 'A failed map identity must stay disabled without retrying allocations each frame');
 assert(update.includes('TClientMapProgress::IsMapSizeWithinProgressBudget') && update.includes('TClientMapProgress::IsMapProgressVisualMetadataWithinBudget'), 'Tile and visual metadata budgets must fail closed before scanning');
@@ -43,7 +49,7 @@ const failMap = functionBody(client, 'void CTClient::FailMapProgressForMap(');
 assert(failMap.includes('ResetMapProgress()') && failMap.includes('m_MapProgressFailedForMap = true'), 'Fail-closed must clear partial route state then latch map identity');
 const visualScan = functionBody(client, 'void CTClient::ScanMapProgressVisualLayers(');
 assert(visualScan.includes('pMap->GetDataSize(pTilemap->m_Data) < RequiredBytes') && visualScan.includes('if(!pVisualTiles)'), 'Malformed or unavailable borrowed visual tile data must fail closed');
-assert.match(update, /ScanMapProgressVisualLayers\(MAP_PROGRESS_TILE_SCAN_BUDGET\)[\s\S]*?if\(m_MapProgressFailedForMap\)[\s\S]*?return;/, 'The frame must stop immediately after a visual scan latches failure');
+assert.match(update, /ScanMapProgressVisualLayers\(ScanBudget\)[\s\S]*?if\(m_MapProgressFailedForMap\)[\s\S]*?return;/, 'The shared frame budget must stop after a visual scan latches failure');
 assert(/if\(!pCurrentMap \|\| !pCurrentMap->IsLoaded\(\)\)[\s\S]*?ResetMapProgress\(\);[\s\S]*?return;[\s\S]*?pCurrentMap->BaseName\(\)/.test(update), 'Never query the map name while its datafile is closed');
 const reset = functionBody(client, 'void CTClient::ResetMapProgress()');
 assert.doesNotMatch(reset, /BaseName\(|Crc\(|UnloadData\(/, 'Reset must discard cached state without reading or releasing shared map data');
@@ -53,21 +59,27 @@ assert(/if\(!pCurrentMap \|\| !pCurrentMap->IsLoaded\(\)\)[\s\S]*?return \{\};[\
 assert(update.includes('TClientMapProgress::MakeTile(') && update.includes('m_aMapProgressPlayers[Slot].Observe(') && update.includes('m_aMapProgressPlayers[Slot].Update('), 'Production sampling must feed the tested Qm-derived algorithm');
 
 const hud = read('src/game/client/components/hud.cpp');
-const onHudRender = functionBody(hud, 'void CHud::OnRender()');
-assert(onHudRender.includes('UpdateMapProgress()'), 'HUD smoothing must update from the production estimate');
-assert(onHudRender.includes('RenderMapProgressBelowBoard'), 'The percent must be rendered below the drown board when there is room');
-assert(hud.includes('std::optional<CHud::SDrownBoardPlacement> CHud::RenderDrownBoard()'), 'The drown board must report its actual drawn bounds');
-const boardRender = functionBody(hud, 'bool CHud::RenderMapProgressBelowBoard(');
-assert(boardRender.includes('TClientHudMapProgress::BoardValue(Board)') && boardRender.includes('TextRender()->Text('), 'Below-board output is a percentage text, not a bar');
-assert.doesNotMatch(boardRender, /DrawRect\(/, 'No progress rail is drawn below the board');
-const board = functionBody(hud, 'std::optional<CHud::SDrownBoardPlacement> CHud::RenderDrownBoard()');
-assert(board.includes('SafeBottom = BoardBottom') && board.includes('BOARD_VALUE_HEIGHT') && board.includes('std::max(BoardBottom - BoardHeight, 32.0f)'), 'Reserve one row under the drown board and raise the panel to make room');
-const fallback = functionBody(hud, 'void CHud::RenderMapProgressStandalone(int Dummy)');
-assert(fallback.includes('TextRender()->Text(') && !fallback.includes('Graphics()->DrawRect('), 'Fallback also contains only the percentage text');
-assert(onHudRender.includes('RenderMapProgressBelowBoard') && onHudRender.includes('RenderMapProgressStandalone'), 'Render below the board, with a text-only fallback if unavailable');
+const onHudUpdate = functionBody(hud, 'void CHud::OnUpdate()');
+assert(onHudUpdate.includes('UpdateMapProgress()'), 'HUD smoothing must update from the cached production estimate outside render');
+const textInfo = functionBody(hud, 'void CHud::RenderTextInfo()');
+assert(textInfo.includes('MiniDebugCoordinateOffsetY'), 'MiniDebug must retain its own independent coordinate offsets');
+assert.doesNotMatch(textInfo, /TcMapProgress|MapProgressHud/, 'Progress must not render at the MiniDebug anchor');
+assert.doesNotMatch(hud, /RenderMapProgressBelowBoard|RenderMapProgressStandalone/, 'The progress must not jump between board and fallback positions');
+const movement = functionBody(hud, 'void CHud::RenderMovementInformation(');
+assert(movement.includes('RenderMapProgressHud(StartY)') && movement.includes('RightHudTop'), 'The independent readout and stack must share the actual coordinates top, including dummy rows');
+const progressHud = functionBody(hud, 'void CHud::RenderMapProgressHud(');
+assert.doesNotMatch(progressHud, /DrawRect|QuadsBegin|MapProgressEstimate|TextWidth\(/, 'Transparent readout must not draw a panel, solve routes or measure glyphs every frame');
+assert(progressHud.includes('TClientModernUi::Accent(') && progressHud.includes('m_MapProgressHudText.Render(') && progressHud.includes('m_MapProgressHudLabel.Render('), 'The percentage uses the visual accent and both pieces use cached text');
+assert(hud.includes('TCLocalize("Finish", "Map progress")'), 'Use the localized finish label');
+for(const part of ['RenderSpectatorCount', 'RenderDummyActions', 'RenderDrownBoard'])
+  assert(functionBody(hud, 'void CHud::' + part + '(').includes('RightHudTop'), part + ' must use the occupied right-hand stack');
+assert.doesNotMatch(functionBody(hud, 'void CHud::OnRender()'), /UpdateMapProgress\(/, 'Render must not update or generate map progress');
 const islandMusic = read('src/game/client/components/tclient/island_music.cpp');
 assert(islandMusic.includes('GetMapProgressIslandValue(g_Config.m_ClDummy, MapProgressValue)'), 'Island reads the HUD-sampled percentage');
-assert(islandMusic.includes('MapProgressCellW') && islandMusic.includes('aMapProgress'), 'Island budgets and draws the numeric cell');
+assert.match(islandMusic, /MapProgressIconSize, FontIcon::FLAG_CHECKERED, EFontPreset::ICON_FONT/, 'Measure the finish flag with the same font used to draw it');
+assert.match(islandMusic, /m_MapProgressIcon\.Update\([^;]+;\s*m_pTextRender->SetFontPreset\(EFontPreset::DEFAULT_FONT\)/, 'Restore the text font before drawing the percentage or track title');
+assert.match(islandMusic, /MapProgressTextW = ShowMapProgressSlot \? MeasureCached\([^;]*"100\.0%"/, 'Unknown and valid progress must reserve identical numeric widths');
+assert(islandMusic.includes('DrawMapProgressCell(CursorX,') && islandMusic.includes('DrawMapProgressCell(CellX,'), 'Idle and playing must draw the same cached flag and value');
 assert.doesNotMatch(islandMusic, /RenderMapProgressIsland\(/, 'No separate external map strip is drawn by the island wrapper');
 assert.match(islandMusic, /tc_island_show_song_progress[\s\S]*?RailH = 3\.0f \* Scale/, 'The song rail remains an independent island feature');
 
@@ -75,16 +87,15 @@ const menus = read('src/game/client/components/tclient/menus_tclient.cpp');
 assert(menus.includes('if(g_Config.m_TcMapProgress)'), 'Advanced map-progress settings should be gated by the disabled master switch');
 assert(menus.includes('DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgress,'));
 
+assert(!menus.includes('m_TcMapProgressColor'), 'Do not show a separate color picker when progress follows the visual accent');
+assert(islandMusic.includes('FontIcon::FLAG_CHECKERED') && islandMusic.includes('TClientModernUi::Accent('), 'The Island finish mark must use the native icon and visual accent');
 const sharedLocaleKeys = [
   'Map progress',
-  'Show estimated finish percentage below the drown board',
-  'Also show the percentage inside the Dynamic Island',
-  'Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available.',
-  'Map progress percentage color',
-  'Fallback percentage width',
-  'Fallback percentage height',
-  'Fallback horizontal position',
-  'Fallback vertical position',
+		'Show estimated finish percentage',
+		'Use the Dynamic Island instead of the HUD',
+		'Show progress in the Dynamic Island instead of at the bottom right. If the island is off or unsupported, show it at the bottom right.',
+		'Map progress is estimated locally on Gores and DDRace maps; it can stay unknown until a route is available.',
+		'Show the estimated finish percentage in only one place at a time: at the bottom right or in the Dynamic Island.',
 ];
 for(const locale of ['simplified_chinese.txt', 'traditional_chinese.txt']) {
   const dictionary = read(path.join('data/tclient/languages', locale));
@@ -92,7 +103,11 @@ for(const locale of ['simplified_chinese.txt', 'traditional_chinese.txt']) {
     assert(dictionary.includes(`\n${key}\n== `), `${locale} is missing a translation for: ${key}`);
 }
 const simplifiedChinese = read(path.join('data/tclient/languages', 'simplified_chinese.txt'));
-assert(simplifiedChinese.includes('\nShow the estimated finish percentage below the drown board on Gores and DDRace maps.\n== '), 'Simplified Chinese is missing the map-progress hover explanation');
+assert(simplifiedChinese.includes('\nShow the estimated finish percentage in only one place at a time: at the bottom right or in the Dynamic Island.\n== '), 'Simplified Chinese is missing the exclusive-display hover explanation');
+assert(menus.includes('Show estimated finish percentage'), 'The master switch must describe the enabled progress display');
+assert(menus.includes('Use the Dynamic Island instead of the HUD'), 'The destination choice must be explicitly exclusive');
+assert(!menus.includes('Fallback horizontal position') && !menus.includes('Fallback vertical position'), 'Legacy fallback-position sliders must not imply that the fixed HUD anchor moves');
+assert(config.includes('Legacy map progress fallback horizontal position (unused)'), 'Legacy position cvars must remain available without changing saved values');
 
 const cmake = read('CMakeLists.txt');
 assert(cmake.includes('components/tclient/map_progress.h') && cmake.includes('components/tclient/hud_map_progress.h'));

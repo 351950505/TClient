@@ -409,15 +409,19 @@ class UpdateRetryTest(unittest.TestCase):
 			self.skipTest("requires cryptography to sign isolated fixture manifests")
 		source = SOURCE.read_text(encoding="utf-8-sig")
 		header = (SOURCE.parent / "tclient.h").read_text(encoding="utf-8-sig")
-		constants = re.search(r"^static constexpr const char \*TCLIENT_UPDATE_LATEST_URL.*?^static constexpr int64_t TCLIENT_UPDATE_CHECK_INTERVAL[^\n]*", source, re.MULTILINE | re.DOTALL)[0]
+		constant_block = re.search(r"^static constexpr const char \*TCLIENT_UPDATE_LATEST_URL.*?^static constexpr const char \*TCLIENT_UPDATE_ZIP_PATH[^\n]*;", source, re.MULTILINE | re.DOTALL)
+		self.assertIsNotNone(constant_block, "could not extract production update sources and asset paths")
+		constants = constant_block[0] + "\n"
 		helpers = []
-		for name in ["ParseAppVersion", "CompareAppVersion", "JsonObj", "JsonStr", "JsonGetInt", "IsHexSha256"]:
+		for name in ["ParseAppVersion", "CompareAppVersion", "JsonObj", "JsonStr", "JsonGetInt", "JsonGetUpdateSize", "IsHexSha256"]:
 			match = re.search(r"^static [^\n]*\b" + name + r"\([^\n]*\)\s*\n\{.*?^\}", source, re.MULTILINE | re.DOTALL)
 			self.assertIsNotNone(match, "could not extract production helper " + name)
 			helpers.append(match[0])
 		helpers.insert(0, re.search(r"^static constexpr int APP_VERSION_MAX_SEGMENTS[^\n]*", source, re.MULTILINE)[0])
 		public = header[header.index("\tenum class EUpdateState"):header.index("\nprivate:")]
-		fields = header[header.index("\t// ----- Client-side auto-update internals -----"):header.index("\t// 游戏内中键玩家菜单")]
+		field_block = re.search(r"^\tEUpdateState m_UpdateState\b.*?^\tfloat m_UpdateRetryAt[^\n]*;", header, re.MULTILINE | re.DOTALL)
+		self.assertIsNotNone(field_block, "could not extract production updater state and retry fields")
+		fields = field_block[0] + "\n"
 		fields = re.sub(r" \[\[gnu::format\(printf, 2, 3\)\]\]", "", fields)
 		client = "struct CTClient {\n" + public + fields + r'''
 	CClock m_Clock;

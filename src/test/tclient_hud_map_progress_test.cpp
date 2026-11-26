@@ -27,60 +27,69 @@
 
 #include <gtest/gtest.h>
 
-TEST(TClientHudMapProgress, IslandToggleAddsOnlyAValidPercentageValue)
+TEST(TClientHudMapProgress, IslandAndStandaloneHudDestinationsAreMutuallyExclusive)
 {
+	using TClientHudMapProgress::ShouldReserveIslandValue;
 	using TClientHudMapProgress::ShouldShowIslandValue;
-	EXPECT_FALSE(ShouldShowIslandValue(false, 1, true, true));
-	EXPECT_FALSE(ShouldShowIslandValue(true, 0, true, true));
-	EXPECT_FALSE(ShouldShowIslandValue(true, 1, false, true));
-	EXPECT_FALSE(ShouldShowIslandValue(true, 1, true, false));
-	EXPECT_TRUE(ShouldShowIslandValue(true, 1, true, true));
+	using TClientHudMapProgress::ShouldShowStandaloneValue;
+	EXPECT_FALSE(ShouldReserveIslandValue(false, 1, true, true));
+	EXPECT_FALSE(ShouldReserveIslandValue(true, 0, true, true));
+	EXPECT_FALSE(ShouldReserveIslandValue(true, 1, false, true));
+	EXPECT_TRUE(ShouldReserveIslandValue(true, 1, true, true));
+	EXPECT_FALSE(ShouldReserveIslandValue(true, 1, true, false));
+	EXPECT_FALSE(ShouldShowIslandValue(true, 1, true, false, true));
+	EXPECT_TRUE(ShouldShowIslandValue(true, 1, true, true, true));
+	EXPECT_FALSE(ShouldShowIslandValue(true, 1, true, true, false));
+	EXPECT_TRUE(ShouldShowStandaloneValue(true, 0, true, true));
+	EXPECT_FALSE(ShouldShowStandaloneValue(true, 1, true, true));
+	EXPECT_TRUE(ShouldShowStandaloneValue(true, 1, false, true));
+	EXPECT_TRUE(ShouldShowStandaloneValue(true, 1, true, false));
+	EXPECT_FALSE(ShouldShowStandaloneValue(false, 0, true, true));
 }
 
-TEST(TClientHudMapProgress, FallbackPercentageStaysInsideTheHudAndCenters)
+TEST(TClientHudMapProgress, MiniDebugCoordinatesKeepTheirOriginalOffsets)
 {
-	const auto Layout = TClientHudMapProgress::FallbackTextLayout(300.0f, 300.0f, 28.0f, 10.0f, 50.0f, 97.0f);
-	EXPECT_FLOAT_EQ(Layout.m_Text.w, 84.0f);
-	EXPECT_FLOAT_EQ(Layout.m_Text.x + Layout.m_Text.w * 0.5f, 150.0f);
-	EXPECT_LE(Layout.m_Text.x, 300.0f - Layout.m_Text.w);
-	EXPECT_LE(Layout.m_Text.y + Layout.m_Text.h, 298.0f);
-	EXPECT_GE(Layout.m_FontSize, 6.0f);
+	using TClientHudMapProgress::MiniDebugCoordinateOffsetY;
+	EXPECT_FLOAT_EQ(MiniDebugCoordinateOffsetY(false, false), 3.0f);
+	EXPECT_FLOAT_EQ(MiniDebugCoordinateOffsetY(false, true), 30.0f);
+	EXPECT_FLOAT_EQ(MiniDebugCoordinateOffsetY(true, false), 53.0f);
 }
 
-TEST(TClientHudMapProgress, FallbackPercentageBoundsClampOversizedInputs)
+TEST(TClientHudMapProgress, StandaloneHudTextUsesOneAlignedRowAndReservesMatchingStackSpace)
 {
-	const auto Layout = TClientHudMapProgress::FallbackTextLayout(300.0f, 300.0f, 1000.0f, 1000.0f, -100.0f, 1000.0f);
-	EXPECT_GE(Layout.m_Text.x, 6.0f);
-	EXPECT_GE(Layout.m_Text.y, 2.0f);
-	EXPECT_LE(Layout.m_Text.x + Layout.m_Text.w, 294.0f);
-	EXPECT_LE(Layout.m_Text.y + Layout.m_Text.h, 298.0f);
+	using namespace TClientHudMapProgress;
+	const float PanelTop = 100.0f;
+	const float ProgressTop = MapProgressHudTop(PanelTop);
+	EXPECT_FLOAT_EQ(MOVEMENT_INFORMATION_BOX_WIDTH, 62.0f);
+	EXPECT_FLOAT_EQ(MAP_PROGRESS_HUD_MAX_WIDTH, 25.0f);
+	EXPECT_FLOAT_EQ(MAP_PROGRESS_HUD_FONT_SIZE, 4.5f);
+	EXPECT_FLOAT_EQ(PanelTop - ProgressTop, MAP_PROGRESS_HUD_HEIGHT + MAP_PROGRESS_HUD_GAP);
+	EXPECT_FLOAT_EQ(ProgressTop + MAP_PROGRESS_HUD_HEIGHT + MAP_PROGRESS_HUD_GAP, PanelTop);
+	EXPECT_FLOAT_EQ(StandaloneHudStackOffset(true), 10.0f);
+	EXPECT_FLOAT_EQ(StandaloneHudStackOffset(false), 0.0f);
+	EXPECT_LT(PanelTop - StandaloneHudStackOffset(true), ProgressTop);
+	EXPECT_FLOAT_EQ(ReadoutFit(18.0f), 1.0f);
+	EXPECT_FLOAT_EQ(50.0f * ReadoutFit(50.0f) + LABEL_GAP, MAP_PROGRESS_HUD_MAX_WIDTH);
 }
 
-TEST(TClientHudMapProgress, BoardPercentageSitsBelowTheActualPanelBounds)
+TEST(TClientHudMapProgress, IslandFinishMarkAndValueShareAStableCenteredCell)
 {
-	const CUIRect Board{240.0f, 248.0f, 54.0f, 42.0f};
-	const float SafeBottom = 300.0f;
-	ASSERT_TRUE(TClientHudMapProgress::HasRoomBelowBoard(Board, SafeBottom));
-	const CUIRect Value = TClientHudMapProgress::BoardValue(Board);
-	EXPECT_FLOAT_EQ(Value.x + Value.w * 0.5f, Board.x + Board.w * 0.5f);
-	EXPECT_FLOAT_EQ(Value.y, Board.y + Board.h + TClientHudMapProgress::BOARD_VALUE_GAP);
-	EXPECT_LE(Value.y + Value.h + TClientHudMapProgress::BOARD_VALUE_BOTTOM_PADDING, SafeBottom);
-}
-
-TEST(TClientHudMapProgress, BoardPercentageFallsBackWhenThePanelWasClampedIntoTheSafeArea)
-{
-	const CUIRect Board{240.0f, 258.0f, 54.0f, 42.0f};
-	EXPECT_FALSE(TClientHudMapProgress::HasRoomBelowBoard(Board, 300.0f));
-}
-
-TEST(TClientHudMapProgress, IslandValueUsesOneCenteredNumberCellWithoutATrack)
-{
-	const float CellWidth = TClientHudMapProgress::IslandValueCellWidth(28.0f, 19.0f);
-	const auto Layout = TClientHudMapProgress::IslandValueLayout(50.0f, 10.0f, CellWidth, 72.0f, 28.0f, 16.0f, 19.0f);
-	ASSERT_TRUE(Layout.m_Visible);
-	EXPECT_FLOAT_EQ(Layout.m_ValueX + 28.0f * 0.5f, 50.0f + CellWidth * 0.5f);
-	EXPECT_FLOAT_EQ(Layout.m_ValueY + Layout.m_FontSize * 0.5f, 46.0f);
-	EXPECT_FALSE(TClientHudMapProgress::IslandValueLayout(50.0f, 10.0f, CellWidth - 1.0f, 72.0f, 28.0f, 16.0f, 19.0f).m_Visible);
+	const float MaximumTextWidth = 56.0f;
+	const float IconWidth = 12.0f;
+	const float IconGap = 4.0f;
+	const float Padding = 19.0f;
+	const float ContentWidth = TClientHudMapProgress::IslandValueContentWidth(MaximumTextWidth, IconWidth, IconGap);
+	const float CellWidth = TClientHudMapProgress::IslandValueCellWidth(ContentWidth, Padding);
+	const auto ValidLayout = TClientHudMapProgress::IslandValueLayout(50.0f, 10.0f, CellWidth, 72.0f, ContentWidth, 16.0f, Padding);
+	const auto PlaceholderLayout = TClientHudMapProgress::IslandValueLayout(50.0f, 10.0f, CellWidth, 72.0f, ContentWidth, 16.0f, Padding);
+	ASSERT_TRUE(ValidLayout.m_Visible);
+	ASSERT_TRUE(PlaceholderLayout.m_Visible);
+	EXPECT_FLOAT_EQ(ValidLayout.m_ValueX, PlaceholderLayout.m_ValueX);
+	EXPECT_FLOAT_EQ(ValidLayout.m_ValueY, PlaceholderLayout.m_ValueY);
+	EXPECT_FLOAT_EQ(ContentWidth, MaximumTextWidth + IconWidth + IconGap);
+	EXPECT_FLOAT_EQ(ValidLayout.m_ValueX, 50.0f + Padding);
+	EXPECT_FALSE(TClientHudMapProgress::IslandValueLayout(50.0f, 10.0f, CellWidth - 1.0f, 72.0f, ContentWidth, 16.0f, Padding).m_Visible);
+	EXPECT_FLOAT_EQ(CellWidth, ContentWidth + 2.0f * Padding);
 }
 
 TEST(TClientHudMapProgress, ProgressSmoothsAndResetsWhenTargetChangesOrDisappears)

@@ -171,7 +171,11 @@ private:
 	unsigned m_MapProgressMapCrc = 0;
 	bool m_MapProgressGoresMode = false;
 	std::vector<uint8_t> m_vMapProgressWaterImages;
+	bool m_MapProgressWaterImagesPrepared = false;
 	bool m_MapProgressWaterImagesLoaded = false;
+	int m_MapProgressWaterImageStart = 0;
+	int m_MapProgressWaterImageCount = 0;
+	int m_MapProgressWaterImageScanCursor = 0;
 	int m_MapProgressVisualGroup = 0;
 	int m_MapProgressVisualLayer = 0;
 	int m_MapProgressVisualTile = 0;
@@ -184,7 +188,7 @@ private:
 	void ResetMapProgress();
 
 	void UpdateMapProgress(bool NewSnapshot);
-	void ScanMapProgressVisualLayers(int Budget);
+	void ScanMapProgressVisualLayers(int &Budget);
 	int MapProgressSlot(int Conn) const;
 	int ResolveMapProgressClientId(int Slot) const;
 

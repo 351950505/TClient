@@ -13,6 +13,7 @@ public:
 
 	void OnInit() override;
 	void OnReset() override;
+	void OnWindowResize() override;
 	void OnRender() override;
 	void OnShutdown() override;
 

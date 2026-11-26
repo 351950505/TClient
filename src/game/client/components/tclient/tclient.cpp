@@ -35,6 +35,7 @@
 #define NOMINMAX
 #endif
 #include <base/windows.h>
+
 #include <windows.h>
 #include <tlhelp32.h>
 #endif
@@ -2050,9 +2051,6 @@ bool CTClient::IsGoresGameMode() const
 
 namespace
 {
-	constexpr int MAP_PROGRESS_TILE_SCAN_BUDGET = 4096;
-	constexpr int MAP_PROGRESS_DIJKSTRA_BUDGET = 2048;
-
 	bool IsMapProgressWaterImage(const char *pImageName)
 	{
 		// QmClient Gores water art uses both black-water and ordinary water atlases.
@@ -2093,7 +2091,11 @@ void CTClient::ResetMapProgress()
 	m_MapProgressMapCrc = 0;
 	m_MapProgressGoresMode = false;
 	m_vMapProgressWaterImages.clear();
+	m_MapProgressWaterImagesPrepared = false;
 	m_MapProgressWaterImagesLoaded = false;
+	m_MapProgressWaterImageStart = 0;
+	m_MapProgressWaterImageCount = 0;
+	m_MapProgressWaterImageScanCursor = 0;
 	m_MapProgressVisualGroup = 0;
 	m_MapProgressVisualLayer = 0;
 	m_MapProgressVisualTile = 0;
@@ -2159,7 +2161,7 @@ bool CTClient::HasMapProgress(int Conn) const
 	return MapProgressEstimate(Conn).m_Valid;
 }
 
-void CTClient::ScanMapProgressVisualLayers(int Budget)
+void CTClient::ScanMapProgressVisualLayers(int &Budget)
 {
 	if(m_MapProgressVisualLayersComplete || Budget <= 0)
 		return;
@@ -2170,11 +2172,12 @@ void CTClient::ScanMapProgressVisualLayers(int Budget)
 		m_MapProgressVisualLayersComplete = true;
 		return;
 	}
-	while(m_MapProgressVisualGroup < pLayers->NumGroups())
+	while(Budget > 0 && m_MapProgressVisualGroup < pLayers->NumGroups())
 	{
 		const CMapItemGroup *pGroup = pLayers->GetGroup(m_MapProgressVisualGroup);
 		if(!pGroup || m_MapProgressVisualLayer >= pGroup->m_NumLayers)
 		{
+			--Budget;
 			++m_MapProgressVisualGroup;
 			m_MapProgressVisualLayer = 0;
 			m_MapProgressVisualTile = 0;
@@ -2183,6 +2186,7 @@ void CTClient::ScanMapProgressVisualLayers(int Budget)
 		const int64_t LayerIndex64 = (int64_t)pGroup->m_StartLayer + m_MapProgressVisualLayer;
 		if(LayerIndex64 < 0 || LayerIndex64 >= pLayers->NumLayers())
 		{
+			--Budget;
 			++m_MapProgressVisualLayer;
 			m_MapProgressVisualTile = 0;
 			continue;
@@ -2190,6 +2194,7 @@ void CTClient::ScanMapProgressVisualLayers(int Budget)
 		const CMapItemLayer *pLayer = pLayers->GetLayer((int)LayerIndex64);
 		if(!pLayer || pLayer->m_Type != LAYERTYPE_TILES)
 		{
+			--Budget;
 			++m_MapProgressVisualLayer;
 			m_MapProgressVisualTile = 0;
 			continue;
@@ -2200,6 +2205,7 @@ void CTClient::ScanMapProgressVisualLayers(int Budget)
 			pTilemap->m_Image >= (int)m_vMapProgressWaterImages.size() ||
 			!m_vMapProgressWaterImages[(size_t)pTilemap->m_Image] || pTilemap->m_Data < 0 || pTilemap->m_Data >= pMap->NumData())
 		{
+			--Budget;
 			++m_MapProgressVisualLayer;
 			m_MapProgressVisualTile = 0;
 			continue;
@@ -2334,9 +2340,13 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 			m_MapProgressGoresMode = GoresMode;
 			m_MapProgressVisualLayersComplete = !GoresMode;
 		}
-		if(GoresMode && !m_MapProgressWaterImagesLoaded)
+		if(!GoresMode)
 		{
+			m_MapProgressWaterImagesPrepared = true;
 			m_MapProgressWaterImagesLoaded = true;
+		}
+		else if(!m_MapProgressWaterImagesPrepared)
+		{
 			int ImageStart = 0;
 			int ImageCount = 0;
 			pMap->GetType(MAPITEMTYPE_IMAGE, &ImageStart, &ImageCount);
@@ -2349,27 +2359,12 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 				FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
 				return;
 			}
-			if(ImageCount > 0)
-			{
 				m_vMapProgressWaterImages.assign((size_t)ImageCount, 0);
-				for(int ImageIndex = 0; ImageIndex < ImageCount; ++ImageIndex)
-				{
-					const auto *pImage = static_cast<const CMapItemImage_v2 *>(pMap->GetItem(ImageStart + ImageIndex));
-					if(!pImage || pImage->m_ImageName < 0 || pImage->m_ImageName >= pMap->NumData())
-					{
-						FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
-						return;
-					}
-					// Image-name data can also be shared with the renderer; this scan only borrows it.
-					const char *pImageName = pMap->GetDataString(pImage->m_ImageName);
-					if(!pImageName)
-					{
-						FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
-						return;
-					}
-					m_vMapProgressWaterImages[(size_t)ImageIndex] = IsMapProgressWaterImage(pImageName);
-				}
-			}
+			m_MapProgressWaterImageStart = ImageStart;
+			m_MapProgressWaterImageCount = ImageCount;
+			m_MapProgressWaterImageScanCursor = 0;
+			m_MapProgressWaterImagesPrepared = true;
+			m_MapProgressWaterImagesLoaded = ImageCount == 0;
 		}
 		const auto ReadTile = [&](int Index) {
 			const int GameTile = pCollision->GetTileIndex(Index);
@@ -2384,20 +2379,52 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 			Tile.m_TimeCheckpoint = TimeCheckpoint;
 			return Tile;
 		};
+		if(!NewSnapshot)
+		{
+			int ScanBudget = TClientMapProgress::MAP_PROGRESS_SCAN_BUDGET;
 		if(m_MapProgressBaseScanCursor < MapSize)
 		{
-			const int End = (int)std::min<int64_t>(MapSize, (int64_t)m_MapProgressBaseScanCursor + MAP_PROGRESS_TILE_SCAN_BUDGET);
+				const int Start = m_MapProgressBaseScanCursor;
+				const int End = (int)std::min<int64_t>(MapSize, (int64_t)Start + ScanBudget);
 			for(; m_MapProgressBaseScanCursor < End; ++m_MapProgressBaseScanCursor)
 				m_MapProgressMap.SetTile(m_MapProgressBaseScanCursor, ReadTile(m_MapProgressBaseScanCursor));
+				ScanBudget -= End - Start;
 		}
-		if(m_MapProgressBaseScanCursor == MapSize && !m_MapProgressVisualLayersComplete)
+			if(ScanBudget > 0 && GoresMode && !m_MapProgressWaterImagesLoaded)
+			{
+				const int ImageBudget = std::min(ScanBudget, TClientMapProgress::MAP_PROGRESS_IMAGE_SCAN_BUDGET);
+				int ImageScanned = 0;
+				for(; ImageScanned < ImageBudget && m_MapProgressWaterImageScanCursor < m_MapProgressWaterImageCount; ++ImageScanned)
+				{
+					const auto *pImage = static_cast<const CMapItemImage_v2 *>(pMap->GetItem(m_MapProgressWaterImageStart + m_MapProgressWaterImageScanCursor));
+					if(!pImage || pImage->m_ImageName < 0 || pImage->m_ImageName >= pMap->NumData())
 		{
-			ScanMapProgressVisualLayers(MAP_PROGRESS_TILE_SCAN_BUDGET);
+						FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
+						return;
+					}
+					// Image-name data can also be shared with the renderer; this scan only borrows it.
+					const char *pImageName = pMap->GetDataString(pImage->m_ImageName);
+					if(!pImageName)
+					{
+						FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);
+						return;
+					}
+					m_vMapProgressWaterImages[(size_t)m_MapProgressWaterImageScanCursor] = IsMapProgressWaterImage(pImageName);
+					++m_MapProgressWaterImageScanCursor;
+				}
+				ScanBudget -= ImageScanned;
+				if(m_MapProgressWaterImageScanCursor >= m_MapProgressWaterImageCount)
+					m_MapProgressWaterImagesLoaded = true;
+			}
+			if(m_MapProgressBaseScanCursor == MapSize && m_MapProgressWaterImagesLoaded && !m_MapProgressVisualLayersComplete && ScanBudget > 0)
+			{
+				ScanMapProgressVisualLayers(ScanBudget);
 			if(m_MapProgressFailedForMap)
 				return;
 		}
-		if(m_MapProgressBaseScanCursor == MapSize && m_MapProgressVisualLayersComplete && !m_MapProgressMap.Finalized())
-			m_MapProgressMap.FinalizeStep(MAP_PROGRESS_TILE_SCAN_BUDGET);
+			if(m_MapProgressBaseScanCursor == MapSize && m_MapProgressWaterImagesLoaded && m_MapProgressVisualLayersComplete && !m_MapProgressMap.Finalized() && ScanBudget > 0)
+				m_MapProgressMap.FinalizeStep(ScanBudget);
+		}
 		if(NewSnapshot)
 		{
 			for(int Slot = 0; Slot <= NUM_DUMMIES; ++Slot)
@@ -2505,7 +2532,13 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 				ObserveIndex(Index);
 				Target.m_HasPreviousPosition = false;
 			}
+			return;
 		}
+
+		if(!m_MapProgressMap.Ready())
+			return;
+
+		int ActiveSlots = 0;
 		for(int Slot = 0; Slot <= NUM_DUMMIES; ++Slot)
 		{
 			if(m_aMapProgressClientIds[Slot] != ResolveMapProgressClientId(Slot))
@@ -2516,10 +2549,22 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 				continue;
 			}
 			const auto &Target = m_aMapProgressTargets[Slot];
-			if(!Target.m_Valid || Target.m_ClientId < 0 || Target.m_Index < 0 || Target.m_Index >= MapSize || !m_MapProgressMap.Ready())
+			if(Target.m_Valid && Target.m_ClientId >= 0 && Target.m_Index >= 0 && Target.m_Index < MapSize)
+				++ActiveSlots;
+		}
+
+		int DijkstraBudget = TClientMapProgress::MAP_PROGRESS_DIJKSTRA_BUDGET;
+		for(int Slot = 0; Slot <= NUM_DUMMIES && ActiveSlots > 0; ++Slot)
+		{
+			const auto &Target = m_aMapProgressTargets[Slot];
+			if(m_aMapProgressClientIds[Slot] != ResolveMapProgressClientId(Slot) || !Target.m_Valid ||
+				Target.m_ClientId < 0 || Target.m_Index < 0 || Target.m_Index >= MapSize)
 				continue;
+			const int SlotBudget = TClientMapProgress::ShareMapProgressBudget(DijkstraBudget, ActiveSlots);
+			DijkstraBudget -= SlotBudget;
+			--ActiveSlots;
 			m_aMapProgressPlayers[Slot].Update(m_MapProgressMap, Target.m_Index, Target.m_TeleCheckpoint,
-				MAP_PROGRESS_DIJKSTRA_BUDGET, Slot < NUM_DUMMIES);
+				SlotBudget, Slot < NUM_DUMMIES);
 			if(m_aMapProgressPlayers[Slot].Failed())
 			{
 				FailMapProgressForMap(pMap, pCollision, CurrentMapCrc);

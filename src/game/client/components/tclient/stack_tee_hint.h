@@ -1,6 +1,8 @@
 #ifndef GAME_CLIENT_COMPONENTS_TCLIENT_STACK_TEE_HINT_H
 #define GAME_CLIENT_COMPONENTS_TCLIENT_STACK_TEE_HINT_H
 
+#include "me_binds.h"
+
 #include <base/vmath.h>
 
 #include <game/mapitems.h>
@@ -11,7 +13,7 @@
 
 namespace tclient_stack_tee
 {
-	inline constexpr const char *BIND_COMMAND = "toggle me_stack_tee_hint 0 1";
+	inline constexpr const char *BIND_COMMAND = tclient_me_binds::STACK_TEE_HINT;
 
 	class CStackTeeCollisionState
 	{

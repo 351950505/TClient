@@ -14,7 +14,7 @@
 #include <game/client/ui.h>
 
 #include <map>
-#include <optional>
+#include <string>
 
 struct SScoreInfo
 {
@@ -62,6 +62,12 @@ class CHud : public CComponent
 	TClientHudMapProgress::CProgressState m_aMapProgressState[NUM_DUMMIES];
 	bool m_aMapProgressValid[NUM_DUMMIES] = {};
 	float m_aMapProgressDisplayed[NUM_DUMMIES] = {};
+	CCachedText m_MapProgressHudLabel;
+	CCachedText m_MapProgressHudText;
+	std::string m_MapProgressHudCaption;
+	int m_MapProgressHudFontScale = -1;
+	int m_MapProgressHudTenths = -2; // -1 is an unknown estimate.
+	float m_MapProgressHudFontSize = 0.0f;
 	STcFrozenHudFrame<MAX_CLIENTS> m_FrozenHudFrame;
 	ColorRGBA m_FrozenHudTextColor;
 	ColorRGBA m_FrozenHudTextOutlineColor;
@@ -92,8 +98,6 @@ class CHud : public CComponent
 
 	void RenderCursor();
 	void UpdateMapProgress();
-	void RenderMapProgressStandalone(int Dummy);
-	bool RenderMapProgressBelowBoard(const CUIRect &Board, float SafeBottom, int Dummy);
 
 	void RenderTextInfo();
 	void RenderConnectionWarning();
@@ -109,7 +113,7 @@ class CHud : public CComponent
 	// 本帧右下角观战名字框是否绘制了（供落水榜贴在其上方）
 	bool m_SpectatorCountBoxShown = false;
 	float m_SpectatorCountBoxHeight = 0.0f;
-	void RenderSpectatorCount();
+	void RenderSpectatorCount(float RightHudTop);
 
 	// 冻结胶囊预烘焙（学灵动岛 EnsureShapeTexture）：面板/高光各烤一张 alpha 遮罩
 	// 纹理按 (宽,高,圆角,变体) 缓存，每帧只是一次带色 blit，省掉 DrawRectExt 的
@@ -141,8 +145,10 @@ class CHud : public CComponent
 	};
 	std::map<SCapsuleMaskKey, SCapsuleMaskEntry> m_aCapsuleMaskCache;
 	IGraphics::CTextureHandle EnsureCapsuleMask(int W, int H, float Rounding, bool Sheen);
-	void RenderDummyActions();
-	void RenderMovementInformation();
+	void RenderDummyActions(float RightHudTop);
+	void RenderMovementInformation(float &RightHudTop);
+	void CacheMapProgressHudText(int Tenths);
+	void RenderMapProgressHud(float MovementInformationTop);
 
 	void UpdateMovementInformationTextContainer(STextContainerIndex &TextContainer, float FontSize, float Value, float &PrevValue);
 	void RenderMovementInformationTextContainer(STextContainerIndex &TextContainer, const ColorRGBA &Color, float X, float Y);
@@ -176,6 +182,7 @@ public:
 	void ResetHudContainers();
 	void OnWindowResize() override;
 	void OnReset() override;
+	void OnUpdate() override;
 	void OnRender() override;
 	void OnInit() override;
 	void OnNewSnapshot() override;
@@ -194,13 +201,8 @@ public:
 private:
 	void RenderRecord();
 	void RenderDDRaceEffects();
-	struct SDrownBoardPlacement
-	{
-		CUIRect m_Bounds;
-		float m_SafeBottom;
-	};
 	// Gores 组队落水榜（QmClient 移植，默认关闭）
-	std::optional<SDrownBoardPlacement> RenderDrownBoard();
+	void RenderDrownBoard(float RightHudTop);
 	float m_TimeCpDiff;
 	float m_aPlayerRecord[NUM_DUMMIES];
 	float m_FinishTimeDiff;
@@ -209,7 +211,6 @@ private:
 	int m_TimeCpLastReceivedTick;
 	bool m_ShowFinishTime;
 
-	inline float GetMovementInformationBoxHeight();
 	inline int GetDigitsIndex(int Value, int Max);
 
 	// Quad Offsets

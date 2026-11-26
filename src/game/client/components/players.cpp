@@ -30,9 +30,9 @@
 #include <game/mapitems.h>
 
 // TClient
-#include <game/client/components/tclient/rainbow.h>
 #include <game/client/components/tclient/frozen_entry_highlight.h>
 #include <game/client/components/tclient/hook_tile_highlight.h>
+#include <game/client/components/tclient/rainbow.h>
 #include <game/client/prediction/entities/character.h>
 
 static float CalculateHandAngle(vec2 Dir, float AngleOffset)
@@ -1020,40 +1020,39 @@ void CPlayers::UpdateFreezeEntryTileHighlight()
 	const int Width = pCollision->GetWidth();
 	const int Height = pCollision->GetHeight();
 	const int PrimaryLocalClientId = GameClient()->m_Snap.m_LocalClientId;
-	const bool ActiveLocalView = InGame && Width > 0 && Height > 0;
+	const bool ActiveLocalView = InGame;
 	const bool Spectating = GameClient()->m_Snap.m_SpecInfo.m_Active;
 	const bool Enabled = g_Config.m_TcFreezeEntryHighlight != 0;
+	const bool Visible = Enabled && !Spectating && Width > 0 && Height > 0;
 
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; ++Dummy)
 	{
 		const int ClientId = GameClient()->m_aLocalIds[Dummy];
-		if(m_aFreezeEntryClientId[Dummy] != ClientId)
+		if(in_range(ClientId, MAX_CLIENTS - 1) && m_aFreezeEntryClientId[Dummy] != ClientId)
 		{
 			m_aLocalFreezeEntryHighlight[Dummy].Reset();
 			m_aFreezeEntryClientId[Dummy] = ClientId;
 		}
-		const bool ActiveLocalTee = ActiveLocalView &&
-					    tclient_frozen_entry::IsPrimaryLocalClient(ClientId, PrimaryLocalClientId) &&
-					    in_range(ClientId, MAX_CLIENTS - 1) && GameClient()->m_aClients[ClientId].m_Active &&
-					    GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
-		if(ActiveLocalTee && Spectating && Enabled)
+		const bool PrimaryLocalTee = ActiveLocalView &&
+			tclient_frozen_entry::IsPrimaryLocalClient(ClientId, PrimaryLocalClientId) &&
+			in_range(ClientId, MAX_CLIENTS - 1) && GameClient()->m_aClients[ClientId].m_Active;
+		const bool ActiveLocalTee = PrimaryLocalTee && GameClient()->m_Snap.m_aCharacters[ClientId].m_Active;
+		if(!ActiveLocalTee)
 		{
-			m_aLocalFreezeEntryHighlight[Dummy].Suspend();
-			continue;
-		}
-		const bool Active = ActiveLocalTee && !Spectating;
-		if(!Active)
-		{
-			m_aLocalFreezeEntryHighlight[Dummy].Update(false, false, Enabled, [] { return -1; });
+			if(PrimaryLocalTee && !Spectating)
+				m_aLocalFreezeEntryHighlight[Dummy].Reset(); // Death starts a new character episode, not a thaw.
+			else
+				m_aLocalFreezeEntryHighlight[Dummy].Update(false, false, false, Enabled, Visible, [] { return -1; });
 			continue;
 		}
 
 		const auto &Character = GameClient()->m_Snap.m_aCharacters[ClientId];
-		const bool ServerConfirmedFrozen = Character.m_HasExtendedData &&
-			(Character.m_ExtendedData.m_Flags & CHARACTERFLAG_IN_FREEZE) != 0;
+		const bool HasServerSnapshot = Character.m_HasExtendedData;
+		const bool ServerConfirmedFrozen = HasServerSnapshot &&
+						   (Character.m_ExtendedData.m_FreezeEnd != 0 || (Character.m_ExtendedData.m_Flags & CHARACTERFLAG_MOVEMENTS_DISABLED) != 0);
 		const vec2 Pos(Character.m_Cur.m_X, Character.m_Cur.m_Y);
 		m_aLocalFreezeEntryHighlight[Dummy].Update(
-			Active, ServerConfirmedFrozen, Enabled, [&] {
+			ActiveLocalTee, HasServerSnapshot, ServerConfirmedFrozen, Enabled, Visible, [&] {
 				if(!ServerConfirmedFrozen || Pos.x < 0.0f || Pos.y < 0.0f || Pos.x >= Width * 32.0f || Pos.y >= Height * 32.0f)
 					return -1;
 				const int MapIndex = pCollision->GetMapIndex(Pos);
@@ -1330,7 +1329,8 @@ void CPlayers::RenderPlayer(
 	if(!InAir && WantOtherDir && length(Vel * 50) > 500.0f &&
 		// TClient 特效裁剪：ClientId < 0 是本地幽灵 tee，按自己算
 		((ClientId < 0 || GameClient()->m_aClients[ClientId].m_IsPredictedLocal) ?
-			!g_Config.m_TcDisableLocalSkidTrail : !g_Config.m_TcDisableOthersSkidTrail))
+				!g_Config.m_TcDisableLocalSkidTrail :
+				!g_Config.m_TcDisableOthersSkidTrail))
 		GameClient()->m_Effects.SkidTrail(Position, Vel, Player.m_Direction, Alpha, Volume);
 
 	// draw gun
@@ -1600,7 +1600,8 @@ void CPlayers::RenderPlayer(
 	{
 		// TClient 特效裁剪：ClientId < 0 是本地幽灵 tee，按自己算
 		if((ClientId < 0 || GameClient()->m_aClients[ClientId].m_IsPredictedLocal) ?
-			!g_Config.m_TcDisableLocalSnowflakes : !g_Config.m_TcDisableOthersSnowflakes)
+				!g_Config.m_TcDisableLocalSnowflakes :
+				!g_Config.m_TcDisableOthersSnowflakes)
 			GameClient()->m_Effects.FreezingFlakes(BodyPos, vec2(32, 32), Alpha);
 	}
 	if(RenderInfo.m_TeeRenderFlags & TEE_EFFECT_SPARKLE)

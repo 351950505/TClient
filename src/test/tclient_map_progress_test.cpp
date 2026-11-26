@@ -254,6 +254,28 @@ TEST(TClientMapProgress, VisualMetadataBudgetRejectsExtremeItemCounts)
 	EXPECT_FALSE(IsMapProgressVisualMetadataWithinBudget(-1, 0, 0, 0));
 }
 
+TEST(TClientMapProgress, FrameBudgetIsSharedAcrossActiveSlots)
+{
+	using namespace TClientMapProgress;
+	for(int NumSlots = 1; NumSlots <= 3; ++NumSlots) // Main, dummy, and spectated player.
+	{
+		int Remaining = MAP_PROGRESS_DIJKSTRA_BUDGET;
+		int Distributed = 0;
+		for(int SlotsLeft = NumSlots; SlotsLeft > 0; --SlotsLeft)
+		{
+			const int Share = ShareMapProgressBudget(Remaining, SlotsLeft);
+			EXPECT_GT(Share, 0);
+			EXPECT_LE(Share, Remaining);
+			Distributed += Share;
+			Remaining -= Share;
+		}
+		EXPECT_EQ(Distributed, MAP_PROGRESS_DIJKSTRA_BUDGET);
+		EXPECT_EQ(Remaining, 0);
+	}
+	EXPECT_EQ(ShareMapProgressBudget(0, 2), 0);
+	EXPECT_EQ(ShareMapProgressBudget(10, 0), 0);
+}
+
 TEST(TClientMapProgress, QueueBoundStopsGrowthInsteadOfReportingACompleteRoute)
 {
 	EXPECT_TRUE(TClientMapProgress::HasMapProgressQueueRoom(3, 4));

@@ -4040,11 +4040,13 @@ public:
 		// panel rather than one long smear of text.
 		const float CoverSize = 44.0f * Scale;
 		const float ClockPad = 19.0f * Scale;          // padding inside the clock cell
-		const float MapProgressIconSize = 12.0f * Scale;
-		const float MapProgressIconGap = 4.0f * Scale;
+		const float MapProgressPadding = TClientHudMapProgress::ISLAND_MAP_PROGRESS_PADDING * Scale;
+		const float MapProgressTextSize = TimerSize * TClientHudMapProgress::ISLAND_MAP_PROGRESS_FONT_SCALE;
+		const float MapProgressIconSize = TClientHudMapProgress::ISLAND_MAP_PROGRESS_ICON_SIZE * Scale;
+		const float MapProgressIconGap = TClientHudMapProgress::ISLAND_MAP_PROGRESS_ICON_GAP * Scale;
 		const float MapProgressIconW = ShowMapProgressSlot ? MeasureCached(
 			m_pTextRender, MapProgressIconSize, FontIcon::FLAG_CHECKERED, EFontPreset::ICON_FONT) : 0.0f;
-		const float MapProgressTextW = ShowMapProgressSlot ? MeasureCached(m_pTextRender, TimerSize, "100.0%") : 0.0f;
+		const float MapProgressTextW = ShowMapProgressSlot ? MeasureCached(m_pTextRender, MapProgressTextSize, "100.0%") : 0.0f;
 		if(!ShowMapProgressSlot)
 			ResetMapProgressTextCache();
 		else
@@ -4065,11 +4067,11 @@ public:
 				str_format(aMapProgress, sizeof(aMapProgress), "%.1f%%", MapProgressValue * 100.0f);
 			else
 				str_copy(aMapProgress, "--");
-			m_MapProgressText.Update(m_pTextRender, aMapProgress, TimerSize);
-		}
+			m_MapProgressText.Update(m_pTextRender, aMapProgress, MapProgressTextSize);
+			}
 		const float MapProgressContentW = ShowMapProgressSlot ? TClientHudMapProgress::IslandValueContentWidth(
 			MapProgressTextW, MapProgressIconW, MapProgressIconGap) : 0.0f;
-		const float MapProgressCellW = ShowMapProgressSlot ? TClientHudMapProgress::IslandValueCellWidth(MapProgressContentW, ClockPad) : 0.0f;
+		const float MapProgressCellW = ShowMapProgressSlot ? TClientHudMapProgress::IslandValueCellWidth(MapProgressContentW, MapProgressPadding) : 0.0f;
 		const float DiscPad = 15.0f * Scale;           // padding either side of the disc
 		// 端帽是半径 = Height/2 的半圆，右边缘要留出整个端帽宽度再放柱子，
 		// 否则柱子的右半截会被圆角裁掉（玩家反馈的"右边没了"）。
@@ -4180,14 +4182,16 @@ public:
 		const float Dim = m_ClockPlaying ? 1.0f : 0.55f;
 		auto DrawMapProgressCell = [&](float CellX, float Alpha) {
 			const auto ValueLayout = TClientHudMapProgress::IslandValueLayout(
-				CellX, PillY, MapProgressCellW, Height, MapProgressContentW, TimerSize, ClockPad);
+				CellX, PillY, MapProgressCellW, Height, MapProgressContentW, MapProgressTextSize, MapProgressPadding);
 			if(!ValueLayout.m_Visible)
 				return;
 			const float PixelToHud = 300.0f / RealH;
-			ColorRGBA ProgressColor = TClientModernUi::Accent(ValueLayout.m_ValueX * PixelToHud, ValueLayout.m_ValueY * PixelToHud);
+			ColorRGBA ProgressColor = g_Config.m_TcMapProgressFollowAccent ?
+				TClientModernUi::Accent(ValueLayout.m_ValueX * PixelToHud, ValueLayout.m_ValueY * PixelToHud) :
+				ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
 			ProgressColor.a = Alpha;
 			m_MapProgressIcon.Render(m_pTextRender,
-				vec2(ValueLayout.m_ValueX, ValueLayout.m_ValueY + (TimerSize - MapProgressIconSize) * 0.5f), ProgressColor);
+				vec2(ValueLayout.m_ValueX, ValueLayout.m_ValueY + (MapProgressTextSize - MapProgressIconSize) * 0.5f), ProgressColor);
 			m_MapProgressText.Render(m_pTextRender,
 				vec2(ValueLayout.m_ValueX + MapProgressIconW + MapProgressIconGap, ValueLayout.m_ValueY), ProgressColor);
 		};

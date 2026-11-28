@@ -2333,8 +2333,8 @@ void CHud::RenderMovementInformation(float &RightHudTop)
 	const CMovementInformation Info = GetMovementInformation(ClientId, g_Config.m_ClDummy);
 
 	float y = StartY + LineSpacer * 2.0f;
-	const float LeftX = StartX + 2.0f;
-	const float RightX = m_Width - 2.0f;
+	const float LeftX = StartX + TClientHudMapProgress::MOVEMENT_INFORMATION_TEXT_INSET;
+	const float RightX = m_Width - TClientHudMapProgress::MOVEMENT_INFORMATION_TEXT_INSET;
 
 	if(g_Config.m_ClShowhudPlayerPosition)
 	{
@@ -2622,11 +2622,12 @@ void CHud::RenderMapProgressHud(float MovementInformationTop)
 	const int Tenths = m_aMapProgressState[Dummy].TryGetForClient(GameClient()->m_TClient.MapProgressClientId(Dummy), Progress) ? round_to_int(Progress * 1000.0f) : -1;
 	CacheMapProgressHudText(Tenths);
 	const float Top = TClientHudMapProgress::MapProgressHudTop(MovementInformationTop);
-	const float X = m_Width - m_MapProgressHudText.Width();
+	const float X = TClientHudMapProgress::StandaloneHudValueX(m_Width, m_MapProgressHudText.Width());
 	const float LabelX = X - TClientHudMapProgress::LABEL_GAP - m_MapProgressHudLabel.Width();
 	const float LabelY = Top + (m_MapProgressHudText.MaxCharacterHeight() - m_MapProgressHudLabel.MaxCharacterHeight());
-	m_MapProgressHudLabel.Render(TextRender(), vec2(LabelX, LabelY), ColorRGBA(215 / 255.0f, 219 / 255.0f, 216 / 255.0f, 1.0f));
-	m_MapProgressHudText.Render(TextRender(), vec2(X, Top), TClientModernUi::Accent(X, Top));
+	const ColorRGBA ProgressColor = g_Config.m_TcMapProgressFollowAccent ? TClientModernUi::Accent(X, Top) : ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
+	m_MapProgressHudLabel.Render(TextRender(), vec2(LabelX, LabelY), ProgressColor);
+	m_MapProgressHudText.Render(TextRender(), vec2(X, Top), ProgressColor);
 }
 
 void CHud::OnRender()

@@ -226,7 +226,7 @@ namespace TClientMapProgress
 		const STile &Tile(int Index) const { return m_vTiles[(size_t)Index]; }
 		void SetTile(int Index, const STile &Tile) { m_vTiles[(size_t)Index] = Tile; }
 		bool Finalized() const { return m_Finalized; }
-		bool Ready() const { return m_Finalized && !m_vStarts.empty() && !m_vFinishes.empty(); }
+		bool Ready() const { return m_Finalized && !m_vFinishes.empty(); }
 		int CheckpointCount() const { return m_CheckpointCount; }
 
 		void FinalizeStep(int Budget)
@@ -495,14 +495,19 @@ namespace TClientMapProgress
 			}
 		}
 
-		int Source(const std::vector<int> &vSources, int ObservedSource) const
+	int Source(const std::vector<int> &vSources, int ObservedSource) const
 	{
 		if(ObservedSource >= 0)
-			return Settled(ObservedSource) ? ObservedSource : -1;
+		{
+			if(Length(ObservedSource) > 0)
+				return ObservedSource;
+			if(!Settled(ObservedSource) && !Complete())
+				return -1;
+		}
 		int Best = -1;
 		for(const int Index : vSources)
 		{
-			if(Settled(Index) && (Best < 0 || Cost(Index) < Cost(Best)))
+			if(Length(Index) > 0 && (Best < 0 || Cost(Index) < Cost(Best)))
 				Best = Index;
 		}
 		return Best;
@@ -540,11 +545,31 @@ inline int ResolveSpectatorClientId(bool Spectating, int SpectatorId)
 	return ResolveClientId(-1, Spectating, SpectatorId);
 }
 
-inline std::optional<vec2> ResolvePosition(std::optional<vec2> Character, std::optional<vec2> SpecCharacter, std::optional<vec2> Spectator)
+inline constexpr int MAP_PROGRESS_FREEVIEW_ID = MAX_CLIENTS;
+
+inline int ResolveProgressViewClientId(bool Spectating, int SpectatorId)
+{
+	if(!Spectating)
+		return -1;
+	const int ClientId = ResolveSpectatorClientId(true, SpectatorId);
+	return ClientId >= 0 ? ClientId : MAP_PROGRESS_FREEVIEW_ID;
+}
+
+inline bool IsProgressFreeview(int ClientId)
+{
+	return ClientId == MAP_PROGRESS_FREEVIEW_ID;
+}
+
+inline bool RaceTimeStarted(bool HasGameInfo, bool RaceTimeFlag)
+{
+	return HasGameInfo && RaceTimeFlag;
+}
+
+inline std::optional<vec2> ResolvePosition(std::optional<vec2> Character, std::optional<vec2> SpecCharacter)
 {
 	if(Character)
 		return Character;
-	return SpecCharacter ? SpecCharacter : Spectator;
+	return SpecCharacter;
 }
 
 inline SEstimate EstimateDistance(int RemainingDistance, int StartDistance)
@@ -570,24 +595,71 @@ class CPlayer
 	bool m_PendingDirection = false;
 	bool m_SegmentsRejected = false;
 	bool m_UseSegmentForRoute = false;
+	int m_PendingStartIndex = -1;
+	int m_FirstTimedIndex = -1;
+	bool m_RaceTimeStarted = false;
+	bool m_ViewOnly = false;
+
+	void ResetRunState()
+	{
+		m_Estimate = {};
+		m_Stage = -1;
+		m_StartIndex = -1;
+		m_SourceIndex = -1;
+		m_TeleCheckpoint = -1;
+		m_PreviousTimeCheckpoint = -1;
+		m_PendingDirection = false;
+		m_SegmentsRejected = false;
+		m_UseSegmentForRoute = false;
+		m_OnStart = false;
+		m_OnFinish = false;
+		m_PendingStartIndex = -1;
+		m_FirstTimedIndex = -1;
+		m_RaceTimeStarted = false;
+		m_ViewOnly = false;
+	}
 
 public:
 	void Reset() { *this = CPlayer(); }
 	const SEstimate &Estimate() const { return m_Estimate; }
 	bool Failed() const { return m_Global.Failed() || m_Segment.Failed(); }
 
-	void Observe(const STile &Tile, int Index)
+	void Observe(const STile &Tile, int Index, bool RaceTimeStarted)
 	{
-		if(Tile.m_Start)
+		if(!RaceTimeStarted)
 		{
-			if(!m_OnStart)
-				m_SegmentsRejected = false;
-			m_Stage = 0;
+			if(m_RaceTimeStarted || m_ViewOnly)
+				ResetRunState();
+			if(Tile.m_Start)
+				m_PendingStartIndex = Index;
+			m_PreviousTimeCheckpoint = Tile.m_TimeCheckpoint;
+			m_OnStart = Tile.m_Start;
+			m_OnFinish = Tile.m_Finish;
+			return;
+		}
+
+		if(!m_RaceTimeStarted)
+		{
+			const int StartIndex = Tile.m_Start ? Index : m_PendingStartIndex;
+			ResetRunState();
+			m_RaceTimeStarted = true;
+			m_FirstTimedIndex = Index;
+			m_StartIndex = StartIndex;
+			m_SourceIndex = StartIndex;
+			if(StartIndex >= 0)
+				m_Stage = 0;
+		}
+		else if(Tile.m_Start && !m_OnStart && m_StartIndex < 0)
+		{
+			// The timer may be observed a snapshot late while the Tee is still touching start.
 			m_StartIndex = Index;
 			m_SourceIndex = Index;
+			m_Stage = 0;
 			m_PendingDirection = false;
 		}
-		else if(Tile.m_TimeCheckpoint >= 0 && Tile.m_TimeCheckpoint != m_PreviousTimeCheckpoint)
+		if(Tile.m_Start)
+			m_PendingStartIndex = Index;
+		if(Tile.m_TimeCheckpoint >= 0 && Tile.m_TimeCheckpoint != m_PreviousTimeCheckpoint)
 		{
 			m_Stage = Tile.m_TimeCheckpoint + 1;
 			m_SourceIndex = Index;
@@ -598,14 +670,42 @@ public:
 		m_OnFinish = Tile.m_Finish;
 	}
 
+	void ObserveView(const STile &Tile, int Index)
+	{
+		if(!m_ViewOnly || m_RaceTimeStarted)
+			ResetRunState();
+		m_ViewOnly = true;
+		m_PendingStartIndex = -1;
+		m_Stage = -1;
+		m_StartIndex = -1;
+		m_SourceIndex = -1;
+		m_PreviousTimeCheckpoint = -1;
+		m_OnStart = Tile.m_Start;
+		m_OnFinish = Tile.m_Finish;
+		m_CurrentIndex = Index;
+	}
+
 	void Update(const CMap &Map, int Index, int TeleCheckpoint, int Budget, bool UseTimeCheckpoints = true)
 	{
 		m_CurrentIndex = Index;
+		if(!m_RaceTimeStarted && !m_ViewOnly)
+		{
+			m_Estimate = {};
+			return;
+		}
 		if(!Map.Ready() || Index < 0 || Index >= Map.Size())
 		{
 			m_Estimate = {};
 			return;
 		}
+			if(m_RaceTimeStarted && !m_ViewOnly && m_StartIndex < 0 && Map.Sources(-1).empty())
+			{
+				// Timer state is authoritative when a map omits TILE_START collision data.
+				// Keep the first sampled race position even if map scanning finishes later.
+				m_StartIndex = m_FirstTimedIndex >= 0 ? m_FirstTimedIndex : Index;
+				m_SourceIndex = m_StartIndex;
+				m_Stage = 0;
+			}
 		TeleCheckpoint = std::clamp(TeleCheckpoint, 0, 255);
 		if(m_TeleCheckpoint != TeleCheckpoint)
 		{
@@ -658,9 +758,9 @@ public:
 				return;
 			}
 		}
-		if(m_OnStart || m_OnFinish)
+		if(m_OnFinish)
 		{
-			m_Estimate = {true, m_OnFinish ? 1.0f : 0.0f};
+			m_Estimate = {true, 1.0f};
 			return;
 		}
 		const int Source = m_Global.Source(Map.Sources(-1), m_StartIndex);

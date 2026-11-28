@@ -9,16 +9,17 @@
 #include <game/client/gameclient.h>
 #include <game/client/render.h>
 #include <game/mapitems.h>
+#include <game/map/freeze_outline_geometry.h>
 
-// The order of this is the order of priority for outlines
+// Keep the existing names local to this component while sharing the priority values.
 enum
 {
-	OUTLINE_NONE = 0,
-	OUTLINE_UNFREEZE,
-	OUTLINE_FREEZE,
-	OUTLINE_TELE,
-	OUTLINE_KILL,
-	OUTLINE_SOLID,
+	OUTLINE_NONE = FREEZE_OUTLINE_NONE,
+	OUTLINE_UNFREEZE = FREEZE_OUTLINE_UNFREEZE,
+	OUTLINE_FREEZE = FREEZE_OUTLINE_FREEZE,
+	OUTLINE_TELE = FREEZE_OUTLINE_TELE,
+	OUTLINE_KILL = FREEZE_OUTLINE_KILL,
+	OUTLINE_SOLID = FREEZE_OUTLINE_SOLID,
 };
 
 enum class OutlineLayer
@@ -145,10 +146,6 @@ void COutlines::OnRender()
 	if(!g_Config.m_TcOutline)
 		return;
 
-	const float Opacity = g_Config.m_TcOutlineTransparent ? g_Config.m_TcOutlineOpacity / 100.0f : 1.0f;
-	if(Opacity <= 0.0f)
-		return;
-
 	const float Scale = 32.0f;
 
 	const CScreenRect ScreenRect = Graphics()->GetScreen();
@@ -167,11 +164,7 @@ void COutlines::OnRender()
 		EndY -= EdgeY / 2;
 	}
 
-	auto GetTile = [&](int x, int y) {
-		x = std::clamp(x, 0, m_MapDataSize.x - 1);
-		y = std::clamp(y, 0, m_MapDataSize.y - 1);
-		return m_pMapData[y * m_MapDataSize.x + x];
-	};
+	const CFreezeOutlineMapView OutlineMap = FreezeOutlineMap();
 
 	Graphics()->TextureClear();
 	Graphics()->QuadsBegin();
@@ -180,8 +173,11 @@ void COutlines::OnRender()
 	{
 		for(int x = StartX; x < EndX; x++)
 		{
-			const int Type = GetTile(x, y);
+			const int Type = OutlineMap.TypeAt(x, y);
 			if(Type == OUTLINE_NONE)
+				continue;
+			// Transparent mode hides only freeze borders; map tiles and other outlines stay unchanged.
+			if(g_Config.m_TcOutlineTransparent && Type == OUTLINE_FREEZE)
 				continue;
 			class COutlineConfig
 			{
@@ -205,63 +201,17 @@ void COutlines::OnRender()
 			}();
 			if(!Config.m_Enable || Config.m_Width <= 0)
 				continue;
-			// Find neighbours
-			const bool aNeighbors[8] = {
-				GetTile(x - 1, y - 1) >= Type,
-				GetTile(x - 0, y - 1) >= Type,
-				GetTile(x + 1, y - 1) >= Type,
-				GetTile(x - 1, y + 0) >= Type,
-				GetTile(x + 1, y + 0) >= Type,
-				GetTile(x - 1, y + 1) >= Type,
-				GetTile(x + 0, y + 1) >= Type,
-				GetTile(x + 1, y + 1) >= Type,
-			};
-			// Figure out edges
-			IGraphics::CQuadItem aQuads[8];
-			int NumQuads = 0;
-			// Lone corners first
-			if(!aNeighbors[0] && aNeighbors[1] && aNeighbors[3])
-				aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale, y * Scale, Config.m_Width, Config.m_Width);
-			if(!aNeighbors[2] && aNeighbors[1] && aNeighbors[4])
-				aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale + Scale - Config.m_Width, y * Scale, Config.m_Width, Config.m_Width);
-			if(!aNeighbors[5] && aNeighbors[3] && aNeighbors[6])
-				aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale, y * Scale + Scale - Config.m_Width, Config.m_Width, Config.m_Width);
-			if(!aNeighbors[7] && aNeighbors[6] && aNeighbors[4])
-				aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale + Scale - Config.m_Width, y * Scale + Scale - Config.m_Width, Config.m_Width, Config.m_Width);
-			// Top
-			if(!aNeighbors[1])
-				aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale, y * Scale, Scale, Config.m_Width);
-			// Bottom
-			if(!aNeighbors[6])
-				aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale, y * Scale + Scale - Config.m_Width, Scale, Config.m_Width);
-			// Left
-			if(!aNeighbors[3])
-			{
-				if(aNeighbors[1] && aNeighbors[6])
-					aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale, y * Scale, Config.m_Width, Scale);
-				else if(aNeighbors[6])
-					aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale, y * Scale + Config.m_Width, Config.m_Width, Scale - Config.m_Width);
-				else if(aNeighbors[1])
-					aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale, y * Scale, Config.m_Width, Scale - Config.m_Width);
-				else
-					aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale, y * Scale + Config.m_Width, Config.m_Width, Scale - Config.m_Width * 2.0f);
-			}
-			// Right
-			if(!aNeighbors[4])
-			{
-				if(aNeighbors[1] && aNeighbors[6])
-					aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale + Scale - Config.m_Width, y * Scale, Config.m_Width, Scale);
-				else if(aNeighbors[6])
-					aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale + Scale - Config.m_Width, y * Scale + Config.m_Width, Config.m_Width, Scale - Config.m_Width);
-				else if(aNeighbors[1])
-					aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale + Scale - Config.m_Width, y * Scale, Config.m_Width, Scale - Config.m_Width);
-				else
-					aQuads[NumQuads++] = IGraphics::CQuadItem(x * Scale + Scale - Config.m_Width, y * Scale + Config.m_Width, Config.m_Width, Scale - Config.m_Width * 2.0f);
-			}
-			if(NumQuads <= 0)
-				continue;
-			Graphics()->SetColor(color_cast<ColorRGBA>(ColorHSLA(Config.m_Color, true)).WithMultipliedAlpha(Opacity));
-			Graphics()->QuadsDrawTL(aQuads, NumQuads);
+				const auto Geometry = MakeFreezeOutlineGeometry(OutlineMap, x, y, Type, Config.m_Width, false, false);
+				if(Geometry.m_NumBand <= 0)
+					continue;
+				IGraphics::CQuadItem aQuads[8];
+				for(int i = 0; i < Geometry.m_NumBand; ++i)
+				{
+					const auto &Rect = Geometry.m_aBand[i];
+					aQuads[i] = IGraphics::CQuadItem(x * Scale + Rect.m_X, y * Scale + Rect.m_Y, Rect.m_Width, Rect.m_Height);
+				}
+			Graphics()->SetColor(color_cast<ColorRGBA>(ColorHSLA(Config.m_Color, true)));
+			Graphics()->QuadsDrawTL(aQuads, Geometry.m_NumBand);
 		}
 	}
 

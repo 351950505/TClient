@@ -231,14 +231,11 @@ Show any enabled outlines
 Only show outlines in entities
 == 仅在实体层中显示轮廓
 
-Tile outline transparent mode
-== 透明模式
+Cut out freeze borders
+== 冻结边带镂空
 
-Outline opacity multiplier
-== 描边不透明度比例
-
-Scale outline opacity without changing saved colors.
-== 按比例降低描边不透明度，不改变已保存的颜色。
+Cut the freeze texture beneath exposed outline-width strips so the background shows through. Frozen tiles still freeze your Tee.
+== 只挖空外侧冻结边带，露出下面的背景；冻结判定保持不变。
 
 Outline freeze & deep
 == 冻结 & 深度冻结轮廓
@@ -2132,6 +2129,12 @@ Show estimated finish percentage
 
 Use the Dynamic Island instead of the HUD
 == 改为在灵动岛显示
+
+Follow the interface accent color
+== 跟随界面强调色
+
+Use white by default, or follow the interface accent on both displays.
+== 完赛提示默认白色；勾选后右下和灵动岛都跟随界面强调色。
 
 Show progress in the Dynamic Island instead of at the bottom right. If the island is off or unsupported, show it at the bottom right.
 == 进度改在灵动岛显示。如果灵动岛关闭或不支持，进度仍显示在右下角。

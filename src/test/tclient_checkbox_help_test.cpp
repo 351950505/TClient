@@ -6,10 +6,11 @@
 
 #include <gtest/gtest.h>
 
-TEST(ClientCheckBoxHelp, CoversFullMapTeeAndTransparentOutlines)
+TEST(ClientCheckBoxHelp, CoversNewCheckboxHelpEntries)
 {
 	EXPECT_NE(FindCheckBoxHelpText(&g_Config.m_TcFrozenTeesShowAll), nullptr);
 	EXPECT_NE(FindCheckBoxHelpText(&g_Config.m_TcOutlineTransparent), nullptr);
+	EXPECT_NE(FindCheckBoxHelpText(&g_Config.m_TcMapProgressFollowAccent), nullptr);
 }
 
 TEST(ClientCheckBoxHelp, AddressesAreUnique)

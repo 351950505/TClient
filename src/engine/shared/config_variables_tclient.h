@@ -233,8 +233,7 @@ MACRO_CONFIG_INT(TcRevertHookLine, tc_revert_hook_line, 0, 0, 1, CFGFLAG_CLIENT 
 // Outline Variables
 MACRO_CONFIG_INT(TcOutline, tc_outline, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Draws outlines")
 MACRO_CONFIG_INT(TcOutlineEntities, tc_outline_in_entities, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Only show outlines in entities")
-MACRO_CONFIG_INT(TcOutlineTransparent, tc_outline_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Enable adjustable transparency for tile outlines")
-MACRO_CONFIG_INT(TcOutlineOpacity, tc_outline_opacity, 35, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Opacity multiplier for tile outlines in transparent mode (percent)")
+MACRO_CONFIG_INT(TcOutlineTransparent, tc_outline_transparent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Cut the outline band out of freeze entity textures; does not affect gameplay")
 
 MACRO_CONFIG_INT(TcOutlineSolid, tc_outline_solid, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Draws outline around hook and unhook")
 MACRO_CONFIG_INT(TcOutlineFreeze, tc_outline_freeze, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Draws outline around freeze and deep")
@@ -522,7 +521,8 @@ MACRO_CONFIG_INT(TcDrownBoardResetOnWipe, tc_drown_board_reset_on_wipe, 1, 0, 1,
 // QmClient map-to-finish estimate, adapted to the TClient HUD; the master switch is off by default.
 MACRO_CONFIG_INT(TcMapProgress, tc_map_progress, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "On Gores, show your finish progress. When spectating, show the selected player instead")
 MACRO_CONFIG_INT(TcMapProgressStyle, tc_map_progress_style, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Show progress in the Dynamic Island instead of at the bottom right; fall back to the bottom right if the island is off or unsupported")
-MACRO_CONFIG_COL(TcMapProgressColor, tc_map_progress_color, 6602362, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Legacy map progress color (unused); map progress uses the global UI accent color")
+MACRO_CONFIG_INT(TcMapProgressFollowAccent, tc_map_progress_follow_accent, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Use the interface accent color for finish progress in the HUD and Dynamic Island")
+MACRO_CONFIG_COL(TcMapProgressColor, tc_map_progress_color, 6602362, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Legacy map progress color (unused); the HUD and island are white by default and can follow the UI accent")
 // Retain these settings for existing configs; the map progress HUD now has a fixed anchor.
 MACRO_CONFIG_INT(TcMapProgressWidth, tc_map_progress_width, 28, 10, 80, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Legacy map progress fallback width (unused)")
 MACRO_CONFIG_INT(TcMapProgressHeight, tc_map_progress_height, 10, 6, 30, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Legacy map progress fallback text height (unused)")

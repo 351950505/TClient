@@ -55,12 +55,22 @@ namespace TClientHudMapProgress
 	}
 
 	inline constexpr float MOVEMENT_INFORMATION_BOX_WIDTH = 62.0f;
+	inline constexpr float MOVEMENT_INFORMATION_TEXT_INSET = 2.0f;
 	inline constexpr float MAP_PROGRESS_HUD_MAX_WIDTH = 25.0f;
 	inline constexpr float MAP_PROGRESS_HUD_HEIGHT = 5.5f;
 	inline constexpr float MAP_PROGRESS_HUD_GAP = 2.0f;
 	inline constexpr float MAP_PROGRESS_HUD_FONT_SIZE = 4.5f;
+
+	inline float StandaloneHudValueX(float ScreenWidth, float TextWidth)
+	{
+		return ScreenWidth - MOVEMENT_INFORMATION_TEXT_INSET - TextWidth;
+	}
 	inline constexpr float LABEL_SCALE = 0.70f;
 	inline constexpr float LABEL_GAP = 0.85f;
+	inline constexpr float ISLAND_MAP_PROGRESS_FONT_SCALE = 0.875f;
+	inline constexpr float ISLAND_MAP_PROGRESS_ICON_SIZE = 10.0f;
+	inline constexpr float ISLAND_MAP_PROGRESS_ICON_GAP = 3.0f;
+	inline constexpr float ISLAND_MAP_PROGRESS_PADDING = 14.0f;
 	inline constexpr float MINI_DEBUG_TEXT_HEIGHT = 11.0f;
 
 	inline float StandaloneHudStackOffset(bool Visible)

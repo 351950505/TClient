@@ -26,7 +26,7 @@ let m;
 while((m = ENTRY_RE.exec(HELP_CPP)))
 	entries.push({ name: m[1], help: m[2].replace(/\\"/g, '"').replace(/\\\\/g, '\\') });
 
-expect(entries.length === 143, `帮助表条目数应为 143，实际为 ${entries.length}`);
+expect(entries.length === 144, `帮助表条目数应为 144，实际为 ${entries.length}`);
 expect(entries.length === [...new Set(entries.map(e => e.name))].length, '帮助表存在重复配置项条目');
 
 // ---- 词典（data/tclient/languages，格式：可选 [context] 段 + 英文行 + "== 译文"）----
@@ -97,16 +97,27 @@ const OUTLINES_CPP = READ('src', 'game', 'client', 'components', 'tclient', 'out
 const outlineMenuStart = TCLIENT_CPP.indexOf('// ***** Tile Outlines ***** //');
 const outlineMenuEnd = TCLIENT_CPP.indexOf('s_SectionBoxes.back().h', outlineMenuStart);
 const outlineSection = TCLIENT_CPP.slice(outlineMenuStart, outlineMenuEnd);
-expect(/MACRO_CONFIG_INT\(TcOutlineTransparent, tc_outline_transparent, 0, 0, 1, CFGFLAG_CLIENT \| CFGFLAG_SAVE,/.test(CONFIG), '透明模式默认关闭且需主动开启');
-expect(/MACRO_CONFIG_INT\(TcOutlineOpacity, tc_outline_opacity, 35, 0, 100, CFGFLAG_CLIENT \| CFGFLAG_SAVE,/.test(CONFIG), '透明模式的不透明度默认约 35% 且范围 0–100%');
-expect(/if\(g_Config\.m_TcOutlineTransparent\)\s*\{[^}]*DoScrollbarOption\(&g_Config\.m_TcOutlineOpacity, &g_Config\.m_TcOutlineOpacity, &Button, TCLocalize\("Outline opacity multiplier"\), 0, 100,/.test(outlineSection), '透明模式开启后显示可调不透明度滑条');
-expect(/const float Opacity = g_Config\.m_TcOutlineTransparent \? g_Config\.m_TcOutlineOpacity \/ 100\.0f : 1\.0f;\s*if\(Opacity <= 0\.0f\)\s*return;/.test(OUTLINES_CPP) && OUTLINES_CPP.indexOf('if(Opacity <= 0.0f)') < OUTLINES_CPP.indexOf('Graphics()->QuadsBegin()'), '关闭模式保留原不透明度，0% 时跳过绘制');
-expect(/SetColor\(color_cast<ColorRGBA>\(ColorHSLA\(Config\.m_Color, true\)\)\.WithMultipliedAlpha\(Opacity\)\)/.test(OUTLINES_CPP), '百分比只缩放现有轮廓色的 alpha，保留 RGB 与保存颜色');
-for(const lang of ['simplified_chinese.txt','traditional_chinese.txt']) {
-  const dict = READ('data', 'tclient', 'languages', lang);
-  for(const key of ['Tile outline transparent mode','Outline opacity multiplier','Scale outline opacity without changing saved colors.'])
-    expect(dict.includes(`\n${key}\n== `), `${lang} 缺少透明模式翻译: ${key}`);
-}
+expect(/MACRO_CONFIG_INT\(TcOutlineTransparent, tc_outline_transparent, 0, 0, 1, CFGFLAG_CLIENT \| CFGFLAG_SAVE,/.test(CONFIG), '冻结轮廓隐藏开关默认关闭');
+expect(!/\bTcOutlineOpacity\b|tc_outline_opacity/.test(CONFIG), '隐藏冻结轮廓时不应保留无效的不透明度配置');
+expect(!/TcOutlineOpacity|Outline opacity multiplier/.test(outlineSection), '隐藏冻结轮廓时不显示无效的不透明度滑条');
+const outlineRenderStart = OUTLINES_CPP.indexOf('void COutlines::OnRender()');
+const outlineRender = OUTLINES_CPP.slice(outlineRenderStart);
+expect(outlineRenderStart >= 0 && outlineRender.includes('MakeFreezeOutlineGeometry'), 'Outline strokes use shared edge geometry');
+expect(outlineRender.includes('Type == OUTLINE_FREEZE') && outlineRender.includes('g_Config.m_TcOutlineTransparent'), 'Freeze cutout retains its outline-width geometry');
+expect(/if\(g_Config\.m_TcOutlineTransparent && Type == OUTLINE_FREEZE\)\s*continue;[\s\S]*?QuadsDrawTL\(/.test(outlineRender), '镂空模式必须在绘制前跳过原冻结描边');
+expect(!OUTLINES_CPP.includes('m_TcOutlineOpacity'), 'Freeze-band cutout has no unrelated opacity slider');
+const mapLayers = READ('src', 'game', 'client', 'components', 'maplayers.cpp');
+expect(mapLayers.includes('m_CutoutFreezeOutlines') && mapLayers.includes('m_FreezeOutlineMap') && mapLayers.includes('m_FreezeOutlineWidth'), 'Pass the enabled outline map and configured width into entity tile rendering');
+const renderLayer = READ('src', 'game', 'map', 'render_layer.cpp');
+expect(renderLayer.includes('RenderTilemapWithFreezeCutout') && renderLayer.includes('ShouldCutoutFreezeOutlines'), 'Apply tile cutout to both buffered and immediate entity layer paths');
+const renderMap = READ('src', 'game', 'map', 'render_map.cpp');
+expect(/RenderMap\(\)->RenderTilemap\(m_pTiles,[^;]*&Params\.m_FreezeOutlineMap,\s*Params\.m_FreezeOutlineWidth,/.test(renderLayer) &&
+	/TILE_FREEZE \|\|[^;]*?TILE_DFREEZE \|\|[^;]*?TILE_LFREEZE[^;]*?const auto Cutout = MakeFreezeOutlineGeometry\(\*pFreezeOutlineMap, x, y, FREEZE_OUTLINE_FREEZE, FreezeOutlineWidth,[^;]*;\s*if\(Cutout\.m_NumBand > 0\)[\s\S]*?for\(int i = 0; i < Cutout\.m_NumInterior; \+\+i\)\s*\{\s*const auto &Rect = Cutout\.m_aInterior\[i\];\s*DrawSubTile\(Rect\.[^;]+;\s*\}\s*DidDrawCutout = true;[\s\S]*?if\(!DidDrawCutout &&/.test(renderMap),
+	'Game/Front 只用冻结宽度裁实际冻结贴图区块，不再补画完整冻结贴图');
+const outlineHelp = 'Cut the freeze texture beneath exposed outline-width strips so the background shows through. Frozen tiles still freeze your Tee.';
+expect(entries.some(entry => entry.name === 'TcOutlineTransparent' && entry.help === outlineHelp), 'Help describes the cutout while preserving gameplay freeze');
+for(const key of ['Cut out freeze borders', outlineHelp])
+  expect(SC.has('\n' + key), `简体词典缺少冻结边带镂空说明: ${key}`);
 const DIRECT_HELP_KEYS = [
 	'Resends packets until the server confirms them, so hits still register on bad connections.',
 	'Sends the copies a few milliseconds apart instead of back to back.',

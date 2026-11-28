@@ -591,7 +591,7 @@ void CRenderMap::RenderTile(int x, int y, unsigned char Index, float Scale, Colo
 	Graphics()->MapScreen(ScreenRect);
 }
 
-void CRenderMap::RenderTilemap(CTile *pTiles, int w, int h, float Scale, ColorRGBA Color, int RenderFlags)
+void CRenderMap::RenderTilemap(CTile *pTiles, int w, int h, float Scale, ColorRGBA Color, int RenderFlags, const CFreezeOutlineMapView *pFreezeOutlineMap, int FreezeOutlineWidth, bool IncludeSolidSides)
 {
 	CScreenRect ScreenRect = Graphics()->GetScreen();
 
@@ -724,13 +724,57 @@ void CRenderMap::RenderTilemap(CTile *pTiles, int w, int h, float Scale, ColorRG
 						y1 = Tmp;
 					}
 
-					if(Graphics()->HasTextureArraysSupport())
+					bool DidDrawCutout = false;
+					if(pFreezeOutlineMap && pFreezeOutlineMap->m_pTypes && x >= 0 && x < w && y >= 0 && y < h &&
+						(pTiles[c].m_Index == TILE_FREEZE || pTiles[c].m_Index == TILE_DFREEZE || pTiles[c].m_Index == TILE_LFREEZE) &&
+						pFreezeOutlineMap->TypeAt(x, y) == FREEZE_OUTLINE_FREEZE)
+					{
+						const auto Cutout = MakeFreezeOutlineGeometry(*pFreezeOutlineMap, x, y, FREEZE_OUTLINE_FREEZE, FreezeOutlineWidth, IncludeSolidSides, true);
+						if(Cutout.m_NumBand > 0)
+						{
+							auto DrawSubTile = [&](float Left, float Top, float Right, float Bottom) {
+								auto UvAt = [&](float u, float v) {
+									return vec2(
+										x0 * (1.0f - u) * (1.0f - v) + x1 * u * (1.0f - v) + x2 * u * v + x3 * (1.0f - u) * v,
+										y0 * (1.0f - u) * (1.0f - v) + y1 * u * (1.0f - v) + y2 * u * v + y3 * (1.0f - u) * v);
+								};
+								const vec2 TopLeftUv = UvAt(Left, Top);
+								const vec2 TopRightUv = UvAt(Right, Top);
+								const vec2 BottomRightUv = UvAt(Right, Bottom);
+								const vec2 BottomLeftUv = UvAt(Left, Bottom);
+								const float PosX = x * Scale + Left * Scale;
+								const float PosY = y * Scale + Top * Scale;
+								const float PartWidth = (Right - Left) * Scale;
+								const float PartHeight = (Bottom - Top) * Scale;
+								IGraphics::CQuadItem QuadItem(PosX, PosY, PartWidth, PartHeight);
+								if(Graphics()->HasTextureArraysSupport())
+								{
+									Graphics()->QuadsSetSubsetFree(TopLeftUv.x, TopLeftUv.y, TopRightUv.x, TopRightUv.y, BottomRightUv.x, BottomRightUv.y, BottomLeftUv.x, BottomLeftUv.y, Index);
+									Graphics()->QuadsTex3DDrawTL(&QuadItem, 1);
+								}
+								else
+								{
+									Graphics()->QuadsSetSubsetFree(TopLeftUv.x, TopLeftUv.y, TopRightUv.x, TopRightUv.y, BottomRightUv.x, BottomRightUv.y, BottomLeftUv.x, BottomLeftUv.y);
+									Graphics()->QuadsDrawTL(&QuadItem, 1);
+								}
+							};
+
+							for(int i = 0; i < Cutout.m_NumInterior; ++i)
+							{
+								const auto &Rect = Cutout.m_aInterior[i];
+								DrawSubTile(Rect.m_X / 32.0f, Rect.m_Y / 32.0f, (Rect.m_X + Rect.m_Width) / 32.0f, (Rect.m_Y + Rect.m_Height) / 32.0f);
+							}
+							DidDrawCutout = true;
+						}
+					}
+
+					if(!DidDrawCutout && Graphics()->HasTextureArraysSupport())
 					{
 						Graphics()->QuadsSetSubsetFree(x0, y0, x1, y1, x2, y2, x3, y3, Index);
 						IGraphics::CQuadItem QuadItem(x * Scale, y * Scale, Scale, Scale);
 						Graphics()->QuadsTex3DDrawTL(&QuadItem, 1);
 					}
-					else
+					else if(!DidDrawCutout)
 					{
 						Graphics()->QuadsSetSubsetFree(x0, y0, x1, y1, x2, y2, x3, y3);
 						IGraphics::CQuadItem QuadItem(x * Scale, y * Scale, Scale, Scale);

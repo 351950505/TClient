@@ -43,12 +43,26 @@ namespace
 
 	TClientMapProgress::SEstimate MoveProgressPlayer(TClientMapProgress::CPlayer &Player, const TClientMapProgress::CMap &Map, int Index, int TeleCheckpoint = 0, bool UseTimeCheckpoints = true)
 	{
-		Player.Observe(Map.Tile(Index), Index);
+		Player.Observe(Map.Tile(Index), Index, true);
 		// 小地图也分多次推进，以覆盖换段和回传后重建距离场的行为。
 		for(int Step = 0; Step < 128; ++Step)
 			Player.Update(Map, Index, TeleCheckpoint, 128, UseTimeCheckpoints);
 		return Player.Estimate();
 	}
+}
+
+TEST(TClientMapProgressTarget, FreeviewAndRaceTimerSignalsAreDistinct)
+{
+	EXPECT_EQ(TClientMapProgress::ResolveProgressViewClientId(false, -1), -1);
+	EXPECT_EQ(TClientMapProgress::ResolveProgressViewClientId(true, 17), 17);
+	const int Freeview = TClientMapProgress::ResolveProgressViewClientId(true, -1);
+	EXPECT_EQ(Freeview, TClientMapProgress::MAP_PROGRESS_FREEVIEW_ID);
+	EXPECT_TRUE(TClientMapProgress::IsProgressFreeview(Freeview));
+	EXPECT_FALSE(TClientMapProgress::IsProgressFreeview(17));
+
+	EXPECT_FALSE(TClientMapProgress::RaceTimeStarted(false, true));
+	EXPECT_FALSE(TClientMapProgress::RaceTimeStarted(true, false));
+	EXPECT_TRUE(TClientMapProgress::RaceTimeStarted(true, true));
 }
 
 TEST(TClientMapProgressTarget, ExplicitSpectatorTargetTakesPriorityOverLocalPlayer)
@@ -80,37 +94,30 @@ TEST(TClientMapProgressTarget, InactiveSpectatorSlotDoesNotDuplicateLocalPlayer)
 	EXPECT_EQ(TClientMapProgress::ResolveSpectatorClientId(true, MAX_CLIENTS), -1);
 }
 
-TEST(TClientMapProgressPosition, FullCharacterTakesPriorityOverSpectatorCoordinates)
+TEST(TClientMapProgressPosition, FullCharacterTakesPriorityOverSpecCharacter)
 {
-	const auto Position = TClientMapProgress::ResolvePosition(vec2(16, 32), vec2(48, 64), vec2(80, 96));
+	const auto Position = TClientMapProgress::ResolvePosition(vec2(16, 32), vec2(48, 64));
 	ASSERT_TRUE(Position);
 	EXPECT_EQ(*Position, vec2(16, 32));
 }
 
 TEST(TClientMapProgressPosition, MissingFullCharacterUsesSpecCharacter)
 {
-	const auto Position = TClientMapProgress::ResolvePosition(std::nullopt, vec2(48, 64), vec2(80, 96));
+	const auto Position = TClientMapProgress::ResolvePosition(std::nullopt, vec2(48, 64));
 	ASSERT_TRUE(Position);
 	EXPECT_EQ(*Position, vec2(48, 64));
 }
 
-TEST(TClientMapProgressPosition, SpectatorCoordinatesRemainUsableWithoutCharacterSnapshots)
+TEST(TClientMapProgressPosition, MissingTargetPositionStaysUnknownWithoutCharacterSnapshots)
 {
-	const auto Position = TClientMapProgress::ResolvePosition(std::nullopt, std::nullopt, vec2(0, 0));
-	ASSERT_TRUE(Position);
-	EXPECT_EQ(*Position, vec2(0, 0));
+	EXPECT_FALSE(TClientMapProgress::ResolvePosition(std::nullopt, std::nullopt));
 }
 
-TEST(TClientMapProgressPosition, MissingAllSourcesStaysUnknown)
-{
-	EXPECT_FALSE(TClientMapProgress::ResolvePosition(std::nullopt, std::nullopt, std::nullopt));
-}
-
-TEST(TClientMapProgressPosition, SpectatorCoordinatesDriveProgressAndRouteFromTheSameTile)
+TEST(TClientMapProgressPosition, SpecCharacterCoordinatesDriveProgressAndRouteFromTheSameTile)
 {
 	auto Map = MakeProgressLine(11);
 	Map.Finalize();
-	const auto Position = TClientMapProgress::ResolvePosition(std::nullopt, std::nullopt, vec2(6 * 32 + 16, 16));
+	const auto Position = TClientMapProgress::ResolvePosition(std::nullopt, vec2(6 * 32 + 16, 16));
 	ASSERT_TRUE(Position);
 	TClientMapProgress::CPlayer Player;
 	const auto Estimate = MoveProgressPlayer(Player, Map, (int)(Position->x / 32), 0, false);
@@ -152,9 +159,117 @@ TEST(TClientMapProgress, MapWithoutFinishIsNotReadyAndKeepsEstimateUnknown)
 	EXPECT_FALSE(Map.Ready());
 
 	TClientMapProgress::CPlayer Player;
-	Player.Observe(Map.Tile(2), 2);
+	Player.Observe(Map.Tile(2), 2, true);
 	Player.Update(Map, 2, 0, 128, false);
 	EXPECT_FALSE(Player.Estimate().m_Valid);
+}
+
+TEST(TClientMapProgress, RaceTimerBeginsAtStartAndProgressSurvivesBacktrackingAndIdling)
+{
+	auto Map = MakeProgressLine(9);
+	Map.SetTile(4, TClientMapProgress::MakeTile(TILE_START));
+	Map.Finalize();
+	ASSERT_TRUE(Map.Ready());
+
+	TClientMapProgress::CPlayer Player;
+	Player.Observe(Map.Tile(0), 0, false);
+	Player.Update(Map, 0, 0, 128, false);
+	EXPECT_FALSE(Player.Estimate().m_Valid);
+
+	// A snapshot may report the start tile before the server's race clock flag.
+	Player.Observe(Map.Tile(0), 0, false);
+	Player.Observe(Map.Tile(1), 1, true);
+	TClientMapProgress::SEstimate Estimate;
+	for(int i = 0; i < 16; ++i)
+	{
+		Player.Update(Map, 1, 0, 128, false);
+		Estimate = Player.Estimate();
+	}
+	ASSERT_TRUE(Estimate.m_Valid);
+	EXPECT_FLOAT_EQ(Estimate.m_Progress, 0.125f);
+
+	Player.Observe(Map.Tile(5), 5, true);
+	Player.Update(Map, 5, 0, 128, false);
+	ASSERT_TRUE(Player.Estimate().m_Valid);
+	EXPECT_FLOAT_EQ(Player.Estimate().m_Progress, 0.625f);
+	for(int i = 0; i < 4; ++i)
+		Player.Update(Map, 5, 0, 128, false);
+	EXPECT_FLOAT_EQ(Player.Estimate().m_Progress, 0.625f);
+
+	Player.Observe(Map.Tile(2), 2, true);
+	Player.Update(Map, 2, 0, 128, false);
+	EXPECT_FLOAT_EQ(Player.Estimate().m_Progress, 0.25f);
+
+	Player.Observe(Map.Tile(4), 4, true); // Touching another start while the timer is active does not begin another run.
+	Player.Update(Map, 4, 0, 128, false);
+	EXPECT_FLOAT_EQ(Player.Estimate().m_Progress, 0.5f);
+	Player.Observe(Map.Tile(2), 2, true);
+	Player.Update(Map, 2, 0, 128, false);
+	EXPECT_FLOAT_EQ(Player.Estimate().m_Progress, 0.25f);
+
+	Player.Observe(Map.Tile(2), 2, false);
+	Player.Update(Map, 2, 0, 128, false);
+	EXPECT_FALSE(Player.Estimate().m_Valid);
+}
+
+TEST(TClientMapProgress, RunningClockCanAnchorMapWithoutCollisionStart)
+{
+	TClientMapProgress::CMap Map(5, 1);
+	for(int Index = 0; Index < Map.Size(); ++Index)
+		Map.SetTile(Index, TClientMapProgress::MakeTile(Index == 4 ? TILE_FINISH : TILE_AIR));
+	Map.Finalize();
+	ASSERT_TRUE(Map.Ready());
+
+	TClientMapProgress::CPlayer Player;
+	Player.Observe(Map.Tile(1), 1, true);
+	for(int i = 0; i < 16; ++i)
+		Player.Update(Map, 1, 0, 128, false);
+	ASSERT_TRUE(Player.Estimate().m_Valid);
+	EXPECT_FLOAT_EQ(Player.Estimate().m_Progress, 0.0f);
+	Player.Observe(Map.Tile(3), 3, true);
+	Player.Update(Map, 3, 0, 128, false);
+	EXPECT_FLOAT_EQ(Player.Estimate().m_Progress, 2.0f / 3.0f);
+}
+
+TEST(TClientMapProgress, UnreachableObservedStartFallsBackToReachableStartWhenFieldCompletes)
+{
+	TClientMapProgress::CMap Map(7, 3);
+	for(int Index = 0; Index < Map.Size(); ++Index)
+		Map.SetTile(Index, TClientMapProgress::MakeTile(TILE_SOLID));
+	for(int X = 2; X <= 6; ++X)
+		Map.SetTile(7 + X, TClientMapProgress::MakeTile(TILE_AIR));
+	Map.SetTile(7, TClientMapProgress::MakeTile(TILE_START)); // isolated observed start
+	Map.SetTile(9, TClientMapProgress::MakeTile(TILE_START)); // reachable source
+	Map.SetTile(13, TClientMapProgress::MakeTile(TILE_FINISH));
+	Map.Finalize();
+	ASSERT_TRUE(Map.Ready());
+
+	TClientMapProgress::CPlayer Player;
+	Player.Observe(Map.Tile(7), 7, false);
+	Player.Observe(Map.Tile(7), 7, true);
+	for(int i = 0; i < 32; ++i)
+	{
+		Player.Observe(Map.Tile(11), 11, true);
+		Player.Update(Map, 11, 0, 128, false);
+	}
+	ASSERT_TRUE(Player.Estimate().m_Valid);
+	EXPECT_FLOAT_EQ(Player.Estimate().m_Progress, 0.5f);
+}
+
+TEST(TClientMapProgress, FreeviewUsesViewPositionWithoutPlayerRaceTimer)
+{
+	auto Map = MakeProgressLine(9);
+	Map.Finalize();
+	TClientMapProgress::CPlayer View;
+	View.ObserveView(Map.Tile(2), 2);
+	for(int i = 0; i < 16; ++i)
+		View.Update(Map, 2, 0, 128, false);
+	ASSERT_TRUE(View.Estimate().m_Valid);
+	EXPECT_FLOAT_EQ(View.Estimate().m_Progress, 0.25f);
+
+	View.ObserveView(Map.Tile(6), 6);
+	View.Update(Map, 6, 0, 128, false);
+	EXPECT_FLOAT_EQ(View.Estimate().m_Progress, 0.75f);
 }
 
 TEST(TClientMapProgress, StartFinishAndBacktrackingClampProgressToTheMap)
@@ -231,7 +346,7 @@ TEST(TClientMapProgress, InvalidMapDimensionsAndPlayerIndexesStayUnknown)
 	auto Map = MakeProgressLine(5);
 	Map.Finalize();
 	TClientMapProgress::CPlayer Player;
-	Player.Observe(Map.Tile(0), 0);
+	Player.Observe(Map.Tile(0), 0, true);
 	Player.Update(Map, 0, 0, 128, false);
 	ASSERT_TRUE(Player.Estimate().m_Valid);
 	Player.Update(Map, -1, 0, 128, false);
@@ -326,6 +441,7 @@ TEST(TClientMapProgress, TeleportWorkBudgetFailsClosedAndPlayerStaysUnknown)
 	EXPECT_FALSE(Field.Complete());
 
 	TClientMapProgress::CPlayer Player;
+	Player.Observe(Map.Tile(99), 99, true);
 	Player.Update(Map, 99, 0, 10000, false);
 	EXPECT_TRUE(Player.Failed());
 	EXPECT_FALSE(Player.Estimate().m_Valid);

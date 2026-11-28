@@ -57,6 +57,11 @@ void CMapLayers::OnRender()
 
 	// dynamic parameters for ingame rendering
 	m_Params.m_EntityOverlayVal = m_Type == RENDERTYPE_FULL_DESIGN ? 0 : g_Config.m_ClOverlayEntities;
+	m_Params.m_FreezeOutlineMap = GameClient()->m_Outlines.FreezeOutlineMap();
+	m_Params.m_FreezeOutlineWidth = g_Config.m_TcOutlineWidthFreeze;
+	m_Params.m_CutoutFreezeOutlines = m_Params.m_EntityOverlayVal > 0 &&
+		g_Config.m_TcOutlineTransparent && g_Config.m_TcOutline && g_Config.m_TcOutlineFreeze &&
+		m_Params.m_FreezeOutlineMap.m_pTypes != nullptr;
 	m_Params.m_Center = GetCurCamera()->m_Center;
 	m_Params.m_Zoom = GetCurCamera()->m_Zoom;
 	m_Params.m_RenderText = g_Config.m_ClTextEntities;

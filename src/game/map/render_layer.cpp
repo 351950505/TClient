@@ -600,9 +600,9 @@ void CRenderLayerTile::RenderTileLayerWithTileBuffer(const ColorRGBA &Color, con
 void CRenderLayerTile::RenderTileLayerNoTileBuffer(const ColorRGBA &Color, const CRenderLayerParams &Params)
 {
 	Graphics()->BlendNone();
-	RenderMap()->RenderTilemap(m_pTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_OPAQUE);
+	RenderMap()->RenderTilemap(m_pTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_OPAQUE, nullptr, 0, false);
 	Graphics()->BlendNormal();
-	RenderMap()->RenderTilemap(m_pTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_TRANSPARENT);
+	RenderMap()->RenderTilemap(m_pTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_TRANSPARENT, nullptr, 0, false);
 }
 
 void CRenderLayerTile::Init()
@@ -1488,6 +1488,31 @@ IGraphics::CTextureHandle CRenderLayerEntityBase::GetTexture() const
 	return m_pMapImages->GetEntities(MAP_IMAGE_ENTITY_LAYER_TYPE_ALL_EXCEPT_SWITCH);
 }
 
+bool CRenderLayerEntityBase::ShouldCutoutFreezeOutlines(const CRenderLayerParams &Params) const
+{
+	return Params.m_CutoutFreezeOutlines && Params.m_EntityOverlayVal > 0 &&
+		Params.m_FreezeOutlineMap.m_pTypes && Params.m_FreezeOutlineWidth > 0;
+}
+
+void CRenderLayerEntityBase::RenderTilemapWithFreezeCutout(const ColorRGBA &Color, const CRenderLayerParams &Params, int RenderFlags)
+{
+	RenderMap()->RenderTilemap(m_pTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, RenderFlags,
+		&Params.m_FreezeOutlineMap, Params.m_FreezeOutlineWidth, false);
+}
+
+void CRenderLayerEntityBase::RenderTileBorderForCutout(const ColorRGBA &Color, const CRenderLayerParams &Params)
+{
+	if(!Params.m_RenderTileBorder || !m_VisualTiles.has_value())
+		return;
+
+	const CScreenRect ScreenRect = Graphics()->GetScreen();
+	const int ScreenRectY0 = std::floor(ScreenRect.m_TopLeft.y / 32);
+	const int ScreenRectX0 = std::floor(ScreenRect.m_TopLeft.x / 32);
+	const int ScreenRectY1 = std::ceil(ScreenRect.m_BottomRight.y / 32);
+	const int ScreenRectX1 = std::ceil(ScreenRect.m_BottomRight.x / 32);
+	RenderTileBorder(Color, ScreenRectX0, ScreenRectY0, ScreenRectX1, ScreenRectY1, &m_VisualTiles.value());
+}
+
 // GAME
 CRenderLayerEntityGame::CRenderLayerEntityGame(int GroupId, int LayerId, int Flags, CMapItemLayerTilemap *pLayerTilemap) :
 	CRenderLayerEntityBase(GroupId, LayerId, Flags, pLayerTilemap) {}
@@ -1500,6 +1525,18 @@ void CRenderLayerEntityGame::Init()
 
 void CRenderLayerEntityGame::RenderTileLayerWithTileBuffer(const ColorRGBA &Color, const CRenderLayerParams &Params)
 {
+	if(ShouldCutoutFreezeOutlines(Params))
+	{
+		if(Params.m_RenderTileBorder)
+			RenderKillTileBorder(Color.Multiply(GetDeathBorderColor()));
+		RenderTileBorderForCutout(Color, Params);
+		Graphics()->BlendNone();
+		RenderTilemapWithFreezeCutout(Color, Params, LAYERRENDERFLAG_OPAQUE);
+		Graphics()->BlendNormal();
+		RenderTilemapWithFreezeCutout(Color, Params, LAYERRENDERFLAG_TRANSPARENT);
+		return;
+	}
+
 	if(Params.m_RenderTileBorder)
 		RenderKillTileBorder(Color.Multiply(GetDeathBorderColor()));
 	RenderTileLayer(Color, Params);
@@ -1507,8 +1544,26 @@ void CRenderLayerEntityGame::RenderTileLayerWithTileBuffer(const ColorRGBA &Colo
 
 void CRenderLayerEntityGame::RenderTileLayerNoTileBuffer(const ColorRGBA &Color, const CRenderLayerParams &Params)
 {
+	if(ShouldCutoutFreezeOutlines(Params))
+	{
+		const int BorderFlag = Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0;
+		Graphics()->BlendNone();
+		RenderTilemapWithFreezeCutout(Color, Params, BorderFlag | LAYERRENDERFLAG_OPAQUE);
+		Graphics()->BlendNormal();
+
+		if(Params.m_RenderTileBorder)
+		{
+			RenderMap()->RenderTileRectangle(-BorderRenderDistance, -BorderRenderDistance, m_pLayerTilemap->m_Width + 2 * BorderRenderDistance, m_pLayerTilemap->m_Height + 2 * BorderRenderDistance,
+				TILE_AIR, TILE_DEATH,
+				32.0f, Color.Multiply(GetDeathBorderColor()), TILERENDERFLAG_EXTEND | LAYERRENDERFLAG_TRANSPARENT);
+		}
+
+		RenderTilemapWithFreezeCutout(Color, Params, BorderFlag | LAYERRENDERFLAG_TRANSPARENT);
+		return;
+	}
+
 	Graphics()->BlendNone();
-	RenderMap()->RenderTilemap(m_pTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_OPAQUE);
+	RenderMap()->RenderTilemap(m_pTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_OPAQUE, nullptr, 0, false);
 	Graphics()->BlendNormal();
 
 	if(Params.m_RenderTileBorder)
@@ -1518,7 +1573,7 @@ void CRenderLayerEntityGame::RenderTileLayerNoTileBuffer(const ColorRGBA &Color,
 			32.0f, Color.Multiply(GetDeathBorderColor()), TILERENDERFLAG_EXTEND | LAYERRENDERFLAG_TRANSPARENT);
 	}
 
-	RenderMap()->RenderTilemap(m_pTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_TRANSPARENT);
+	RenderMap()->RenderTilemap(m_pTiles, m_pLayerTilemap->m_Width, m_pLayerTilemap->m_Height, 32.0f, Color, (Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0) | LAYERRENDERFLAG_TRANSPARENT, nullptr, 0, false);
 }
 
 ColorRGBA CRenderLayerEntityGame::GetDeathBorderColor() const
@@ -1537,6 +1592,36 @@ CRenderLayerEntityFront::CRenderLayerEntityFront(int GroupId, int LayerId, int F
 int CRenderLayerEntityFront::GetDataIndex() const
 {
 	return m_pLayerTilemap->m_Front;
+}
+
+void CRenderLayerEntityFront::RenderTileLayerWithTileBuffer(const ColorRGBA &Color, const CRenderLayerParams &Params)
+{
+	if(!ShouldCutoutFreezeOutlines(Params))
+	{
+		RenderTileLayer(Color, Params);
+		return;
+	}
+
+	RenderTileBorderForCutout(Color, Params);
+	Graphics()->BlendNone();
+	RenderTilemapWithFreezeCutout(Color, Params, LAYERRENDERFLAG_OPAQUE);
+	Graphics()->BlendNormal();
+	RenderTilemapWithFreezeCutout(Color, Params, LAYERRENDERFLAG_TRANSPARENT);
+}
+
+void CRenderLayerEntityFront::RenderTileLayerNoTileBuffer(const ColorRGBA &Color, const CRenderLayerParams &Params)
+{
+	if(!ShouldCutoutFreezeOutlines(Params))
+	{
+		CRenderLayerTile::RenderTileLayerNoTileBuffer(Color, Params);
+		return;
+	}
+
+	const int BorderFlag = Params.m_RenderTileBorder ? TILERENDERFLAG_EXTEND : 0;
+	Graphics()->BlendNone();
+	RenderTilemapWithFreezeCutout(Color, Params, BorderFlag | LAYERRENDERFLAG_OPAQUE);
+	Graphics()->BlendNormal();
+	RenderTilemapWithFreezeCutout(Color, Params, BorderFlag | LAYERRENDERFLAG_TRANSPARENT);
 }
 
 // TELE

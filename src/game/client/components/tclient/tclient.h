@@ -143,9 +143,12 @@ private:
 	void UpdateDrownBoard();
 	void ResetDrownBoard();
 
-	struct SMapProgressTarget
+	class CMapProgressTarget
 	{
+	public:
 		bool m_Valid = false;
+		bool m_ViewOnly = false;
+		bool m_RaceTimeStarted = false;
 		int m_ClientId = -1;
 		vec2 m_Position = vec2(0.0f, 0.0f);
 		int m_Index = -1;
@@ -154,10 +157,10 @@ private:
 		bool m_HasPreviousPosition = false;
 	};
 	TClientMapProgress::CMap m_MapProgressMap;
-	std::array<TClientMapProgress::CPlayer, NUM_DUMMIES + 1> m_aMapProgressPlayers;
-	std::array<SMapProgressTarget, NUM_DUMMIES + 1> m_aMapProgressTargets;
-	std::array<int, NUM_DUMMIES + 1> m_aMapProgressClientIds = [] {
-		std::array<int, NUM_DUMMIES + 1> aClientIds{};
+	std::array<TClientMapProgress::CPlayer, NUM_DUMMIES + 2> m_aMapProgressPlayers;
+	std::array<CMapProgressTarget, NUM_DUMMIES + 2> m_aMapProgressTargets;
+	std::array<int, NUM_DUMMIES + 2> m_aMapProgressClientIds = [] {
+		std::array<int, NUM_DUMMIES + 2> aClientIds{};
 		aClientIds.fill(-1);
 		return aClientIds;
 	}();
@@ -188,8 +191,12 @@ private:
 
 	void UpdateMapProgress(bool NewSnapshot);
 	void ScanMapProgressVisualLayers(int &Budget);
+	static int MapProgressViewSlot() { return NUM_DUMMIES; }
+	static int MapProgressFreeviewSlot() { return NUM_DUMMIES + 1; }
 	int MapProgressSlot(int Conn) const;
 	int ResolveMapProgressClientId(int Slot) const;
+	int ResolveMapProgressViewSlot() const;
+	bool MapProgressRaceTimeStarted(int Slot) const;
 
 public:
 	CTClient();

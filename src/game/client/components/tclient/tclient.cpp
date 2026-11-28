@@ -2084,7 +2084,7 @@ void CTClient::ResetMapProgress()
 	for(auto &Player : m_aMapProgressPlayers)
 		Player.Reset();
 	for(auto &Target : m_aMapProgressTargets)
-		Target = SMapProgressTarget();
+		Target = CMapProgressTarget();
 	m_aMapProgressClientIds.fill(-1);
 	m_pMapProgressMap = nullptr;
 	m_pMapProgressCollision = nullptr;
@@ -2110,17 +2110,47 @@ void CTClient::ResetMapProgress()
 	m_MapProgressFailedMapCrc = 0;
 }
 
+int CTClient::ResolveMapProgressViewSlot() const
+{
+	const auto &Spec = GameClient()->m_Snap.m_SpecInfo;
+	return TClientMapProgress::ResolveProgressViewClientId(Spec.m_Active, Spec.m_SpectatorId);
+}
+
 int CTClient::ResolveMapProgressClientId(int Slot) const
 {
-	if(Slot == NUM_DUMMIES)
+	if(Slot == MapProgressViewSlot())
 	{
-		const auto &Spec = GameClient()->m_Snap.m_SpecInfo;
-		return TClientMapProgress::ResolveSpectatorClientId(Spec.m_Active, Spec.m_SpectatorId);
+		const int ViewId = ResolveMapProgressViewSlot();
+		return TClientMapProgress::IsProgressFreeview(ViewId) ? -1 : ViewId;
 	}
+	if(Slot == MapProgressFreeviewSlot())
+		return GameClient()->m_Snap.m_SpecInfo.m_Active && ResolveMapProgressViewSlot() == TClientMapProgress::MAP_PROGRESS_FREEVIEW_ID ?
+			TClientMapProgress::MAP_PROGRESS_FREEVIEW_ID : -1;
 	if(Slot < 0 || Slot >= NUM_DUMMIES || (Slot == 1 && !Client()->DummyConnected()))
+		return -1;
+	if(Slot == std::clamp(g_Config.m_ClDummy, 0, NUM_DUMMIES - 1) && GameClient()->m_Snap.m_SpecInfo.m_Active)
 		return -1;
 	const int ClientId = GameClient()->m_aLocalIds[Slot];
 	return ClientId >= 0 && ClientId < MAX_CLIENTS ? ClientId : -1;
+}
+
+bool CTClient::MapProgressRaceTimeStarted(int Slot) const
+{
+	if(Slot == MapProgressFreeviewSlot())
+		return false;
+	if(Slot == MapProgressViewSlot())
+	{
+		const int SpectatorId = ResolveMapProgressViewSlot();
+		if(!GameClient()->m_Snap.m_SpecInfo.m_Active || SpectatorId < 0 || SpectatorId >= MAX_CLIENTS)
+			return false;
+	}
+	else if(Slot < 0 || Slot >= NUM_DUMMIES || Slot != std::clamp(g_Config.m_ClDummy, 0, NUM_DUMMIES - 1) ||
+		ResolveMapProgressClientId(Slot) < 0)
+		return false;
+
+	const auto *pGameInfo = GameClient()->m_Snap.m_pGameInfoObj;
+	return TClientMapProgress::RaceTimeStarted(pGameInfo != nullptr,
+		pGameInfo && (pGameInfo->m_GameStateFlags & GAMESTATEFLAG_RACETIME) != 0);
 }
 
 int CTClient::MapProgressSlot(int Conn) const
@@ -2130,10 +2160,7 @@ int CTClient::MapProgressSlot(int Conn) const
 	const int ActiveConn = std::clamp(g_Config.m_ClDummy, 0, NUM_DUMMIES - 1);
 	const int Slot = Conn < 0 ? ActiveConn : Conn;
 	if(Slot == ActiveConn && GameClient()->m_Snap.m_SpecInfo.m_Active)
-	{
-		const int SpectatorId = ResolveMapProgressClientId(NUM_DUMMIES);
-		return SpectatorId >= 0 ? NUM_DUMMIES : -1;
-	}
+		return TClientMapProgress::IsProgressFreeview(ResolveMapProgressViewSlot()) ? MapProgressFreeviewSlot() : MapProgressViewSlot();
 	return ResolveMapProgressClientId(Slot) >= 0 ? Slot : -1;
 }
 
@@ -2259,7 +2286,7 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 		if(!IsMapProgressEnabled())
 		{
 			const bool HasTrackedState = m_pMapProgressMap || m_MapProgressFailedForMap ||
-				std::any_of(m_aMapProgressTargets.begin(), m_aMapProgressTargets.end(), [](const SMapProgressTarget &Target) { return Target.m_Valid; }) ||
+				std::any_of(m_aMapProgressTargets.begin(), m_aMapProgressTargets.end(), [](const CMapProgressTarget &Target) { return Target.m_Valid; }) ||
 				std::any_of(m_aMapProgressClientIds.begin(), m_aMapProgressClientIds.end(), [](int ClientId) { return ClientId >= 0; });
 			if(HasTrackedState)
 				ResetMapProgress();
@@ -2372,6 +2399,12 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 			Tile.m_TimeCheckpoint = TimeCheckpoint;
 			return Tile;
 		};
+		const auto PositionToIndex = [&](vec2 Position) {
+			if(!(Position.x >= 0.0f && Position.y >= 0.0f &&
+				Position.x < pCollision->GetWidth() * 32.0f && Position.y < pCollision->GetHeight() * 32.0f))
+				return -1;
+			return pCollision->GetPureMapIndex(Position);
+		};
 		if(!NewSnapshot)
 		{
 			int ScanBudget = TClientMapProgress::MAP_PROGRESS_SCAN_BUDGET;
@@ -2418,113 +2451,159 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 			if(m_MapProgressBaseScanCursor == MapSize && m_MapProgressWaterImagesLoaded && m_MapProgressVisualLayersComplete && !m_MapProgressMap.Finalized() && ScanBudget > 0)
 				m_MapProgressMap.FinalizeStep(ScanBudget);
 		}
-		if(NewSnapshot)
 		{
-			for(int Slot = 0; Slot <= NUM_DUMMIES; ++Slot)
+			const int Slot = MapProgressFreeviewSlot();
+			const int ClientId = ResolveMapProgressClientId(Slot);
+			auto &Target = m_aMapProgressTargets[Slot];
+			if(!TClientMapProgress::IsProgressFreeview(ClientId))
 			{
-				const int ClientId = ResolveMapProgressClientId(Slot);
-				auto &Target = m_aMapProgressTargets[Slot];
-				if(ClientId < 0 || ClientId >= MAX_CLIENTS)
+				if(m_aMapProgressClientIds[Slot] != -1)
 				{
 					m_aMapProgressPlayers[Slot].Reset();
-					Target = SMapProgressTarget();
+					Target = CMapProgressTarget();
 					m_aMapProgressClientIds[Slot] = -1;
-					continue;
 				}
+			}
+			else
+			{
 				if(m_aMapProgressClientIds[Slot] != ClientId)
 				{
 					m_aMapProgressPlayers[Slot].Reset();
-					Target = SMapProgressTarget();
+					Target = CMapProgressTarget();
 					m_aMapProgressClientIds[Slot] = ClientId;
 				}
-				const auto &Character = GameClient()->m_Snap.m_aCharacters[ClientId];
-				const bool CharacterActive = Client()->SnapFindItem(IClient::SNAP_CURRENT, NETOBJTYPE_CHARACTER, ClientId) != nullptr;
-				bool HasPosition = CharacterActive;
-				vec2 Position(0.0f, 0.0f);
-				if(CharacterActive)
-					Position = vec2((float)Character.m_Cur.m_X, (float)Character.m_Cur.m_Y);
-				else if(Slot == NUM_DUMMIES && GameClient()->m_aClients[ClientId].m_Active)
-				{
-					const auto &ClientInfo = GameClient()->m_aClients[ClientId];
-					if(ClientInfo.m_SpecCharPresent)
-					{
-						Position = ClientInfo.m_SpecChar;
-						HasPosition = true;
-					}
-					else if(const auto *pSpectator = GameClient()->m_Snap.m_pSpectatorInfo;
-						pSpectator && pSpectator->m_SpectatorId == ClientId)
-					{
-						Position = vec2((float)pSpectator->m_X, (float)pSpectator->m_Y);
-						HasPosition = true;
-					}
-				}
-				if(!HasPosition)
-				{
-					m_aMapProgressPlayers[Slot].Reset();
-					Target = SMapProgressTarget();
-					continue;
-				}
-				const int Index = pCollision->GetPureMapIndex(Position);
+				const vec2 Position = GameClient()->m_Camera.m_Center;
+				const int Index = PositionToIndex(Position);
 				if(Index < 0 || Index >= MapSize)
 				{
 					m_aMapProgressPlayers[Slot].Reset();
-					Target = SMapProgressTarget();
-					continue;
+					Target = CMapProgressTarget();
 				}
-				if(Target.m_Valid)
+				else
 				{
-					Target.m_PreviousPosition = Target.m_Position;
-					Target.m_HasPreviousPosition = true;
+					Target.m_Valid = true;
+					Target.m_ViewOnly = true;
+					Target.m_RaceTimeStarted = false;
+					Target.m_ClientId = ClientId;
+					Target.m_Position = Position;
+					Target.m_Index = Index;
+					Target.m_TeleCheckpoint = 0;
+					Target.m_HasPreviousPosition = false;
+					m_aMapProgressPlayers[Slot].ObserveView(ReadTile(Index), Index);
 				}
-				int TeleCheckpoint = Target.m_TeleCheckpoint;
-				if(CharacterActive && Character.m_HasExtendedData && Character.m_ExtendedData.m_TeleCheckpoint >= 0)
-					TeleCheckpoint = Character.m_ExtendedData.m_TeleCheckpoint;
-				else if(pTele && pTele[Index].m_Type == TILE_TELECHECK)
+			}
+		}
+			if(NewSnapshot)
+			{
+				for(int Slot = 0; Slot < MapProgressFreeviewSlot(); ++Slot)
 				{
-					const int ObservedTeleCheckpoint = pCollision->IsTeleCheckpoint(Index);
-					if(ObservedTeleCheckpoint >= 0)
-						TeleCheckpoint = ObservedTeleCheckpoint;
-				}
-				Target.m_Valid = true;
-				Target.m_ClientId = ClientId;
-				Target.m_Position = Position;
-				Target.m_Index = Index;
-				Target.m_TeleCheckpoint = TeleCheckpoint;
-				const auto ObserveIndex = [&](int ObserveAt) {
-					if(ObserveAt < 0 || ObserveAt >= MapSize)
-						return;
-					auto Tile = ReadTile(ObserveAt);
-					if(ObserveAt < m_MapProgressBaseScanCursor)
-						Tile.m_Water = Tile.m_Water || m_MapProgressMap.Tile(ObserveAt).m_Water;
-					if((!CharacterActive || !Character.m_HasExtendedData || Character.m_ExtendedData.m_TeleCheckpoint < 0) &&
-						pTele && pTele[ObserveAt].m_Type == TILE_TELECHECK)
+					const int ClientId = ResolveMapProgressClientId(Slot);
+					auto &Target = m_aMapProgressTargets[Slot];
+					if(ClientId < 0 || ClientId >= MAX_CLIENTS)
 					{
-						const int ObservedTeleCheckpoint = pCollision->IsTeleCheckpoint(ObserveAt);
+						m_aMapProgressPlayers[Slot].Reset();
+						Target = CMapProgressTarget();
+						m_aMapProgressClientIds[Slot] = -1;
+						continue;
+					}
+					if(m_aMapProgressClientIds[Slot] != ClientId)
+					{
+						m_aMapProgressPlayers[Slot].Reset();
+						Target = CMapProgressTarget();
+						m_aMapProgressClientIds[Slot] = ClientId;
+					}
+
+					const auto *pCharacter = &GameClient()->m_Snap.m_aCharacters[ClientId];
+					bool CharacterActive = false;
+					bool HasPosition = false;
+					vec2 Position(0.0f, 0.0f);
+					int TeleCheckpoint = Target.m_TeleCheckpoint;
+					CharacterActive = Client()->SnapFindItem(IClient::SNAP_CURRENT, NETOBJTYPE_CHARACTER, ClientId) != nullptr;
+					HasPosition = CharacterActive;
+					if(CharacterActive)
+					{
+						Position = vec2((float)pCharacter->m_Cur.m_X, (float)pCharacter->m_Cur.m_Y);
+						if(pCharacter->m_HasExtendedData && pCharacter->m_ExtendedData.m_TeleCheckpoint >= 0)
+							TeleCheckpoint = pCharacter->m_ExtendedData.m_TeleCheckpoint;
+					}
+					else if(Slot == MapProgressViewSlot() && GameClient()->m_aClients[ClientId].m_Active)
+					{
+						const auto &ClientInfo = GameClient()->m_aClients[ClientId];
+						if(ClientInfo.m_SpecCharPresent)
+						{
+							Position = ClientInfo.m_SpecChar;
+							HasPosition = true;
+						}
+					}
+					if(!HasPosition)
+					{
+						m_aMapProgressPlayers[Slot].Reset();
+						Target = CMapProgressTarget();
+						continue;
+					}
+					const int Index = PositionToIndex(Position);
+					if(Index < 0 || Index >= MapSize)
+					{
+						m_aMapProgressPlayers[Slot].Reset();
+						Target = CMapProgressTarget();
+						continue;
+					}
+					if(Target.m_Valid)
+					{
+						Target.m_PreviousPosition = Target.m_Position;
+						Target.m_HasPreviousPosition = true;
+					}
+					if(CharacterActive && pCharacter->m_HasExtendedData && pCharacter->m_ExtendedData.m_TeleCheckpoint >= 0)
+						TeleCheckpoint = pCharacter->m_ExtendedData.m_TeleCheckpoint;
+					else if(pTele && pTele[Index].m_Type == TILE_TELECHECK)
+					{
+						const int ObservedTeleCheckpoint = pCollision->IsTeleCheckpoint(Index);
 						if(ObservedTeleCheckpoint >= 0)
-							Target.m_TeleCheckpoint = ObservedTeleCheckpoint;
+							TeleCheckpoint = ObservedTeleCheckpoint;
 					}
-					m_aMapProgressPlayers[Slot].Observe(Tile, ObserveAt);
-				};
-				if(Target.m_HasPreviousPosition)
-				{
-					const int PreviousIndex = pCollision->GetPureMapIndex(Target.m_PreviousPosition);
-					const auto TeleportEndpoint = [&](int TileIndex) {
-						if(!pTele || TileIndex < 0 || TileIndex >= MapSize)
-							return false;
-						const int Type = pTele[TileIndex].m_Type;
-						return IsMapProgressTeleportInput(Type) || Type == TILE_TELEOUT || Type == TILE_TELECHECKOUT;
+					const bool RaceTimeStarted = MapProgressRaceTimeStarted(Slot);
+					Target.m_Valid = true;
+					Target.m_ViewOnly = false;
+					Target.m_RaceTimeStarted = RaceTimeStarted;
+					Target.m_ClientId = ClientId;
+					Target.m_Position = Position;
+					Target.m_Index = Index;
+					Target.m_TeleCheckpoint = TeleCheckpoint;
+					const auto ObserveIndex = [&](int ObserveAt) {
+						if(ObserveAt < 0 || ObserveAt >= MapSize)
+							return;
+						auto Tile = ReadTile(ObserveAt);
+						if(ObserveAt < m_MapProgressBaseScanCursor)
+							Tile.m_Water = Tile.m_Water || m_MapProgressMap.Tile(ObserveAt).m_Water;
+						if((!CharacterActive || !pCharacter->m_HasExtendedData || pCharacter->m_ExtendedData.m_TeleCheckpoint < 0) &&
+							pTele && pTele[ObserveAt].m_Type == TILE_TELECHECK)
+						{
+							const int ObservedTeleCheckpoint = pCollision->IsTeleCheckpoint(ObserveAt);
+							if(ObservedTeleCheckpoint >= 0)
+								Target.m_TeleCheckpoint = ObservedTeleCheckpoint;
+						}
+						m_aMapProgressPlayers[Slot].Observe(Tile, ObserveAt, RaceTimeStarted);
 					};
-					if(PreviousIndex >= 0 && PreviousIndex < MapSize && PreviousIndex != Index &&
-						length_squared(Position - Target.m_PreviousPosition) <= 128.0f * 128.0f &&
-						!TeleportEndpoint(PreviousIndex) && !TeleportEndpoint(Index))
+					if(Target.m_HasPreviousPosition)
 					{
-						for(const int CrossedIndex : pCollision->GetMapIndices(Target.m_PreviousPosition, Position, 8))
-							if(CrossedIndex != Index)
-								ObserveIndex(CrossedIndex);
+						const int PreviousIndex = pCollision->GetPureMapIndex(Target.m_PreviousPosition);
+						const auto TeleportEndpoint = [&](int TileIndex) {
+							if(!pTele || TileIndex < 0 || TileIndex >= MapSize)
+								return false;
+							const int Type = pTele[TileIndex].m_Type;
+							return IsMapProgressTeleportInput(Type) || Type == TILE_TELEOUT || Type == TILE_TELECHECKOUT;
+						};
+						if(PreviousIndex >= 0 && PreviousIndex < MapSize && PreviousIndex != Index &&
+							length_squared(Position - Target.m_PreviousPosition) <= 128.0f * 128.0f &&
+							!TeleportEndpoint(PreviousIndex) && !TeleportEndpoint(Index))
+						{
+							for(const int CrossedIndex : pCollision->GetMapIndices(Target.m_PreviousPosition, Position, 8))
+								if(CrossedIndex != Index)
+									ObserveIndex(CrossedIndex);
+						}
 					}
-				}
-				ObserveIndex(Index);
-				Target.m_HasPreviousPosition = false;
+					ObserveIndex(Index);
+					Target.m_HasPreviousPosition = false;
 			}
 			return;
 		}
@@ -2533,26 +2612,28 @@ void CTClient::UpdateMapProgress(bool NewSnapshot)
 			return;
 
 		int ActiveSlots = 0;
-		for(int Slot = 0; Slot <= NUM_DUMMIES; ++Slot)
+		for(int Slot = 0; Slot <= MapProgressFreeviewSlot(); ++Slot)
 		{
 			if(m_aMapProgressClientIds[Slot] != ResolveMapProgressClientId(Slot))
 			{
 				m_aMapProgressPlayers[Slot].Reset();
-				m_aMapProgressTargets[Slot] = SMapProgressTarget();
+				m_aMapProgressTargets[Slot] = CMapProgressTarget();
 				m_aMapProgressClientIds[Slot] = -1;
 				continue;
 			}
 			const auto &Target = m_aMapProgressTargets[Slot];
-			if(Target.m_Valid && Target.m_ClientId >= 0 && Target.m_Index >= 0 && Target.m_Index < MapSize)
+			if(Target.m_Valid && (Target.m_ViewOnly || Target.m_RaceTimeStarted) &&
+				Target.m_ClientId >= 0 && Target.m_Index >= 0 && Target.m_Index < MapSize)
 				++ActiveSlots;
 		}
 
 		int DijkstraBudget = TClientMapProgress::MAP_PROGRESS_DIJKSTRA_BUDGET;
-		for(int Slot = 0; Slot <= NUM_DUMMIES && ActiveSlots > 0; ++Slot)
+		for(int Slot = 0; Slot <= MapProgressFreeviewSlot() && ActiveSlots > 0; ++Slot)
 		{
 			const auto &Target = m_aMapProgressTargets[Slot];
 			if(m_aMapProgressClientIds[Slot] != ResolveMapProgressClientId(Slot) || !Target.m_Valid ||
-				Target.m_ClientId < 0 || Target.m_Index < 0 || Target.m_Index >= MapSize)
+				(!Target.m_ViewOnly && !Target.m_RaceTimeStarted) || Target.m_ClientId < 0 ||
+				Target.m_Index < 0 || Target.m_Index >= MapSize)
 				continue;
 			const int SlotBudget = TClientMapProgress::ShareMapProgressBudget(DijkstraBudget, ActiveSlots);
 			DijkstraBudget -= SlotBudget;

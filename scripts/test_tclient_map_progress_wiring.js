@@ -24,9 +24,27 @@ assert.match(config, /MACRO_CONFIG_INT\(TcMapProgress\s*,\s*tc_map_progress\s*,\
   'Map progress must remain disabled for new and existing users by default');
 assert.match(config, /MACRO_CONFIG_INT\(TcMapProgressStyle\s*,\s*tc_map_progress_style\s*,\s*0\s*,\s*0\s*,\s*1/);
 assert.match(config, /tc_map_progress_style[^\n]*instead of at the bottom right/i);
+assert.match(config, /MACRO_CONFIG_INT\(TcMapProgressFollowAccent,\s*tc_map_progress_follow_accent,\s*0,\s*0,\s*1,\s*CFGFLAG_CLIENT \| CFGFLAG_SAVE,/,
+  'Standalone HUD should default to white instead of following the accent');
 const hudMapProgress = read('src/game/client/components/tclient/hud_map_progress.h');
 assert(hudMapProgress.includes('ShouldShowStandaloneValue') && hudMapProgress.includes('ShouldReserveIslandValue') && hudMapProgress.includes('DYNAMIC_ISLAND_AVAILABLE'), 'HUD and Island destinations must be exclusive and account for Island availability');
+assert.match(hudMapProgress, /MAP_PROGRESS_HUD_MAX_WIDTH = 25\.0f/);
+assert.match(hudMapProgress, /MAP_PROGRESS_HUD_FONT_SIZE = 4\.5f/);
+assert.match(hudMapProgress, /MOVEMENT_INFORMATION_TEXT_INSET = 2\.0f/);
+assert(hudMapProgress.includes('StandaloneHudValueX'), 'Standalone value must share the movement panel right inset');
+const mapProgressMenus = read('src/game/client/components/tclient/menus_tclient.cpp');
+assert(mapProgressMenus.includes('DoButton_CheckBoxAutoVMarginAndSet(&g_Config.m_TcMapProgressFollowAccent, TCLocalize("Follow the interface accent color")'),
+  'Accent color preference should be an explicit checkbox');
+const mapProgressHudCpp = read('src/game/client/components/hud.cpp');
+const standaloneHud = functionBody(mapProgressHudCpp, 'void CHud::RenderMapProgressHud(float MovementInformationTop)');
+assert.match(standaloneHud, /const ColorRGBA ProgressColor = g_Config\.m_TcMapProgressFollowAccent \? TClientModernUi::Accent\(X, Top\) : ColorRGBA\(1\.0f, 1.0f, 1.0f, 1.0f\)/,
+  'Standalone label and value should default to white and optionally use the interface accent');
+assert.match(standaloneHud, /m_MapProgressHudLabel\.Render\(TextRender\(\), vec2\(LabelX, LabelY\), ProgressColor\)/);
+assert.match(standaloneHud, /m_MapProgressHudText\.Render\(TextRender\(\), vec2\(X, Top\), ProgressColor\)/);
+const mapProgressSimplifiedChinese = read('data/tclient/languages/simplified_chinese.txt');
+assert(mapProgressSimplifiedChinese.includes('\nFollow the interface accent color\n== '), 'Accent checkbox should have a Simplified Chinese label');
 
+const mapProgress = read('src/game/client/components/tclient/map_progress.h');
 const client = read('src/game/client/components/tclient/tclient.cpp');
 const onUpdate = functionBody(client, 'void CTClient::OnUpdate()');
 assert(onUpdate.includes('UpdateMapProgress(false)'), 'Incremental map/distance-field work must advance on regular updates');
@@ -58,6 +76,21 @@ assert(reset.includes('m_MapProgressFailedForMap = false'), 'A map identity chan
 const estimate = functionBody(client, 'TClientMapProgress::SEstimate CTClient::MapProgressEstimate(int Conn) const');
 assert(/if\(!pCurrentMap \|\| !pCurrentMap->IsLoaded\(\)\)[\s\S]*?return \{\};[\s\S]*?pCurrentMap->BaseName\(\)/.test(estimate), 'HUD queries must tolerate the map-unload window');
 assert(update.includes('TClientMapProgress::MakeTile(') && update.includes('m_aMapProgressPlayers[Slot].Observe(') && update.includes('m_aMapProgressPlayers[Slot].Update('), 'Production sampling must feed the tested Qm-derived algorithm');
+assert(update.includes('Slot <= MapProgressFreeviewSlot()') && update.includes('GameClient()->m_Camera.m_Center'), 'Freeview must sample the camera center in a separate progress slot');
+assert(update.includes('PositionToIndex(Position)') && update.includes('ObserveView(ReadTile(Index), Index)'), 'Freeview position must be resampled and bounded on regular updates');
+assert(update.includes('MapProgressRaceTimeStarted(Slot)') &&
+	update.includes('Observe(Tile, ObserveAt, RaceTimeStarted)'), 'Tee progress uses the synchronized race-timer state');
+const raceTimer = functionBody(client, 'bool CTClient::MapProgressRaceTimeStarted(int Slot) const');
+assert(raceTimer.includes('GAMESTATEFLAG_RACETIME') && raceTimer.includes('m_pGameInfoObj'), 'Use the server-synchronized race-timer state');
+assert(raceTimer.includes('SpectatorId < 0 || SpectatorId >= MAX_CLIENTS') && raceTimer.includes('MapProgressFreeviewSlot()'), 'Followed Tee timer and freeview must resolve to separate slots');
+const resolveClient = functionBody(client, 'int CTClient::ResolveMapProgressClientId(int Slot) const');
+assert(resolveClient.includes('m_SpecInfo.m_Active)') && resolveClient.includes('return -1;'), 'A local spectator must not reuse the followed Tee timer for its own slot');
+assert(update.includes('pCharacter->m_Cur.m_X') && update.includes('m_SpecCharPresent') && !update.includes('m_pSpectatorInfo'), 'Followed Tee progress uses target snapshots only and stays unknown when target position is missing');
+const progressModel = read('src/game/client/components/tclient/map_progress.h');
+assert.match(progressModel, /bool Ready\(\) const \{ return m_Finalized && !m_vFinishes\.empty\(\); \}/);
+assert(progressModel.includes('void Observe(const STile &Tile, int Index, bool RaceTimeStarted)'));
+assert(progressModel.includes('void ObserveView(const STile &Tile, int Index)'));
+assert.match(progressModel, /inline bool RaceTimeStarted\(bool HasGameInfo, bool RaceTimeFlag\)/);
 
 const hud = read('src/game/client/components/hud.cpp');
 const onHudUpdate = functionBody(hud, 'void CHud::OnUpdate()');
@@ -82,6 +115,17 @@ assert(islandMusic.includes('GetMapProgressIslandValue(g_Config.m_ClDummy, MapPr
 assert.match(islandMusic, /MapProgressIconSize, FontIcon::FLAG_CHECKERED, EFontPreset::ICON_FONT/, 'Measure the finish flag with the same font used to draw it');
 assert.match(islandMusic, /m_MapProgressIcon\.Update\([^;]+;\s*m_pTextRender->SetFontPreset\(EFontPreset::DEFAULT_FONT\)/, 'Restore the text font before drawing the percentage or track title');
 assert.match(islandMusic, /MapProgressTextW = ShowMapProgressSlot \? MeasureCached\([^;]*"100\.0%"/, 'Unknown and valid progress must reserve identical numeric widths');
+assert.match(hudMapProgress, /ISLAND_MAP_PROGRESS_FONT_SCALE = 0\.875f/);
+assert.match(hudMapProgress, /ISLAND_MAP_PROGRESS_ICON_SIZE = 10\.0f/);
+assert.match(hudMapProgress, /ISLAND_MAP_PROGRESS_ICON_GAP = 3\.0f/);
+assert.match(hudMapProgress, /ISLAND_MAP_PROGRESS_PADDING = 14\.0f/);
+assert.match(islandMusic, /const float MapProgressTextSize = TimerSize \* TClientHudMapProgress::ISLAND_MAP_PROGRESS_FONT_SCALE/);
+assert.match(islandMusic, /const float MapProgressPadding = TClientHudMapProgress::ISLAND_MAP_PROGRESS_PADDING \* Scale/);
+const islandProgressDraw = functionBody(islandMusic, 'auto DrawMapProgressCell =');
+assert.match(islandProgressDraw, /g_Config\.m_TcMapProgressFollowAccent \?\s*TClientModernUi::Accent\([\s\S]*?:\s*ColorRGBA\(1\.0f, 1\.0f, 1\.0f, 1\.0f\)/,
+  'Island finish flag and percentage must default to white with opt-in accent color');
+assert.match(islandProgressDraw, /m_MapProgressIcon\.Render\([^;]*ProgressColor\)/);
+assert.match(islandProgressDraw, /m_MapProgressText\.Render\([^;]*ProgressColor\)/);
 assert(islandMusic.includes('DrawMapProgressCell(CursorX,') && islandMusic.includes('DrawMapProgressCell(CellX,'), 'Idle and playing must draw the same cached flag and value');
 assert.doesNotMatch(islandMusic, /RenderMapProgressIsland\(/, 'No separate external map strip is drawn by the island wrapper');
 assert.match(islandMusic, /tc_island_show_song_progress[\s\S]*?RailH = 3\.0f \* Scale/, 'The song rail remains an independent island feature');

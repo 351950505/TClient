@@ -47,18 +47,21 @@ public:
 class CRenderLayerParams
 {
 public:
-	int m_RenderType;
-	int m_EntityOverlayVal;
-	vec2 m_Center;
-	float m_Zoom;
-	bool m_RenderText;
-	bool m_RenderInvalidTiles;
-	bool m_TileAndQuadBuffering;
-	bool m_RenderTileBorder;
-	bool m_DebugRenderGroupClips;
-	bool m_DebugRenderQuadClips;
-	bool m_DebugRenderClusterClips;
-	bool m_DebugRenderTileClips;
+	int m_RenderType = 0;
+	int m_EntityOverlayVal = 0;
+	bool m_CutoutFreezeOutlines = false;
+	int m_FreezeOutlineWidth = 0;
+	CFreezeOutlineMapView m_FreezeOutlineMap;
+	vec2 m_Center = vec2(0.0f, 0.0f);
+	float m_Zoom = 0.0f;
+	bool m_RenderText = false;
+	bool m_RenderInvalidTiles = false;
+	bool m_TileAndQuadBuffering = false;
+	bool m_RenderTileBorder = false;
+	bool m_DebugRenderGroupClips = false;
+	bool m_DebugRenderQuadClips = false;
+	bool m_DebugRenderClusterClips = false;
+	bool m_DebugRenderTileClips = false;
 };
 
 class CRenderLayer : public CRenderComponent
@@ -293,6 +296,9 @@ public:
 protected:
 	ColorRGBA GetRenderColor(const CRenderLayerParams &Params) const override { return ColorRGBA(1.0f, 1.0f, 1.0f, Params.m_EntityOverlayVal / 100.0f); }
 	IGraphics::CTextureHandle GetTexture() const override;
+	bool ShouldCutoutFreezeOutlines(const CRenderLayerParams &Params) const;
+	void RenderTilemapWithFreezeCutout(const ColorRGBA &Color, const CRenderLayerParams &Params, int RenderFlags);
+	void RenderTileBorderForCutout(const ColorRGBA &Color, const CRenderLayerParams &Params);
 };
 
 class CRenderLayerEntityGame final : public CRenderLayerEntityBase
@@ -314,6 +320,10 @@ class CRenderLayerEntityFront final : public CRenderLayerEntityBase
 public:
 	CRenderLayerEntityFront(int GroupId, int LayerId, int Flags, CMapItemLayerTilemap *pLayerTilemap);
 	int GetDataIndex() const override;
+
+protected:
+	void RenderTileLayerWithTileBuffer(const ColorRGBA &Color, const CRenderLayerParams &Params) override;
+	void RenderTileLayerNoTileBuffer(const ColorRGBA &Color, const CRenderLayerParams &Params) override;
 };
 
 class CRenderLayerEntityTele final : public CRenderLayerEntityBase
